@@ -2575,6 +2575,7 @@ function viewCalendar(){
   const selItems=itemsForDate(state.selectedDay);
   return `
   <div class="pagehead">
+    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Week &amp; month at a glance</div>
     <h1>Calendar</h1>
     <p>Classes, deadlines, study blocks, and your non-negotiable — color-coded so nothing hides. Export downloads a standard .ics file you can import into Google Calendar, Apple Calendar, or Outlook — no sign-in or account linking needed.</p>
@@ -2729,6 +2730,7 @@ function viewMoney(){
   const catRows=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
   return `
   <div class="pagehead">
+    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Keep it simple</div>
     <h1>Money</h1>
     <p>A quick log — impulsive spending is easier to catch when it's visible. Export or copy a summary any time to share with a parent or just keep for your own records.</p>
@@ -2859,14 +2861,33 @@ function viewEisenhower(){
    ============================================================ */
 function viewBiteSize(){
   const undone=state.tasks.filter(t=>!t.done);
+  const guide = state.biteGuide;
+  if(guide && guide.active && guide.queue && guide.queue.length){
+    const gid = guide.queue[guide.index];
+    if(gid) state.cheeseTaskId = gid;
+  }
   const t=findTask(state.cheeseTaskId)||undone[0];
   if(t) state.cheeseTaskId=t.id;
   const chunks=t?(t.chunks||[]):[];
+  const guideBanner = (guide && guide.active) ? `
+  <div class="card" style="background:var(--amber-soft);border-color:var(--amber);margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1">
+        <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:#8a5a1f;font-weight:800">Guided Bite Size</div>
+        <div style="font-weight:700;margin-top:2px">Task ${guide.index+1} of ${guide.queue.length}</div>
+        <div style="font-size:.82rem;color:var(--muted)">Break this one into small bites, then move on — or skip.</div>
+      </div>
+      <button class="btn ghost sm" data-action="bite-guide-skip">Skip →</button>
+      <button class="btn sm" data-action="bite-guide-next">Next task →</button>
+      <button class="btn ghost sm" data-action="bite-guide-exit">Exit guide</button>
+    </div>
+  </div>` : '';
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Small bites, big progress</div><h1>Bite Size</h1><p>Big tasks feel scary. Break them into tiny bites you can finish in 5–15 minutes. Order doesn't matter — just keep taking bites.</p>
   </div>
+  ${guideBanner}
   <div class="card">
     <label>Task</label>
     <select id="cheeseTaskSelect">${undone.length?undone.map(x=>`<option value="${x.id}" ${t&&t.id===x.id?'selected':''}>${escapeHtml(x.title)}</option>`).join(''):'<option>No tasks yet — add one on the Tasks page</option>'}</select>
@@ -3086,7 +3107,8 @@ function viewRule135(){
     <div class="r135group"><h4>5 small tasks</h4>${r.small.map((it,i)=>row('small',i,it)).join('')}</div>
   </div>
   <div style="margin-top:16px;text-align:center">
-    <button class="btn warm" data-action="open-bitesize-from-plate">Bite Size → break tasks into small pieces</button>
+    <button class="btn warm" data-action="open-bitesize-from-plate">Bite Size → walk through today's tasks</button>
+    <p style="font-size:.78rem;color:var(--muted);margin-top:8px">Opens a guided flow: first task → break into bites → next task (you can skip any).</p>
   </div>`;
 }
 
@@ -3104,7 +3126,7 @@ function viewBodyDouble(){
 
   if(bd.stage==='pick'){
     return `
-    <div class="pagehead"><div class="eyebrow">Work alongside... yourself, with structure</div><h1>Body Doubling</h1><p>Real body doubling works because of a ritual: declare a goal out loud, work inside a fixed block, check out at the end. These three session styles borrow that structure so you get the accountability without needing to book or match with anyone.</p></div>
+    <div class="pagehead"><button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button><div class="eyebrow">Work alongside... yourself, with structure</div><h1>Body Doubling</h1><p>Real body doubling works because of a ritual: declare a goal out loud, work inside a fixed block, check out at the end. These three session styles borrow that structure so you get the accountability without needing to book or match with anyone.</p></div>
     <div class="grid3">
       ${Object.entries(BD_TEMPLATES).map(([key,t])=>`<div class="card">
         <h3>${t.name}</h3>
@@ -3217,7 +3239,7 @@ function viewHabits(){
   const todayLog=state.habitLog[today]||{};
   const days=last7Days();
   return `
-  <div class="pagehead"><div class="eyebrow">The basics hold everything else up</div><h1>Healthy Habits</h1><p>Focus is hard to sustain on no sleep, no food, no movement, and too much scrolling. Quick daily check-ins — check your phone's own Screen Time / Digital Wellbeing report and log the minutes here.</p></div>
+  <div class="pagehead"><button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button><div class="eyebrow">The basics hold everything else up</div><h1>Healthy Habits</h1><p>Focus is hard to sustain on no sleep, no food, no movement, and too much scrolling. Quick daily check-ins — check your phone's own Screen Time / Digital Wellbeing report and log the minutes here.</p></div>
   <div class="card">
     <h3>Today</h3>
     <div class="mustcould" style="grid-template-columns:1fr">
@@ -3430,7 +3452,7 @@ function viewHelp(){
 
 function viewStudyTools(){
   return `
-  <div class="pagehead"><div class="eyebrow">Free, organized by what you're trying to do</div><h1>Study Tools</h1><p>External tools, opened in a new tab — grouped by task so you're not hunting for the right one.</p></div>
+  <div class="pagehead"><button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button><div class="eyebrow">Free, organized by what you're trying to do</div><h1>Study Tools</h1><p>External tools, opened in a new tab — grouped by task so you're not hunting for the right one.</p></div>
   ${STUDY_TOOLS.map(cat=>`<div class="card">
     <h3>${escapeHtml(cat.category)}</h3>
     ${cat.tools.map(t=>`<div class="deadline-row">
@@ -3474,7 +3496,7 @@ function viewStats(){
   const earned=moneyInRange.filter(m=>m.type==='income').reduce((a,b)=>a+b.amount,0);
 
   return `
-  <div class="pagehead"><div class="eyebrow">Zoom out and see the shape of it</div><h1>Stats</h1><p>Pick a range and see what actually happened — completed, left out, and everything in between.</p></div>
+  <div class="pagehead"><button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button><div class="eyebrow">Zoom out and see the shape of it</div><h1>Stats</h1><p>Pick a range and see what actually happened — completed, left out, and everything in between.</p></div>
 
   <div class="card">
     <div class="filters">
@@ -3688,7 +3710,35 @@ function wireView(){
     else if(action==='goto-cheese') el.addEventListener('click', ()=>goCheeseWithTask(id));
     else if(action==='back-to-tasks') el.addEventListener('click', ()=>setView('tasks'));
     else if(action==='back-to-today') el.addEventListener('click', ()=>setView('today'));
-    else if(action==='open-bitesize-from-plate') el.addEventListener('click', ()=>setView('bitesize'));
+    else if(action==='open-bitesize-from-plate') el.addEventListener('click', ()=>{
+      const undone = state.tasks.filter(t=>!t.done);
+      state.biteGuide = {active:true, queue:undone.map(t=>t.id), index:0};
+      if(undone[0]) state.cheeseTaskId = undone[0].id;
+      setView('bitesize');
+    });
+    else if(action==='bite-guide-next') el.addEventListener('click', ()=>{
+      if(!state.biteGuide) return;
+      state.biteGuide.index++;
+      if(state.biteGuide.index >= state.biteGuide.queue.length){
+        state.biteGuide = null;
+        persistRender();
+        return;
+      }
+      state.cheeseTaskId = state.biteGuide.queue[state.biteGuide.index];
+      persistRender();
+    });
+    else if(action==='bite-guide-skip') el.addEventListener('click', ()=>{
+      if(!state.biteGuide) return;
+      state.biteGuide.index++;
+      if(state.biteGuide.index >= state.biteGuide.queue.length){
+        state.biteGuide = null;
+        persistRender();
+        return;
+      }
+      state.cheeseTaskId = state.biteGuide.queue[state.biteGuide.index];
+      persistRender();
+    });
+    else if(action==='bite-guide-exit') el.addEventListener('click', ()=>{ state.biteGuide=null; persistRender(); });
     else if(action==='goto-habits') el.addEventListener('click', (e)=>{ e.preventDefault(); setView('habits'); });
     else if(action==='goto-settings') el.addEventListener('click', ()=>setView('settings'));
     else if(action==='help-goto') el.addEventListener('click', ()=>setView(el.dataset.id));
@@ -3961,6 +4011,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
       if(/^exercise$/i.test(h.name.trim()) && h.type==='check'){ h.type='note'; h.placeholder=h.placeholder||'e.g. 30 min run, leg day'; }
     });
     if(!state.focusSessionLog) state.focusSessionLog={};
+    if(state.biteGuide===undefined) state.biteGuide=null;
     if(!state.statsRangeStart){ const d=new Date(); d.setDate(d.getDate()-6); state.statsRangeStart=toDateStr(d); }
     if(!state.statsRangeEnd) state.statsRangeEnd=todayStr();
   }
