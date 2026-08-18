@@ -290,6 +290,9 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 .switch input:checked + .slidepill{background:var(--pine)}
 .switch input:checked + .slidepill:before{transform:translateX(18px)}
 .savedmsg{font-size:.77rem;color:var(--pine);font-weight:600;height:16px}
+.confetti-piece{position:fixed;width:10px;height:10px;top:-12px;z-index:100;pointer-events:none;border-radius:2px;animation:confetti-fall linear forwards}
+@keyframes confetti-fall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(100vh) rotate(720deg);opacity:0}}
+
 .qmini{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:7px 10px;margin-bottom:6px;font-size:.85rem}
 
 /* Quote modal */
@@ -967,7 +970,7 @@ function defaultState(){
       focusGuardOn:false,
       notifyBrowser:false,
       quoteOnLoad:true,
-      darkMode:false,
+      darkMode:false, celebrateOnComplete:true, celebrateSound:true,
       customQuotes:[]
     },
     timer:{mode:'work',remaining:25*60,total:25*60,running:false,sessionCount:0,activeTaskId:1,distractionCount:0,distractionSeconds:0}
@@ -1450,11 +1453,122 @@ function toggleStartReminder(id, minutes){
   if(i>=0) t.startReminderMinutes.splice(i,1); else t.startReminderMinutes.push(minutes);
   persistRender();
 }
+
+/* ============================================================
+   Celebration — confetti + optional short jig (Web Audio)
+   ============================================================ */
+function burstConfetti(){
+  const colors = ['#2F6F5E','#DC8A3C','#BE5240','#4A6FA5','#7C5FA6','#C79A2E','#F2EFE7'];
+  const n = 48;
+  for(let i=0;i<n;i++){
+    const el = document.createElement('div');
+    el.className = 'confetti-piece';
+    el.style.left = (Math.random()*100) + 'vw';
+    el.style.background = colors[i % colors.length];
+    el.style.width = (6 + Math.random()*8) + 'px';
+    el.style.height = (6 + Math.random()*10) + 'px';
+    el.style.animationDuration = (1.4 + Math.random()*1.6) + 's';
+    el.style.animationDelay = (Math.random()*0.25) + 's';
+    document.body.appendChild(el);
+    setTimeout(()=>el.remove(), 3200);
+  }
+}
+
+let jigCtx = null;
+function playJigBeat(){
+  try{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    if(!jigCtx) jigCtx = new AC();
+    if(jigCtx.state === 'suspended') jigCtx.resume();
+    const ctx = jigCtx;
+    const now = ctx.currentTime;
+    // Simple upbeat 4/4 percussion loop ~12 seconds — original pattern, not a song
+    const bpm = 112;
+    const beat = 60 / bpm;
+    const duration = 12; // seconds
+    const master = ctx.createGain();
+    master.gain.value = 0.22;
+    master.connect(ctx.destination);
+
+    function kick(t){
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(140, t);
+      o.frequency.exponentialRampToValueAtTime(45, t + 0.15);
+      g.gain.setValueAtTime(0.9, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+      o.connect(g); g.connect(master);
+      o.start(t); o.stop(t + 0.22);
+    }
+    function snare(t){
+      const frames = Math.floor(ctx.sampleRate * 0.08);
+      const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for(let i=0;i<frames;i++) data[i] = (Math.random()*2-1) * Math.pow(1 - i/frames, 2.2);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.35, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+      const f = ctx.createBiquadFilter();
+      f.type = 'highpass'; f.frequency.value = 1200;
+      src.connect(f); f.connect(g); g.connect(master);
+      src.start(t);
+    }
+    function hat(t, open){
+      const frames = Math.floor(ctx.sampleRate * (open ? 0.12 : 0.04));
+      const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for(let i=0;i<frames;i++) data[i] = (Math.random()*2-1) * Math.pow(1 - i/frames, open ? 1.2 : 3);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(open ? 0.18 : 0.12, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + (open ? 0.12 : 0.04));
+      const f = ctx.createBiquadFilter();
+      f.type = 'highpass'; f.frequency.value = 6000;
+      src.connect(f); f.connect(g); g.connect(master);
+      src.start(t);
+    }
+    // Pattern: kick on 1 & 3, snare on 2 & 4, hats on 8ths
+    const beats = Math.floor(duration / beat);
+    for(let i=0;i<beats;i++){
+      const t = now + i * beat;
+      const step = i % 4;
+      if(step === 0 || step === 2) kick(t);
+      if(step === 1 || step === 3) snare(t);
+      hat(t, false);
+      hat(t + beat * 0.5, step === 1 || step === 3);
+    }
+    // Soft fade out at end
+    master.gain.setValueAtTime(0.22, now + duration - 0.8);
+    master.gain.linearRampToValueAtTime(0.001, now + duration);
+  }catch(e){ console.warn('Jig beat failed', e); }
+}
+
+function offerCelebration(){
+  const s = state.settings || {};
+  if(s.celebrateOnComplete === false) return;
+  burstConfetti();
+  if(s.celebrateSound === false) return;
+  // Ask before playing sound
+  state.jigPromptOpen = true;
+  renderModal();
+}
+
+
 function toggleDone(id){
   const t=findTask(id); if(!t) return;
   const wasDone=t.done;
   t.done=!t.done;
-  if(t.done && !wasDone){ state.stats.tasksCompletedTotal=(state.stats.tasksCompletedTotal||0)+1; touchStreak(); }
+  if(t.done && !wasDone){
+    state.stats.tasksCompletedTotal=(state.stats.tasksCompletedTotal||0)+1;
+    touchStreak();
+    // Celebrate after render so confetti sits on top of the updated UI
+    setTimeout(()=>offerCelebration(), 80);
+  }
   persistRender();
 }
 function deleteTask(id){
@@ -2159,6 +2273,34 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+  // Celebration jig prompt
+  if(state.jigPromptOpen){
+    root.innerHTML=`<div class="overlay" id="jigOverlay">
+      <div class="quotecard" style="text-align:center;max-width:360px">
+        <div class="qeyebrow">Nice work</div>
+        <div class="qtext" style="font-size:1.15rem">Can we do a quick 10 sec jig?</div>
+        <p style="color:var(--muted);font-size:.85rem;margin:8px 0 0">A short celebratory beat — completely optional.</p>
+        <div class="qactions" style="margin-top:16px">
+          <button class="btn ghost sm" id="jigNo">No thanks</button>
+          <button class="btn sm" id="jigYes">Yes — play it</button>
+        </div>
+      </div>
+    </div>`;
+    document.getElementById('jigYes').addEventListener('click', ()=>{
+      state.jigPromptOpen = false;
+      playJigBeat();
+      renderModal();
+    });
+    document.getElementById('jigNo').addEventListener('click', ()=>{
+      state.jigPromptOpen = false;
+      renderModal();
+    });
+    document.getElementById('jigOverlay').addEventListener('click', (e)=>{
+      if(e.target.id==='jigOverlay'){ state.jigPromptOpen=false; renderModal(); }
+    });
+    return;
+  }
+
   // Post-create mindset prompt (after adding a task)
   if(state.pendingStrategyTaskId){
     const t = findTask(state.pendingStrategyTaskId);
@@ -3913,6 +4055,11 @@ function viewSettings(){
     <div class="setgroup"><h4>Appearance</h4>
       ${toggleRow('setDarkMode','Dark mode', !!s.darkMode)}
     </div>
+    <div class="setgroup"><h4>Celebrations</h4>
+      ${toggleRow('setCelebrateOn','Confetti when I complete a task', s.celebrateOnComplete !== false)}
+      ${toggleRow('setCelebrateSound','Offer a short celebratory beat (asks each time)', s.celebrateSound !== false)}
+      <p style="color:var(--muted);font-size:.78rem;margin-top:4px">The beat is a simple 12-second rhythm made in the browser — not a song. You can turn it off permanently here.</p>
+    </div>
     <div class="setgroup"><h4>Timer lengths (minutes)</h4><div class="grid4">
       ${numField('setWork','Focus session', s.workMin,5,90)}${numField('setShort','Short break', s.shortBreakMin,1,30)}
       ${numField('setLong','Long break', s.longBreakMin,5,60)}${numField('setSessions','Sessions before long break', s.sessionsBeforeLong,2,8)}
@@ -4296,6 +4443,8 @@ function wireView(){
     const gnb=document.getElementById('grantNotifyBtn'); if(gnb) gnb.addEventListener('click', requestNotifyPermission);
     const qol=document.getElementById('setQuoteOnLoad'); if(qol) qol.addEventListener('change', ()=>{ updateSetting('quoteOnLoad', qol.checked); flashSaved(); });
     const dm=document.getElementById('setDarkMode'); if(dm) dm.addEventListener('change', ()=>{ updateSetting('darkMode', dm.checked); applyDarkMode(); flashSaved(); });
+    const cel=document.getElementById('setCelebrateOn'); if(cel) cel.addEventListener('change', ()=>{ updateSetting('celebrateOnComplete', cel.checked); flashSaved(); });
+    const ces=document.getElementById('setCelebrateSound'); if(ces) ces.addEventListener('change', ()=>{ updateSetting('celebrateSound', ces.checked); flashSaved(); });
     const aqb=document.getElementById('addQuoteBtn'); if(aqb) aqb.addEventListener('click', addCustomQuote);
     const settingsInstallBtn=document.getElementById('settingsInstallBtn'); if(settingsInstallBtn) settingsInstallBtn.addEventListener('click', triggerInstall);
   }
@@ -4359,6 +4508,9 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(!state.focusSessionLog) state.focusSessionLog={};
     if(state.biteGuide===undefined) state.biteGuide=null;
     if(state.pendingStrategyTaskId===undefined) state.pendingStrategyTaskId=null;
+    if(state.jigPromptOpen===undefined) state.jigPromptOpen=false;
+    if(state.settings.celebrateOnComplete===undefined) state.settings.celebrateOnComplete=true;
+    if(state.settings.celebrateSound===undefined) state.settings.celebrateSound=true;
     if(!Array.isArray(state.whenThen)) state.whenThen=[];
     if(!Array.isArray(state.rewardingRoutines)) state.rewardingRoutines=[];
     if(!Array.isArray(state.strategicPlans)) state.strategicPlans=[];
