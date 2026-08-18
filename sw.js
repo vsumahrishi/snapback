@@ -1,4 +1,5 @@
 // SnapBack service worker — caches the app shell so it works offline and can be installed.
+// Bump CACHE_NAME whenever index.html changes so returning users get the update.
 const CACHE_NAME = 'snapback-cache-v2';
 
 const APP_SHELL = [
@@ -30,8 +31,11 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Stale-while-revalidate: answer instantly from cache when possible (so it works offline
+// and feels fast), while quietly fetching a fresh copy in the background for next time.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  // Only handle same-origin requests — let external calls (calendar/music links, etc.) pass through normally.
   if (new URL(event.request.url).origin !== self.location.origin) return;
 
   event.respondWith(
