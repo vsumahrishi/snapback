@@ -930,6 +930,10 @@ function defaultState(){
     nonNegotiable:{},
     rule135:{},
     customReminders:[],
+    whenThen:[],
+    rewardingRoutines:[],
+    strategicPlans:[],
+    flipScripts:[],
     habits:[
       {id:1,name:'Exercise',icon:'&#127939;',type:'note',placeholder:'e.g. 30 min run, leg day'},
       {id:2,name:'Eat a real meal',icon:'&#129367;',type:'check'},
@@ -2006,6 +2010,12 @@ const NAV=[
     {id:'rule135', label:'Focus Plate', ico:'&#127860;'},
     {id:'bodydouble', label:'Body Doubling', ico:'&#128101;'}
   ]},
+  {section:'Mindset Tools', items:[
+    {id:'whenthen', label:'When-Then Rules', ico:'&#128161;'},
+    {id:'rewarding', label:'Rewarding Routines', ico:'&#127873;'},
+    {id:'strategic', label:'Strategic Scheduling', ico:'&#128197;'},
+    {id:'flipscript', label:'Flip the Script', ico:'&#128257;'}
+  ]},
   {section:'Learn', items:[
     {id:'studytools', label:'Study Tools', ico:'&#128218;'}
   ]},
@@ -2114,7 +2124,7 @@ function renderMain(){
   const views={today:viewToday,tasks:viewTasks,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
     eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,
     bodydouble:viewBodyDouble,settings:viewSettings,
-    habits:viewHabits,studytools:viewStudyTools,stats:viewStats,help:viewHelp};
+    habits:viewHabits,studytools:viewStudyTools,stats:viewStats,help:viewHelp,whenthen:viewWhenThen,rewarding:viewRewarding,strategic:viewStrategic,flipscript:viewFlipScript};
   try{
     el.innerHTML=(views[state.view]||viewToday)();
     wireView();
@@ -3416,6 +3426,184 @@ const FAQ_ITEMS=[
   {q:'Will I lose my data?', a:'Everything saves automatically in this browser on this device. It won\'t transfer if you switch browsers or devices, and clearing your browser\'s site data would clear it too — so avoid that if you want to keep your history.'},
   {q:'What does the tree/streak thing mean?', a:'Every Focus Pod session you finish (not one you reset early) grows a tree on the Today page — it\'s just a visible way to see your effort add up.'}
 ];
+
+/* ============================================================
+   VIEW: When-Then Rules
+   ============================================================ */
+function viewWhenThen(){
+  const list = state.whenThen || [];
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <div class="eyebrow">If-then plans that stick</div>
+    <h1>When-Then Rules</h1>
+    <p>Pair a hard task with a clear reward. Write it as: <b>When</b> I finish X, <b>then</b> I get to do Y.</p>
+  </div>
+
+  <div class="card">
+    <h3>Add a When-Then rule</h3>
+    <div class="field"><label>When I…</label><input id="wtWhen" placeholder="e.g. finish my chemistry homework"></div>
+    <div class="field"><label>Then I will…</label><input id="wtThen" placeholder="e.g. watch an episode of The Big Bang Theory"></div>
+    <button class="btn" id="addWhenThenBtn" style="margin-top:8px">Save rule</button>
+  </div>
+
+  <div class="card">
+    <h3>Your rules</h3>
+    ${list.length === 0 ? '<div class="empty">No rules yet. Add one above — keep them realistic and specific.</div>' :
+      list.map((r,i)=>`
+        <div class="deadline-row" style="align-items:flex-start">
+          <div style="flex:1">
+            <div style="font-size:.82rem;color:var(--muted)">WHEN</div>
+            <div style="font-weight:600">${escapeHtml(r.when)}</div>
+            <div style="font-size:.82rem;color:var(--muted);margin-top:6px">THEN</div>
+            <div style="font-weight:600;color:var(--pine)">${escapeHtml(r.then)}</div>
+          </div>
+          <button class="btn danger sm" data-action="delete-whenthen" data-idx="${i}">Remove</button>
+        </div>
+      `).join('')}
+  </div>
+
+  <div class="card" style="background:var(--pine-soft);border:none">
+    <h3 style="margin:0 0 6px">Examples that work for students</h3>
+    <ul style="margin:0;padding-left:18px;font-size:.88rem;color:var(--muted)">
+      <li>When I finish the first page of my English paper, then I will get a coffee.</li>
+      <li>When I have chosen a topic for my term paper, then I will play for 30 minutes.</li>
+      <li>When I finish reading this chapter, then I will tidy my desk.</li>
+    </ul>
+  </div>`;
+}
+
+/* ============================================================
+   VIEW: Rewarding Routines
+   ============================================================ */
+function viewRewarding(){
+  const list = state.rewardingRoutines || [];
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <div class="eyebrow">Pair the boring with the fun</div>
+    <h1>Rewarding Routines</h1>
+    <p>Attach something you tend to avoid to something you actually want. The reward only happens after the hard part.</p>
+  </div>
+
+  <div class="card">
+    <h3>Build a routine</h3>
+    <div class="field"><label>Activity I tend to avoid</label><input id="rrAvoid" placeholder="e.g. washing breakfast dishes"></div>
+    <div class="field"><label>Rewarding activity that comes after</label><input id="rrReward" placeholder="e.g. eat lunch / scroll for 10 min"></div>
+    <button class="btn" id="addRewardingBtn" style="margin-top:8px">Save routine</button>
+  </div>
+
+  <div class="card">
+    <h3>Your routines</h3>
+    ${list.length === 0 ? '<div class="empty">No routines yet. Start with one small pairing.</div>' :
+      list.map((r,i)=>`
+        <div class="deadline-row">
+          <div style="flex:1">
+            <span class="badge medium">Avoid</span> ${escapeHtml(r.avoid)}
+            <div style="margin-top:4px"><span class="badge low">Then</span> ${escapeHtml(r.reward)}</div>
+          </div>
+          <button class="btn danger sm" data-action="delete-rewarding" data-idx="${i}">Remove</button>
+        </div>
+      `).join('')}
+  </div>`;
+}
+
+/* ============================================================
+   VIEW: Strategic Scheduling
+   ============================================================ */
+function viewStrategic(){
+  const list = state.strategicPlans || [];
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <div class="eyebrow">Implementation intentions</div>
+    <h1>Strategic Scheduling</h1>
+    <p>Write down <b>when</b>, <b>where</b>, and <b>how</b> you will do the thing. Vague plans fail; specific ones get done.</p>
+  </div>
+
+  <div class="card">
+    <h3>New plan</h3>
+    <div class="field"><label>What will I do?</label><input id="ssWhat" placeholder="e.g. start my history essay outline"></div>
+    <div class="row">
+      <div class="field"><label>When?</label><input id="ssWhen" placeholder="e.g. Tuesday 4pm after class"></div>
+      <div class="field"><label>Where?</label><input id="ssWhere" placeholder="e.g. library 2nd floor"></div>
+    </div>
+    <div class="field"><label>How? (first tiny step)</label><input id="ssHow" placeholder="e.g. open the doc and write the title"></div>
+    <button class="btn" id="addStrategicBtn" style="margin-top:8px">Save plan</button>
+  </div>
+
+  <div class="card">
+    <h3>Your plans</h3>
+    ${list.length === 0 ? '<div class="empty">No plans yet. Make one specific plan for the next hard task.</div>' :
+      list.map((r,i)=>`
+        <div class="card" style="background:#FDFCFA;margin-bottom:10px;padding:12px">
+          <div style="font-weight:700;font-size:1rem">${escapeHtml(r.what)}</div>
+          <div style="font-size:.85rem;margin-top:6px;color:var(--muted)">
+            <div>🕐 <b>When:</b> ${escapeHtml(r.when)}</div>
+            <div>📍 <b>Where:</b> ${escapeHtml(r.where)}</div>
+            <div>▶️ <b>How:</b> ${escapeHtml(r.how)}</div>
+          </div>
+          <button class="btn danger sm" data-action="delete-strategic" data-idx="${i}" style="margin-top:8px">Remove</button>
+        </div>
+      `).join('')}
+  </div>`;
+}
+
+/* ============================================================
+   VIEW: Flip the Script
+   ============================================================ */
+function viewFlipScript(){
+  const presets = [
+    {from:"I can't do it.", to:"Once I start, it won't be so bad. I'm feeling tired and a little stressed. Let me take a deep breath."},
+    {from:"I can't pay attention right now.", to:"I notice I'm thinking it's too late to start. That's a thought I have a lot. But I can do this for 30 minutes."},
+    {from:"It's going to suck.", to:"It'll feel great to finish this. Then after I nail down my topic, I'll play for 30 minutes."},
+    {from:"I have more time to do it later.", to:"Thinking about the whole paper is making me feel gross. I'll break it down and just re-read the assignment first."},
+    {from:"I'll feel like doing it later.", to:"Good plan — go me! This won't be as bad as I thought. I'm being nice to the Me of the Future."}
+  ];
+  const custom = state.flipScripts || [];
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <div class="eyebrow">Change the story you tell yourself</div>
+    <h1>Flip the Script</h1>
+    <p>When your brain says something discouraging, answer with a kinder, more useful line. Practice the flip until it becomes automatic.</p>
+  </div>
+
+  <div class="card">
+    <h3>Ready-made flips</h3>
+    ${presets.map(p=>`
+      <div class="card" style="background:#FDFCFA;margin-bottom:10px;padding:12px">
+        <div style="font-size:.82rem;color:var(--brick);font-weight:700">FROM</div>
+        <div style="margin-bottom:8px">${escapeHtml(p.from)}</div>
+        <div style="font-size:.82rem;color:var(--pine);font-weight:700">TO</div>
+        <div>${escapeHtml(p.to)}</div>
+      </div>
+    `).join('')}
+  </div>
+
+  <div class="card">
+    <h3>Add your own flip</h3>
+    <div class="field"><label>Unhelpful thought (From)</label><input id="fsFrom" placeholder="e.g. I'll never finish this"></div>
+    <div class="field"><label>Helpful reframe (To)</label><textarea id="fsTo" rows="2" placeholder="e.g. I only need to work on it for 25 minutes right now"></textarea></div>
+    <button class="btn" id="addFlipBtn" style="margin-top:8px">Save flip</button>
+  </div>
+
+  ${custom.length ? `
+  <div class="card">
+    <h3>Your custom flips</h3>
+    ${custom.map((r,i)=>`
+      <div class="deadline-row" style="align-items:flex-start">
+        <div style="flex:1">
+          <div style="font-size:.78rem;color:var(--brick)">FROM: ${escapeHtml(r.from)}</div>
+          <div style="font-size:.78rem;color:var(--pine);margin-top:4px">TO: ${escapeHtml(r.to)}</div>
+        </div>
+        <button class="btn danger sm" data-action="delete-flip" data-idx="${i}">Remove</button>
+      </div>
+    `).join('')}
+  </div>` : ''}`;
+}
+
+
 function viewHelp(){
   return `
   <div class="pagehead">
@@ -3739,6 +3927,10 @@ function wireView(){
       persistRender();
     });
     else if(action==='bite-guide-exit') el.addEventListener('click', ()=>{ state.biteGuide=null; persistRender(); });
+    else if(action==='delete-whenthen') el.addEventListener('click', ()=>{ state.whenThen.splice(Number(el.dataset.idx),1); persistRender(); });
+    else if(action==='delete-rewarding') el.addEventListener('click', ()=>{ state.rewardingRoutines.splice(Number(el.dataset.idx),1); persistRender(); });
+    else if(action==='delete-strategic') el.addEventListener('click', ()=>{ state.strategicPlans.splice(Number(el.dataset.idx),1); persistRender(); });
+    else if(action==='delete-flip') el.addEventListener('click', ()=>{ state.flipScripts.splice(Number(el.dataset.idx),1); persistRender(); });
     else if(action==='goto-habits') el.addEventListener('click', (e)=>{ e.preventDefault(); setView('habits'); });
     else if(action==='goto-settings') el.addEventListener('click', ()=>setView('settings'));
     else if(action==='help-goto') el.addEventListener('click', ()=>setView(el.dataset.id));
@@ -3937,6 +4129,50 @@ function wireView(){
     const toggleBtn=document.getElementById('togglePlayBtn'); if(toggleBtn) toggleBtn.addEventListener('click', ()=>{ state.player.playing ? pauseTrack() : playTrack(state.player.currentIndex); });
   }
 
+
+  if(state.view==='whenthen'){
+    const btn=document.getElementById('addWhenThenBtn');
+    if(btn) btn.addEventListener('click', ()=>{
+      const when=(document.getElementById('wtWhen')?.value||'').trim();
+      const then=(document.getElementById('wtThen')?.value||'').trim();
+      if(!when||!then) return;
+      state.whenThen.push({when, then, id:uid()});
+      persistRender();
+    });
+  }
+  if(state.view==='rewarding'){
+    const btn=document.getElementById('addRewardingBtn');
+    if(btn) btn.addEventListener('click', ()=>{
+      const avoid=(document.getElementById('rrAvoid')?.value||'').trim();
+      const reward=(document.getElementById('rrReward')?.value||'').trim();
+      if(!avoid||!reward) return;
+      state.rewardingRoutines.push({avoid, reward, id:uid()});
+      persistRender();
+    });
+  }
+  if(state.view==='strategic'){
+    const btn=document.getElementById('addStrategicBtn');
+    if(btn) btn.addEventListener('click', ()=>{
+      const what=(document.getElementById('ssWhat')?.value||'').trim();
+      const when=(document.getElementById('ssWhen')?.value||'').trim();
+      const where=(document.getElementById('ssWhere')?.value||'').trim();
+      const how=(document.getElementById('ssHow')?.value||'').trim();
+      if(!what) return;
+      state.strategicPlans.push({what, when, where, how, id:uid()});
+      persistRender();
+    });
+  }
+  if(state.view==='flipscript'){
+    const btn=document.getElementById('addFlipBtn');
+    if(btn) btn.addEventListener('click', ()=>{
+      const from=(document.getElementById('fsFrom')?.value||'').trim();
+      const to=(document.getElementById('fsTo')?.value||'').trim();
+      if(!from||!to) return;
+      state.flipScripts.push({from, to, id:uid()});
+      persistRender();
+    });
+  }
+
   if(state.view==='settings'){
     const bind=(id,key,parse)=>{ const el=document.getElementById(id); if(!el) return; el.addEventListener('change', ()=>{ updateSetting(key, parse?parse(el.value):el.value); flashSaved(); }); };
     bind('setWork','workMin',Number); bind('setShort','shortBreakMin',Number); bind('setLong','longBreakMin',Number); bind('setSessions','sessionsBeforeLong',Number);
@@ -4012,6 +4248,10 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     });
     if(!state.focusSessionLog) state.focusSessionLog={};
     if(state.biteGuide===undefined) state.biteGuide=null;
+    if(!Array.isArray(state.whenThen)) state.whenThen=[];
+    if(!Array.isArray(state.rewardingRoutines)) state.rewardingRoutines=[];
+    if(!Array.isArray(state.strategicPlans)) state.strategicPlans=[];
+    if(!Array.isArray(state.flipScripts)) state.flipScripts=[];
     if(!state.statsRangeStart){ const d=new Date(); d.setDate(d.getDate()-6); state.statsRangeStart=toDateStr(d); }
     if(!state.statsRangeEnd) state.statsRangeEnd=todayStr();
   }
