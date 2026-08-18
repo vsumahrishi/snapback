@@ -1416,7 +1416,9 @@ function quickAddTask(){
   const raw=input.value.trim();
   if(!raw) return;
   const parsed=parseQuickAdd(raw);
-  state.tasks.unshift({id:uid(),title:parsed.title,notes:'',date:parsed.date,time:parsed.time,priority:'medium',urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:[7,3,1,0],reminderTime:'09:00',startDate:'',startTime:'',startReminderMinutes:[],chunks:[],pomodoros:0,done:false});
+  const id=uid();
+  state.tasks.unshift({id,title:parsed.title,notes:'',date:parsed.date,time:parsed.time,priority:'medium',urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:[7,3,1,0],reminderTime:'09:00',startDate:'',startTime:'',startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:parsed.title},strategic:{what:parsed.title},flip:{}});
+  state.pendingStrategyTaskId = id;
   input.value='';
   persistRender();
 }
@@ -1428,7 +1430,10 @@ function addTask(){
   const startDate=document.getElementById('newStartDate')?.value || '';
   const startTime=document.getElementById('newStartTime')?.value || '';
   const priority=document.getElementById('newPriority').value;
-  state.tasks.unshift({id:uid(),title,notes:'',date,time,priority,urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:[7,3,1,0],reminderTime:'09:00',startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false});
+  const id=uid();
+  state.tasks.unshift({id,title,notes:'',date,time,priority,urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:[7,3,1,0],reminderTime:'09:00',startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{}});
+  state.pendingStrategyTaskId = id;
+  document.getElementById('newTitle').value='';
   persistRender();
 }
 function toggleReminderLead(id, days){
@@ -2010,12 +2015,6 @@ const NAV=[
     {id:'rule135', label:'Focus Plate', ico:'&#127860;'},
     {id:'bodydouble', label:'Body Doubling', ico:'&#128101;'}
   ]},
-  {section:'Mindset Tools', items:[
-    {id:'whenthen', label:'When-Then Rules', ico:'&#128161;'},
-    {id:'rewarding', label:'Rewarding Routines', ico:'&#127873;'},
-    {id:'strategic', label:'Strategic Scheduling', ico:'&#128197;'},
-    {id:'flipscript', label:'Flip the Script', ico:'&#128257;'}
-  ]},
   {section:'Learn', items:[
     {id:'studytools', label:'Study Tools', ico:'&#128218;'}
   ]},
@@ -2124,7 +2123,7 @@ function renderMain(){
   const views={today:viewToday,tasks:viewTasks,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
     eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,
     bodydouble:viewBodyDouble,settings:viewSettings,
-    habits:viewHabits,studytools:viewStudyTools,stats:viewStats,help:viewHelp,whenthen:viewWhenThen,rewarding:viewRewarding,strategic:viewStrategic,flipscript:viewFlipScript};
+    habits:viewHabits,studytools:viewStudyTools,stats:viewStats,help:viewHelp};
   try{
     el.innerHTML=(views[state.view]||viewToday)();
     wireView();
@@ -2160,6 +2159,57 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+  // Post-create mindset prompt (after adding a task)
+  if(state.pendingStrategyTaskId){
+    const t = findTask(state.pendingStrategyTaskId);
+    if(!t){ state.pendingStrategyTaskId=null; root.innerHTML=''; return; }
+    root.innerHTML=`<div class="overlay" id="strategyOverlay">
+      <div class="quotecard" style="text-align:left;max-width:480px">
+        <div class="qeyebrow">Help this task stick</div>
+        <div class="qtext" style="font-size:1.05rem;margin-bottom:8px">You just added: <b>${escapeHtml(t.title)}</b></div>
+        <p style="color:var(--muted);font-size:.85rem;margin:0 0 12px">Take 20 seconds to set one or more helpers. You can edit these any time on the task card.</p>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px">
+          <div>
+            <div style="font-size:.72rem;font-weight:700;color:var(--muted)">WHEN-THEN</div>
+            <input id="psWhen" placeholder="When I finish this…" style="margin-top:4px" value="${escapeHtml((t.whenThen&&t.whenThen.when)||'')}">
+            <input id="psThen" placeholder="Then I will…" style="margin-top:4px" value="${escapeHtml((t.whenThen&&t.whenThen.then)||'')}">
+          </div>
+          <div>
+            <div style="font-size:.72rem;font-weight:700;color:var(--muted)">REWARD AFTER</div>
+            <input id="psReward" placeholder="e.g. 10 min of a show, coffee, walk" style="margin-top:4px" value="${escapeHtml((t.rewarding&&t.rewarding.reward)||'')}">
+          </div>
+          <div>
+            <div style="font-size:.72rem;font-weight:700;color:var(--muted)">WHEN / WHERE / HOW</div>
+            <input id="psSWhen" placeholder="When?" style="margin-top:4px" value="${escapeHtml((t.strategic&&t.strategic.when)||'')}">
+            <input id="psSWhere" placeholder="Where?" style="margin-top:4px" value="${escapeHtml((t.strategic&&t.strategic.where)||'')}">
+            <input id="psSHow" placeholder="First tiny step" style="margin-top:4px" value="${escapeHtml((t.strategic&&t.strategic.how)||'')}">
+          </div>
+          <div>
+            <div style="font-size:.72rem;font-weight:700;color:var(--muted)">FLIP THE SCRIPT</div>
+            <input id="psFrom" placeholder="Unhelpful thought" style="margin-top:4px" value="${escapeHtml((t.flip&&t.flip.from)||'')}">
+            <input id="psTo" placeholder="Helpful reframe" style="margin-top:4px" value="${escapeHtml((t.flip&&t.flip.to)||'')}">
+          </div>
+        </div>
+        <div class="qactions" style="justify-content:flex-end">
+          <button class="btn ghost sm" id="psSkip">Skip for now</button>
+          <button class="btn sm" id="psSave">Save helpers</button>
+        </div>
+      </div>
+    </div>`;
+    const save = ()=>{
+      t.whenThen = {when: document.getElementById('psWhen').value.trim(), then: document.getElementById('psThen').value.trim()};
+      t.rewarding = {avoid: t.title, reward: document.getElementById('psReward').value.trim()};
+      t.strategic = {what: t.title, when: document.getElementById('psSWhen').value.trim(), where: document.getElementById('psSWhere').value.trim(), how: document.getElementById('psSHow').value.trim()};
+      t.flip = {from: document.getElementById('psFrom').value.trim(), to: document.getElementById('psTo').value.trim()};
+      state.pendingStrategyTaskId = null;
+      persistRender();
+    };
+    document.getElementById('psSave').addEventListener('click', save);
+    document.getElementById('psSkip').addEventListener('click', ()=>{ state.pendingStrategyTaskId=null; persistRender(); });
+    document.getElementById('strategyOverlay').addEventListener('click',(e)=>{ if(e.target.id==='strategyOverlay'){ state.pendingStrategyTaskId=null; persistRender(); }});
+    return;
+  }
+
   if(!state.quoteModalOpen){ root.innerHTML=''; return; }
   const q=allQuotes()[state.quoteIndex]||QUOTE_BANK[0];
   root.innerHTML=`<div class="overlay" id="quoteOverlay">
@@ -2287,6 +2337,53 @@ function viewToday(){
    ============================================================ */
 function priorityBadge(p){ return `<span class="badge ${p}">${p}</span>`; }
 function isOverdue(t){ return t.date && t.date<todayStr() && !t.done; }
+
+function strategyPanel(t){
+  const wt = t.whenThen || {};
+  const rw = t.rewarding || {};
+  const st = t.strategic || {};
+  const fl = t.flip || {};
+  const hasAny = !!(wt.then || rw.reward || st.what || fl.to);
+  return `
+  <details class="strategy-box" style="margin-top:10px;border:1px solid var(--line);border-radius:12px;padding:8px 12px;background:#FDFCFA" ${hasAny?'open':''}>
+    <summary style="cursor:pointer;font-weight:700;font-size:.85rem;color:var(--pine)">💡 Mindset helpers for this task</summary>
+    <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
+
+      <div>
+        <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700">When-Then</div>
+        <div class="row" style="margin-top:4px">
+          <input data-action="set-strategy" data-id="${t.id}" data-field="whenThen.when" placeholder="When I finish this…" value="${escapeHtml(wt.when||'')}">
+          <input data-action="set-strategy" data-id="${t.id}" data-field="whenThen.then" placeholder="Then I will…" value="${escapeHtml(wt.then||'')}">
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700">Rewarding Routine</div>
+        <div class="row" style="margin-top:4px">
+          <input data-action="set-strategy" data-id="${t.id}" data-field="rewarding.avoid" placeholder="Hard part (this task)" value="${escapeHtml(rw.avoid||t.title||'')}">
+          <input data-action="set-strategy" data-id="${t.id}" data-field="rewarding.reward" placeholder="Reward after" value="${escapeHtml(rw.reward||'')}">
+        </div>
+      </div>
+
+      <div>
+        <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700">Strategic plan (when / where / how)</div>
+        <div class="row" style="margin-top:4px">
+          <input data-action="set-strategy" data-id="${t.id}" data-field="strategic.when" placeholder="When?" value="${escapeHtml(st.when||'')}">
+          <input data-action="set-strategy" data-id="${t.id}" data-field="strategic.where" placeholder="Where?" value="${escapeHtml(st.where||'')}">
+        </div>
+        <input style="margin-top:6px" data-action="set-strategy" data-id="${t.id}" data-field="strategic.how" placeholder="How? (first tiny step)" value="${escapeHtml(st.how||'')}">
+      </div>
+
+      <div>
+        <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700">Flip the Script</div>
+        <input style="margin-top:4px" data-action="set-strategy" data-id="${t.id}" data-field="flip.from" placeholder="Unhelpful thought about this task" value="${escapeHtml(fl.from||'')}">
+        <input style="margin-top:6px" data-action="set-strategy" data-id="${t.id}" data-field="flip.to" placeholder="Helpful reframe" value="${escapeHtml(fl.to||'')}">
+      </div>
+
+    </div>
+  </details>`;
+}
+
 function taskCard(t){
   const sugg=suggestTechnique(t);
   const chunkInfo = t.chunks && t.chunks.length ? `<span class="badge low">${t.chunks.filter(c=>c.done).length}/${t.chunks.length} bites</span>` : '';
@@ -2332,6 +2429,7 @@ function taskCard(t){
         <textarea data-action="set-notes" data-id="${t.id}" placeholder="Notes — what's done, what's blocking..." style="margin-top:12px;min-height:52px;font-size:.88rem;padding:10px 12px;border-radius:10px;width:100%">${escapeHtml(t.notes||'')}</textarea>
         
         <div class="suggest" style="margin-top:8px">Suggestion: <button data-action="suggest" data-id="${t.id}">${sugg.label}</button></div>
+        ${strategyPanel(t)}
       </div>
     </div>
   </li>`;
@@ -3931,6 +4029,18 @@ function wireView(){
     else if(action==='delete-rewarding') el.addEventListener('click', ()=>{ state.rewardingRoutines.splice(Number(el.dataset.idx),1); persistRender(); });
     else if(action==='delete-strategic') el.addEventListener('click', ()=>{ state.strategicPlans.splice(Number(el.dataset.idx),1); persistRender(); });
     else if(action==='delete-flip') el.addEventListener('click', ()=>{ state.flipScripts.splice(Number(el.dataset.idx),1); persistRender(); });
+    else if(action==='set-strategy') el.addEventListener('change', ()=>{
+      const t = findTask(Number(el.dataset.id) || el.dataset.id);
+      if(!t) return;
+      const field = el.dataset.field || '';
+      const [group, key] = field.split('.');
+      if(!group || !key) return;
+      if(!t[group] || typeof t[group] !== 'object') t[group] = {};
+      t[group][key] = el.value;
+      // Keep strategic.what in sync with title for display convenience
+      if(group==='strategic' && !t.strategic.what) t.strategic.what = t.title;
+      debouncedSave();
+    });
     else if(action==='goto-habits') el.addEventListener('click', (e)=>{ e.preventDefault(); setView('habits'); });
     else if(action==='goto-settings') el.addEventListener('click', ()=>setView('settings'));
     else if(action==='help-goto') el.addEventListener('click', ()=>setView(el.dataset.id));
@@ -4248,6 +4358,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     });
     if(!state.focusSessionLog) state.focusSessionLog={};
     if(state.biteGuide===undefined) state.biteGuide=null;
+    if(state.pendingStrategyTaskId===undefined) state.pendingStrategyTaskId=null;
     if(!Array.isArray(state.whenThen)) state.whenThen=[];
     if(!Array.isArray(state.rewardingRoutines)) state.rewardingRoutines=[];
     if(!Array.isArray(state.strategicPlans)) state.strategicPlans=[];
