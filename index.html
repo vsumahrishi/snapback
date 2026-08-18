@@ -1421,8 +1421,8 @@ function addTask(){
   if(!title) return;
   const date=document.getElementById('newDate').value;
   const time=document.getElementById('newTime').value;
-  const startDate=document.getElementById('newStartDate').value;
-  const startTime=document.getElementById('newStartTime').value;
+  const startDate=document.getElementById('newStartDate').value || '';
+  const startTime=document.getElementById('newStartTime').value || '';
   const priority=document.getElementById('newPriority').value;
   state.tasks.unshift({id:uid(),title,notes:'',date,time,priority,urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:[7,3,1,0],reminderTime:'09:00',startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false});
   persistRender();
