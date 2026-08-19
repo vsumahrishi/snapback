@@ -325,14 +325,14 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 /* Phones: prevent iOS Safari's zoom-on-focus (needs >=16px inputs), bigger tap targets, single-column forms */
 @media(max-width:480px){
   input,select,textarea{font-size:16px!important}
-  .main{padding:12px 12px 40px}
+  .main{padding:12px 12px calc(48px + env(safe-area-inset-bottom, 0px))}
   .pagehead h1{font-size:1.35rem}
   .card{padding:14px 14px}
   .row{flex-direction:column}
   .row>*{width:100%}
-  .taskactions{width:100%;justify-content:flex-start;margin-top:8px}
+  .taskactions{width:100%;justify-content:flex-start;margin-top:8px;gap:8px}
   .check{width:22px;height:22px}
-  .btn,.btn.sm{padding:9px 14px;font-size:.85rem}
+  .btn,.btn.sm{padding:11px 14px;font-size:.88rem;min-height:44px}
   .navbtn{padding:10px 12px;font-size:.82rem}
   .navbtn .ico{font-size:1rem}
   .ringwrap{width:200px;height:200px}
@@ -341,6 +341,12 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
   .daynum{font-size:.7rem}
   .weekgrid{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:130px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:6px}
   table{font-size:.74rem}
+  /* Keep action buttons visible above phone chrome / home indicator */
+  #addTaskBtn,.qactionsctions,.taskactions button{margin-bottom:4px}
+  input[type=date],input[type=time]{min-height:44px;padding:10px 12px}
+  .overlay{padding:12px;padding-bottom:calc(16px + env(safe-area-inset-bottom, 0px));align-items:flex-end}
+  .quotecard{max-height:88vh;overflow-y:auto;margin-bottom:env(safe-area-inset-bottom, 0px)}
+  .strategy-box input{margin-bottom:6px}
 }
 </style>
 </head>
@@ -911,7 +917,7 @@ function defaultState(){
   return {
     view:'today',
     filter:'all',
-    calMode:'month',
+    calMode:'list',
     calRef: todayStr(),
     moneyMonth: todayStr().slice(0,7),
     selectedDay: todayStr(),
@@ -1433,8 +1439,14 @@ function addTask(){
   const startDate=document.getElementById('newStartDate')?.value || '';
   const startTime=document.getElementById('newStartTime')?.value || '';
   const priority=document.getElementById('newPriority').value;
+  const reminderTime=document.getElementById('newReminderTime')?.value || '09:00';
+  const leads=[];
+  if(document.getElementById('newLead7')?.checked) leads.push(7);
+  if(document.getElementById('newLead3')?.checked) leads.push(3);
+  if(document.getElementById('newLead1')?.checked) leads.push(1);
+  if(document.getElementById('newLead0')?.checked) leads.push(0);
   const id=uid();
-  state.tasks.unshift({id,title,notes:'',date,time,priority,urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:[7,3,1,0],reminderTime:'09:00',startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{}});
+  state.tasks.unshift({id,title,notes:'',date,time,priority,urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{}});
   state.pendingStrategyTaskId = id;
   document.getElementById('newTitle').value='';
   persistRender();
@@ -2560,6 +2572,7 @@ function taskCard(t){
 
         <!-- Quick actions -->
         <div class="taskactions">
+          <button class="btn ghost sm" data-action="focus-title" data-id="${t.id}">✏️ Edit</button>
           <button class="btn sm" data-action="goto-focus" data-id="${t.id}">▶ Focus</button>
           <button class="btn ghost sm" data-action="goto-cheese" data-id="${t.id}">🍽 Bite Size</button>
           ${t.date ? `<button class="btn ghost sm" data-action="reschedule" data-id="${t.id}" data-days="1">+1 day</button>
@@ -2594,14 +2607,30 @@ function viewTasks(){
     <p>Give each task a date and time, tag it Must-do or Frog (the one you're dreading), and let the suggestion nudge you to the right technique.</p>
   </div>
   <div class="card">
-    <label>Quick add</label>
-    <div class="row">
-      <input id="quickAddInput" placeholder="Try: 'Read chapter 3 tomorrow at 5pm' or 'Email advisor next friday'" onkeydown="if(event.key==='Enter'){quickAddTask()}">
-      <button class="btn sm" id="quickAddBtn" style="flex:0 0 auto">Add</button>
+    <h3>Add a task</h3>
+    <div class="field"><label>Title</label><input id="newTitle" placeholder="e.g. Finish problem set 4"></div>
+    <div class="row" style="margin-top:10px">
+      <div class="field"><label>Due date</label><input id="newDate" type="date" value="${todayStr()}"></div>
+      <div class="field"><label>Due time</label><input id="newTime" type="time"></div>
+      <div class="field"><label>Priority</label><select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
     </div>
-    <div class="row" style="margin-top:10px;align-items:center">
-      <span style="font-size:.82rem;color:var(--muted);white-space:nowrap">Ask AI for help:</span>
-      <select id="aiHelperSelect" style="max-width:160px">
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
+      <div style="font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px">ALARM / REMINDER</div>
+      <div class="row">
+        <div class="field"><label>Remind me at</label><input id="newReminderTime" type="time" value="09:00"></div>
+        <div class="field"><label>Also alert</label>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
+            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead7" checked> 7 days before</label>
+            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead3" checked> 3 days</label>
+            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead1" checked> 1 day</label>
+            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead0" checked> On the day</label>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px;align-items:center">
+      <span style="font-size:.82rem;color:var(--muted);white-space:nowrap">Ask AI:</span>
+      <select id="aiHelperSelect" style="max-width:140px">
         <option value="grok">Grok</option>
         <option value="chatgpt">ChatGPT</option>
         <option value="claude">Claude</option>
@@ -2610,17 +2639,7 @@ function viewTasks(){
       </select>
       <button class="btn ghost sm" id="askAiBtn" style="flex:0 0 auto">Open AI ↗</button>
     </div>
-    <p style="color:var(--muted);font-size:.76rem;margin-top:6px">Understands: today, tomorrow, next weekday, in N days, and times like "5pm". Use the AI button to get help breaking down or planning a task.</p>
-  </div>
-  <div class="card">
-    <h3>Add a task</h3>
-    <div class="field"><label>Title</label><input id="newTitle" placeholder="e.g. Finish problem set 4" onkeydown="if(event.key==='Enter'){addTask()}"></div>
-    <div class="row" style="margin-top:10px">
-      <div class="field"><label>Due date</label><input id="newDate" type="date" value="${todayStr()}"></div>
-      <div class="field"><label>Due time</label><input id="newTime" type="time"></div>
-      <div class="field"><label>Priority</label><select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
-    </div>
-    <button class="btn" id="addTaskBtn" style="margin-top:12px">Add task</button>
+    <button class="btn" id="addTaskBtn" style="margin-top:14px;width:100%">Add task</button>
   </div>
   <div class="filters">
     <button data-filter="all" class="${f==='all'?'active':''}">All (${state.tasks.length})</button>
@@ -2781,11 +2800,109 @@ function itemsForDate(dateStr){
   if(state.nonNegotiable[dateStr]) items.push({type:'nn',color:'var(--gold)',time:'',label:'★ '+state.nonNegotiable[dateStr].text});
   return items.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
 }
+
+function parseICS(text){
+  const events=[];
+  const blocks=text.replace(/\r\n /g,'').split('BEGIN:VEVENT');
+  for(let i=1;i<blocks.length;i++){
+    const b=blocks[i].split('END:VEVENT')[0];
+    const get=(k)=>{
+      const re=new RegExp('^'+k+'[^:]*:(.+)$','mi');
+      const m=b.match(re);
+      return m?m[1].trim():'';
+    };
+    const summary=get('SUMMARY').replace(/\\,/g,',').replace(/\\n/g,' ');
+    const location=get('LOCATION').replace(/\\,/g,',');
+    const dtstart=get('DTSTART');
+    const dtend=get('DTEND');
+    const rrule=get('RRULE');
+    if(!dtstart||!summary) continue;
+    // DTSTART may be 20260315T083000 or 20260315T083000Z or with ;TZID=
+    const ds=dtstart.replace(/[^0-9T]/g,'');
+    const date=ds.slice(0,4)+'-'+ds.slice(4,6)+'-'+ds.slice(6,8);
+    let start='';
+    if(ds.includes('T')&&ds.length>=13) start=ds.slice(9,11)+':'+ds.slice(11,13);
+    let end='';
+    if(dtend){
+      const de=dtend.replace(/[^0-9T]/g,'');
+      if(de.includes('T')&&de.length>=13) end=de.slice(9,11)+':'+de.slice(11,13);
+    }
+    if(!end&&start){
+      const [h,m]=start.split(':').map(Number);
+      end=String((h+1)%24).padStart(2,'0')+':'+String(m).padStart(2,'0');
+    }
+    const weekly=/FREQ=WEEKLY/i.test(rrule);
+    let day=0;
+    try{ day=mondayIndex(new Date(date+'T12:00:00')); }catch(e){}
+    events.push({summary, location, date, start, end, weekly, day, rrule});
+  }
+  return events;
+}
+function importICSFile(file){
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const events=parseICS(String(reader.result||''));
+      if(!events.length){ alert('No events found in that calendar file.'); return; }
+      let added=0;
+      events.forEach(ev=>{
+        if(ev.weekly){
+          state.classes.push({
+            id:uid(), title:ev.summary, day:ev.day, start:ev.start||'09:00', end:ev.end||'10:00',
+            room:ev.location||'', textbook:'', meetingUrl:'',
+            scope:'semester', semStart:ev.date||todayStr(), semEnd:''
+          });
+        }else{
+          // one-off → study block / appointment on master calendar
+          state.studyBlocks.push({
+            id:uid(), date:ev.date, start:ev.start||'09:00', end:ev.end||'10:00',
+            label:ev.summary, meetingUrl:''
+          });
+        }
+        added++;
+      });
+      persistRender();
+      alert('Imported '+added+' item(s) into SnapBack.');
+    }catch(e){
+      console.error(e);
+      alert('Could not read that calendar file. Try exporting again as .ics');
+    }
+  };
+  reader.readAsText(file);
+}
+
 function viewCalendar(){
-  const mode=state.calMode;
+  const mode=state.calMode||'list';
   const ref=new Date(state.calRef+'T00:00:00');
   let body='';
-  if(mode==='month'){
+  if(mode==='list'){
+    const dow=mondayIndex(ref);
+    const monday=new Date(ref); monday.setDate(ref.getDate()-dow);
+    const dayNames=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const sections=[];
+    for(let i=0;i<7;i++){
+      const d=new Date(monday); d.setDate(monday.getDate()+i);
+      const ds=toDateStr(d);
+      const items=itemsForDate(ds).slice().sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+      const isToday=ds===todayStr();
+      sections.push(`
+        <div style="margin-bottom:18px">
+          <div style="background:var(--grey-soft);border-radius:10px;padding:8px 12px;font-weight:700;font-size:.95rem;margin-bottom:8px;${isToday?'border:2px solid var(--pine)':''}">
+            ${dayNames[i]}${isToday?' · Today':''}
+            <span style="font-weight:500;color:var(--muted);font-size:.82rem;margin-left:6px">${d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span>
+          </div>
+          ${items.length ? items.map(it=>`
+            <div style="padding:10px 12px;border-bottom:1px solid var(--line)">
+              <div style="font-size:.95rem">
+                <span style="font-weight:700;color:var(--ink)">${it.time ? escapeHtml(it.time) : 'All day'}</span>
+                <span style="margin-left:8px">${escapeHtml(it.label)}</span>
+              </div>
+              ${it.meetingUrl?`<div style="font-size:.78rem;margin-top:2px"><a href="${escapeHtml(it.meetingUrl)}" target="_blank" rel="noopener">Join link ↗</a></div>`:''}
+            </div>`).join('') : `<div style="padding:8px 12px;font-size:.85rem;color:var(--muted)">Nothing scheduled</div>`}
+        </div>`);
+    }
+    body=sections.join('');
+  }else if(mode==='month'){
     const year=ref.getFullYear(), month=ref.getMonth();
     const first=new Date(year,month,1);
     const startOffset=mondayIndex(first);
@@ -2837,10 +2954,9 @@ function viewCalendar(){
       <button class="btn ghost sm" id="calNext">&rarr;</button>
       <button class="btn ghost sm" id="calToday">Today</button>
       <div class="spacer"></div>
-      <button class="btn ${mode==='month'?'':'ghost'} sm" id="calModeMonth">Month</button>
+      <button class="btn ${mode==='list'?'':'ghost'} sm" id="calModeList">List</button>
       <button class="btn ${mode==='week'?'':'ghost'} sm" id="calModeWeek">Week</button>
-      <button class="btn ghost sm" id="exportIcsBtn">Export .ics ↓</button>
-      <button class="btn ghost sm" id="exportWeekGridBtn">Week grid ↓</button>
+      <button class="btn ${mode==='month'?'':'ghost'} sm" id="calModeMonth">Month</button>
     </div>
     ${body}
     <div class="legend">
@@ -2855,9 +2971,23 @@ function viewCalendar(){
   </div>
 
   <div class="card">
-    <h3>Sync to your phone/calendar</h3>
-    <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">Downloads a calendar file — open it and your phone or computer offers to add everything to Google/Apple/Outlook Calendar. That way it still notifies you even with this closed. Re-export after adding new tasks to keep it current.</p>
-    <button class="btn" id="exportIcsBtn2">Export calendar file &#8595;</button>
+    <h3>Import from Google / Apple / Outlook</h3>
+    <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">
+      Export a calendar file (<b>.ics</b>) from Google Calendar, Apple Calendar, or Outlook, then choose it here. Weekly repeating events become semester classes; one-off events become appointments on this calendar.<br><br>
+      <b>Notion:</b> Notion doesn’t export .ics. Copy the timetable text and paste it under <b>Semester Calendar → Paste your timetable</b>.
+    </p>
+    <input type="file" id="icsImportInput" accept=".ics,text/calendar" style="margin-top:8px">
+    <p style="font-size:.78rem;color:var(--muted);margin-top:8px">How to get a .ics file:<br>
+      Google Calendar → Settings → Import &amp; export → Export<br>
+      Apple Calendar → File → Export → Export<br>
+      Outlook → open calendar → Export to ICS
+    </p>
+  </div>
+  <div class="card">
+    <h3>Export to your phone / watch</h3>
+    <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">Download SnapBack’s calendar as .ics and open it in Google/Apple/Outlook so it syncs to your watch.</p>
+    <button class="btn" id="exportIcsBtn2">Export calendar file ↓</button>
+    <button class="btn ghost sm" id="exportWeekGridBtn" style="margin-left:8px">Week grid ↓</button>
   </div>
 
   <div class="card">
@@ -3200,6 +3330,96 @@ function viewTimeBlocking(){
 /* ============================================================
    VIEW: Semester Calendar (placeholder — full implementation next)
    ============================================================ */
+
+/* ============================================================
+   Timetable natural-language parser
+   ============================================================ */
+function parseTimetableText(raw){
+  const dayMap = {
+    mon:0, monday:0, mondays:0,
+    tue:1, tues:1, tuesday:1, tuesdays:1,
+    wed:2, wednesday:2, wednesdays:2,
+    thu:3, thur:3, thurs:3, thursday:3, thursdays:3,
+    fri:4, friday:4, fridays:4,
+    sat:5, saturday:5, saturdays:5,
+    sun:6, sunday:6, sundays:6
+  };
+  const results = [];
+  // Split on commas / semicolons / newlines, but keep "Mon/Wed/Fri" groups intact
+  const chunks = raw.split(/[\n;]+|\s*,\s*(?=[A-Za-z])/).map(s=>s.trim()).filter(Boolean);
+  let lastDays = [0]; // default Monday if unspecified
+  for(let chunk of chunks){
+    const lower = chunk.toLowerCase();
+    // days: mon/wed/fri or Mondays or Mon and Wed
+    const dayHits = [];
+    const dayRe = /\b(mon(?:day)?s?|tue(?:s|sday)?s?|wed(?:nesday)?s?|thu(?:r?s|rsday)?s?|fri(?:day)?s?|sat(?:urday)?s?|sun(?:day)?s?)\b/g;
+    let m;
+    while((m = dayRe.exec(lower))){
+      const key = m[1].replace(/days?$/,'day').replace(/s$/,'');
+      // normalize
+      let k = m[1].toLowerCase();
+      if(k.startsWith('mon')) dayHits.push(0);
+      else if(k.startsWith('tue')) dayHits.push(1);
+      else if(k.startsWith('wed')) dayHits.push(2);
+      else if(k.startsWith('thu')) dayHits.push(3);
+      else if(k.startsWith('fri')) dayHits.push(4);
+      else if(k.startsWith('sat')) dayHits.push(5);
+      else if(k.startsWith('sun')) dayHits.push(6);
+    }
+    if(lower.includes('same day') && !dayHits.length) dayHits.push(...lastDays);
+    // slash groups already caught by dayRe if written Mon/Wed/Fri
+    if(dayHits.length) lastDays = [...new Set(dayHits)];
+    const days = dayHits.length ? [...new Set(dayHits)] : lastDays;
+
+    // time ranges: 8:30 - 12:40 or 8.30-12.40 or single 2:30
+    let start = '';
+    let end = '';
+    const rangeM = lower.match(/\b(\d{1,2})[:.](\d{2})\s*(am|pm)?\s*[-–—to]+\s*(\d{1,2})[:.](\d{2})\s*(am|pm)?\b/);
+    const timeM = rangeM || lower.match(/\b(\d{1,2})[:.](\d{2})\s*(am|pm)?\b/);
+    if(timeM){
+      let h = parseInt(timeM[1],10);
+      const min = timeM[2];
+      const ap = timeM[3];
+      if(ap==='pm' && h<12) h += 12;
+      if(ap==='am' && h===12) h = 0;
+      start = String(h).padStart(2,'0') + ':' + min;
+      if(rangeM){
+        let h2 = parseInt(rangeM[4],10);
+        const min2 = rangeM[5];
+        const ap2 = rangeM[6];
+        if(ap2==='pm' && h2<12) h2 += 12;
+        if(ap2==='am' && h2===12) h2 = 0;
+        end = String(h2).padStart(2,'0') + ':' + min2;
+      } else {
+        const [hh,mm] = start.split(':').map(Number);
+        end = String((hh+1)%24).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+      }
+    }
+    // room
+    let room = '';
+    const roomM = chunk.match(/\broom\s*(?:no\.?|number|#)?\s*([A-Za-z0-9\-]+)/i) || chunk.match(/\b(?:hall|rm)\s*([A-Za-z0-9\-]+)/i);
+    if(roomM) room = roomM[1];
+
+    // title: strip day/time/room phrases
+    let title = chunk
+      .replace(/\b(mon(?:day)?s?|tue(?:s|sday)?s?|wed(?:nesday)?s?|thu(?:r?s|rsday)?s?|fri(?:day)?s?|sat(?:urday)?s?|sun(?:day)?s?)(\s*\/\s*(mon(?:day)?s?|tue(?:s|sday)?s?|wed(?:nesday)?s?|thu(?:r?s|rsday)?s?|fri(?:day)?s?|sat(?:urday)?s?|sun(?:day)?s?))*/gi, '')
+      .replace(/\b(on|at|same day)\b/gi, ' ')
+      .replace(/\b\d{1,2}[:.]\d{2}\s*(am|pm)?\b/gi, '')
+      .replace(/\broom\s*(?:no\.?|number|#)?\s*[A-Za-z0-9\-]+/gi, '')
+      .replace(/\b(?:hall|rm)\s*[A-Za-z0-9\-]+/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/^[\s,.\-]+|[\s,.\-]+$/g, '')
+      .trim();
+    if(!title) title = 'Class';
+    if(!start) continue;
+    for(const d of days){
+      results.push({title, day:d, start, end, room, scope:'semester'});
+    }
+  }
+  return results;
+}
+
+
 function viewSemester(){
   const days=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   const classesByDay = days.map((d,i)=>({
@@ -3212,6 +3432,14 @@ function viewSemester(){
     <div class="eyebrow">Your term at a glance</div>
     <h1>Semester Calendar</h1>
     <p>This is your master class schedule. Everything here automatically appears on the main Calendar. You can also link textbooks to each class.</p>
+  </div>
+
+  <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
+    <h3 style="margin:0 0 6px">Paste your timetable</h3>
+    <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Type or paste something like: <i>Bio on Mondays at 8:30 room 345, Chemistry at 9:30 same day, Gym Mon/Wed/Fri 4:30</i></p>
+    <textarea id="ttPaste" rows="3" placeholder="Bio on Mondays at 8:30 room 345, Chemistry at 9:30 same day, Gym Mon/Wed/Fri at 4:30" style="width:100%"></textarea>
+    <button class="btn" id="ttParseBtn" style="margin-top:10px">Preview classes</button>
+    <div id="ttPreview" style="margin-top:12px"></div>
   </div>
 
   <div class="card">
@@ -3848,7 +4076,35 @@ function viewHelp(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Quick answers, not a manual</div><h1>Help &amp; FAQ</h1><p>Tap anything below to jump straight there.</p>
+    <div class="eyebrow">How to actually use it</div><h1>Help &amp; FAQ</h1><p>Short how-tos first. Then what each section is for.</p>
+  </div>
+
+  <div class="card">
+    <h3>How do I…</h3>
+    <details class="faqitem"><summary>Set a task with an alarm</summary>
+      <p>Go to <b>Tasks</b> → fill Title, Due date/time → under <b>Alarm / Reminder</b> pick the time and how many days before you want alerts → <b>Add task</b>. Alerts work while the app/tab is open (browser rules). For phone alarms that fire when the app is closed, export the task to your phone calendar (📅 on the task card).</p>
+    </details>
+    <details class="faqitem"><summary>Sync with my smartwatch</summary>
+      <p>SnapBack does not talk to watches directly. Do this:<br>
+      1. On <b>Calendar</b> or a task, use <b>Export</b> / 📅 to download an <b>.ics</b> file.<br>
+      2. Open that file with <b>Google Calendar</b> (Android) or <b>Apple Calendar</b> (iPhone).<br>
+      3. Your watch already syncs with that phone calendar — events appear on the watch after a few minutes.<br>
+      Same idea for class times from <b>Semester Calendar</b>.</p>
+    </details>
+    <details class="faqitem"><summary>Add my whole weekly timetable at once</summary>
+      <p>Open <b>Semester Calendar</b> → use <b>Paste your timetable</b>. Type or paste lines like:<br>
+      <i>Bio on Mondays at 8:30 room 345, Chemistry at 9:30 same day, Gym Mon/Wed/Fri 4:30</i><br>
+      Review the preview → confirm if classes repeat weekly → save.</p>
+    </details>
+    <details class="faqitem"><summary>Use Focus Plate without overloading today</summary>
+      <p>Open <b>Focus Plate</b>. Fill only: 1 big, 3 medium, 5 small. Mark one as ★ Non-negotiable. Everything else waits. Use <b>Bite Size</b> at the bottom to break a big item into tiny steps.</p>
+    </details>
+    <details class="faqitem"><summary>Break a scary assignment into small steps</summary>
+      <p>Open the task → <b>Bite Size</b>, or from Focus Plate use the guided walk-through. Add bites yourself or use Smart Breakdown / templates. Check bites off in any order.</p>
+    </details>
+    <details class="faqitem"><summary>Edit a task (not only mark done or delete)</summary>
+      <p>On the task card, tap <b>✏️ Edit</b> — the title field focuses so you can change it. Date, time, priority, tags, notes, and mindset helpers are all editable on the same card.</p>
+    </details>
   </div>
 
   <div class="card">
@@ -4176,6 +4432,11 @@ function wireView(){
     else if(action==='delete-rewarding') el.addEventListener('click', ()=>{ state.rewardingRoutines.splice(Number(el.dataset.idx),1); persistRender(); });
     else if(action==='delete-strategic') el.addEventListener('click', ()=>{ state.strategicPlans.splice(Number(el.dataset.idx),1); persistRender(); });
     else if(action==='delete-flip') el.addEventListener('click', ()=>{ state.flipScripts.splice(Number(el.dataset.idx),1); persistRender(); });
+    else if(action==='focus-title') el.addEventListener('click', ()=>{
+      const card = el.closest('.taskcard');
+      const input = card && card.querySelector('.ttitle-edit');
+      if(input){ input.focus(); input.select(); }
+    });
     else if(action==='set-strategy') el.addEventListener('change', ()=>{
       const t = findTask(Number(el.dataset.id) || el.dataset.id);
       if(!t) return;
@@ -4242,7 +4503,7 @@ function wireView(){
     const quickBtn=document.getElementById('quickAddBtn'); if(quickBtn) quickBtn.addEventListener('click', quickAddTask);
     const askAiBtn=document.getElementById('askAiBtn');
     if(askAiBtn) askAiBtn.addEventListener('click', ()=>{
-      const q = (document.getElementById('quickAddInput')?.value || '').trim() || 'Help me break down and plan this task';
+      const q = (document.getElementById('newTitle')?.value || '').trim() || 'Help me break down and plan this task';
       const ai = document.getElementById('aiHelperSelect')?.value || 'grok';
       const urls = {
         grok: `https://grok.com/?q=${encodeURIComponent(q)}`,
@@ -4270,8 +4531,42 @@ function wireView(){
     document.getElementById('calToday').addEventListener('click', ()=>{ state.calRef=todayStr(); state.selectedDay=todayStr(); persistRender(); });
     document.getElementById('calModeMonth').addEventListener('click', ()=>{ state.calMode='month'; persistRender(); });
     document.getElementById('calModeWeek').addEventListener('click', ()=>{ state.calMode='week'; persistRender(); });
+    const listBtn=document.getElementById('calModeList'); if(listBtn) listBtn.addEventListener('click', ()=>{ state.calMode='list'; persistRender(); });
+    const icsIn=document.getElementById('icsImportInput');
+    if(icsIn) icsIn.addEventListener('change', ()=>{ const f=icsIn.files&&icsIn.files[0]; if(f) importICSFile(f); icsIn.value=''; });
     main.querySelectorAll('[data-day]').forEach(el=>el.addEventListener('click', ()=>{ state.selectedDay=el.dataset.day; persistRender(); }));
     const addClassBtn=document.getElementById('addClassBtn'); if(addClassBtn) addClassBtn.addEventListener('click', addClass);
+    const ttParseBtn=document.getElementById('ttParseBtn');
+    if(ttParseBtn) ttParseBtn.addEventListener('click', ()=>{
+      const raw=document.getElementById('ttPaste')?.value||'';
+      const parsed=parseTimetableText(raw);
+      const box=document.getElementById('ttPreview');
+      if(!box) return;
+      if(!parsed.length){
+        box.innerHTML='<div class="empty">Could not read any classes. Try: Subject on Monday at 9:00 room 101</div>';
+        return;
+      }
+      const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+      box.innerHTML=`
+        <div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} class slot(s). Save as weekly recurring?</div>
+        ${parsed.map((p,i)=>`<div class="deadline-row"><span style="flex:1"><b>${escapeHtml(p.title)}</b> · ${dayNames[p.day]} ${p.start}–${p.end}${p.room?' · room '+escapeHtml(p.room):''}</span></div>`).join('')}
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="ttConfirmBtn">Yes — save as weekly</button>
+          <button class="btn ghost" id="ttCancelBtn">Cancel</button>
+        </div>`;
+      document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
+        parsed.forEach(p=>{
+          state.classes.push({
+            id:uid(), title:p.title, day:p.day, start:p.start, end:p.end,
+            room:p.room||'', textbook:'', meetingUrl:'',
+            scope:'semester', semStart: todayStr(), semEnd:''
+          });
+        });
+        document.getElementById('ttPaste').value='';
+        persistRender();
+      });
+      document.getElementById('ttCancelBtn').addEventListener('click', ()=>{ box.innerHTML=''; });
+    });
     const classScopeSel=document.getElementById('classScope');
     if(classScopeSel) classScopeSel.addEventListener('change', ()=>{
       const semFields=document.getElementById('classSemesterFields'), sessFields=document.getElementById('classSessionFields');
@@ -4285,6 +4580,37 @@ function wireView(){
 
   if(state.view==='semester'){
     const addClassBtn=document.getElementById('addClassBtn'); if(addClassBtn) addClassBtn.addEventListener('click', addClass);
+    const ttParseBtn=document.getElementById('ttParseBtn');
+    if(ttParseBtn) ttParseBtn.addEventListener('click', ()=>{
+      const raw=document.getElementById('ttPaste')?.value||'';
+      const parsed=parseTimetableText(raw);
+      const box=document.getElementById('ttPreview');
+      if(!box) return;
+      if(!parsed.length){
+        box.innerHTML='<div class="empty">Could not read any classes. Try: Subject on Monday at 9:00 room 101</div>';
+        return;
+      }
+      const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+      box.innerHTML=`
+        <div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} class slot(s). Save as weekly recurring?</div>
+        ${parsed.map((p,i)=>`<div class="deadline-row"><span style="flex:1"><b>${escapeHtml(p.title)}</b> · ${dayNames[p.day]} ${p.start}–${p.end}${p.room?' · room '+escapeHtml(p.room):''}</span></div>`).join('')}
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="ttConfirmBtn">Yes — save as weekly</button>
+          <button class="btn ghost" id="ttCancelBtn">Cancel</button>
+        </div>`;
+      document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
+        parsed.forEach(p=>{
+          state.classes.push({
+            id:uid(), title:p.title, day:p.day, start:p.start, end:p.end,
+            room:p.room||'', textbook:'', meetingUrl:'',
+            scope:'semester', semStart: todayStr(), semEnd:''
+          });
+        });
+        document.getElementById('ttPaste').value='';
+        persistRender();
+      });
+      document.getElementById('ttCancelBtn').addEventListener('click', ()=>{ box.innerHTML=''; });
+    });
   }
 
   if(state.view==='reminders'){
