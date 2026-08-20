@@ -3410,7 +3410,140 @@ function viewTimeBlocking(){
 /* ============================================================
    Timetable natural-language parser
    ============================================================ */
+
+function loadTesseract(){
+  return new Promise((resolve, reject)=>{
+    if(window.Tesseract){ resolve(window.Tesseract); return; }
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.onload=()=>resolve(window.Tesseract);
+    s.onerror=()=>reject(new Error('Could not load OCR library (need internet once)'));
+    document.head.appendChild(s);
+  });
+}
+async function ocrTimetableImage(file){
+  const status=document.getElementById('ttOcrStatus');
+  const area=document.getElementById('ttPaste');
+  if(status) status.textContent='Loading OCR… (first time may take a moment)';
+  const Tesseract=await loadTesseract();
+  if(status) status.textContent='Reading image…';
+  const result=await Tesseract.recognize(file, 'eng', {
+    logger: m=>{
+      if(!status) return;
+      if(m.status==='recognizing text' && m.progress!=null){
+        status.textContent='Reading image… '+Math.round(m.progress*100)+'%';
+      } else if(m.status){
+        status.textContent=m.status;
+      }
+    }
+  });
+  const text=(result && result.data && result.data.text) ? result.data.text.trim() : '';
+  if(area) area.value = text;
+  if(status) status.textContent = text
+    ? 'Done — check the text below, fix any mistakes, then Preview classes.'
+    : 'No text found. Try a clearer screenshot or paste from Excel instead.';
+  return text;
+}
+
+function parseTimeRangeToken(str){
+  const s = String(str||'').toLowerCase().trim();
+  // 3:15 - 4:00 | 5:45-6:30 | 5:00 - 5:45 / 6:00 (take first range)
+  const m = s.match(/(\d{1,2})[:.](\d{2})\s*[-–—to]+\s*(\d{1,2})[:.](\d{2})/);
+  if(!m) return null;
+  const pad=(n)=>String(n).padStart(2,'0');
+  return {start: pad(m[1])+':'+m[2], end: pad(m[3])+':'+m[4]};
+}
+function dayNameToIndex(word){
+  const k = String(word||'').toLowerCase().replace(/[^a-z]/g,'');
+  if(k.startsWith('mon')) return 0;
+  if(k.startsWith('tue')) return 1;
+  if(k.startsWith('wed')) return 2;
+  if(k.startsWith('thu')) return 3;
+  if(k.startsWith('fri')) return 4;
+  if(k.startsWith('sat')) return 5;
+  if(k.startsWith('sun')) return 6;
+  return -1;
+}
+function parseExcelGridTimetable(raw){
+  // Excel / Sheets paste: first row = time headers, following rows = Day + cells
+  const lines = String(raw||'').split(/\r?\n/).map(l=>l.replace(/\u00a0/g,' ').trimEnd()).filter(l=>l.trim());
+  if(lines.length < 2) return null;
+
+  function splitRow(line){
+    if(line.includes('\t')) return line.split('\t').map(c=>c.trim());
+    // multiple spaces (Excel sometimes pastes that way)
+    return line.trim().split(/\s{2,}|\t/).map(c=>c.trim()).filter((c,i,a)=>c||i===0);
+  }
+
+  const rows = lines.map(splitRow).filter(r=>r.some(c=>c));
+  if(rows.length < 2) return null;
+
+  // Find header row: has 2+ time ranges
+  let headerIdx = -1;
+  let times = [];
+  for(let i=0;i<Math.min(3, rows.length);i++){
+    const parsed = rows[i].map(parseTimeRangeToken);
+    const ok = parsed.filter(Boolean);
+    if(ok.length >= 2){
+      headerIdx = i;
+      times = parsed; // keep alignment with columns (nulls for non-time cells)
+      break;
+    }
+  }
+  if(headerIdx < 0) return null;
+
+  // Map column index -> time
+  const colTimes = {};
+  times.forEach((t,i)=>{ if(t) colTimes[i]=t; });
+  // If first header cell is empty and times start at col 1, day is col 0
+  const results = [];
+  for(let r=headerIdx+1;r<rows.length;r++){
+    const row = rows[r];
+    if(!row.length) continue;
+    // Day may be first cell, or first non-empty before times
+    let day = dayNameToIndex(row[0]);
+    let startCol = 0;
+    if(day < 0){
+      // try any cell that looks like a day
+      for(let i=0;i<row.length;i++){
+        const d = dayNameToIndex(row[i]);
+        if(d>=0){ day=d; startCol=i; break; }
+      }
+    }
+    if(day < 0) continue;
+
+    // Cells: prefer columns that had times in header
+    const timeCols = Object.keys(colTimes).map(Number).sort((a,b)=>a-b);
+    if(timeCols.length){
+      // align: if header had leading blank, times at 1..n and data day at 0, values at 1..n
+      timeCols.forEach((ci)=>{
+        const t = colTimes[ci];
+        // data column often same index as header; if header col0 was blank text, values match
+        let val = String(row[ci] || '').trim();
+        if(!val) return;
+        if(dayNameToIndex(val)>=0) return;
+        results.push({title: val.replace(/\s+/g,' ').trim(), day, start:t.start, end:t.end, room:'', scope:'semester'});
+      });
+    } else {
+      // fallback sequential
+      let ti = 0;
+      const onlyTimes = times.filter(Boolean);
+      for(let i=1;i<row.length;i++){
+        const val = String(row[i]||'').trim();
+        if(!val || !onlyTimes[ti]) continue;
+        const t = onlyTimes[ti++];
+        results.push({title:val, day, start:t.start, end:t.end, room:'', scope:'semester'});
+      }
+    }
+  }
+  return results.length ? results : null;
+}
+
 function parseTimetableText(raw){
+  // Prefer Excel/grid paste when detected
+  const grid = parseExcelGridTimetable(raw);
+  if(grid && grid.length) return grid;
+
   // Supports:
   // Bio Mon/Thur 8.00 to 8.30, Chem 9 to 10 on Tue/Fri, Math 11 to 12 on all days
   // Mon 8:30-12:40 Intro to Physics room Lab 2
@@ -3533,9 +3666,17 @@ function viewSemester(){
   </div>
 
   <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
-    <h3 style="margin:0 0 6px">Paste your timetable</h3>
-    <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Type or paste something like: <i>Bio on Mondays at 8:30 room 345, Chemistry at 9:30 same day, Gym Mon/Wed/Fri 4:30</i></p>
-    <textarea id="ttPaste" rows="3" placeholder="Bio on Mondays at 8:30 room 345, Chemistry at 9:30 same day, Gym Mon/Wed/Fri at 4:30" style="width:100%"></textarea>
+    <h3 style="margin:0 0 6px">Add your timetable</h3>
+    <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">
+      <b>Option 1:</b> Upload a screenshot of your Excel / college timetable.<br>
+      <b>Option 2:</b> Paste the grid from Excel, or type lines like <i>Bio Mon 8:30 room 345</i>.
+    </p>
+    <div class="row" style="margin-bottom:10px;align-items:center">
+      <input type="file" id="ttImageInput" accept="image/*" capture="environment" style="flex:1">
+      <button class="btn sm" id="ttOcrBtn" style="flex:0 0 auto">Read screenshot</button>
+    </div>
+    <div id="ttOcrStatus" style="font-size:.82rem;color:var(--muted);margin-bottom:8px"></div>
+    <textarea id="ttPaste" rows="4" placeholder="Text appears here after OCR, or paste Excel grid / type classes…" style="width:100%"></textarea>
     <button class="btn" id="ttParseBtn" style="margin-top:10px">Preview classes</button>
     <div id="ttPreview" style="margin-top:12px"></div>
   </div>
@@ -4678,6 +4819,16 @@ function wireView(){
 
   if(state.view==='semester'){
     const addClassBtn=document.getElementById('addClassBtn'); if(addClassBtn) addClassBtn.addEventListener('click', addClass);
+    const ttOcrBtn=document.getElementById('ttOcrBtn');
+    if(ttOcrBtn) ttOcrBtn.addEventListener('click', async ()=>{
+      const input=document.getElementById('ttImageInput');
+      const f=input && input.files && input.files[0];
+      if(!f){ const st=document.getElementById('ttOcrStatus'); if(st) st.textContent='Choose a screenshot first.'; return; }
+      ttOcrBtn.disabled=true;
+      try{ await ocrTimetableImage(f); }
+      catch(e){ const st=document.getElementById('ttOcrStatus'); if(st) st.textContent='OCR failed: '+(e.message||e)+'. Paste text instead if needed.'; }
+      ttOcrBtn.disabled=false;
+    });
     const ttParseBtn=document.getElementById('ttParseBtn');
     if(ttParseBtn) ttParseBtn.addEventListener('click', ()=>{
       const raw=document.getElementById('ttPaste')?.value||'';
