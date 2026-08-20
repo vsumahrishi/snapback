@@ -1,8 +1,9 @@
-SnapBack — complete site package (all required files)
+SnapBack — COMPLETE site package (v14 parser fixes)
 
-Upload EVERYTHING in this folder to your GitHub repo root
-(https://github.com/vsumahrishi/snapback) so the structure is:
+Upload ALL files in this folder to the root of:
+  https://github.com/vsumahrishi/snapback
 
+Required at repo root:
   index.html
   sw.js
   manifest.json
@@ -10,12 +11,6 @@ Upload EVERYTHING in this folder to your GitHub repo root
   icon-512.png
   icon-maskable-192.png
   icon-maskable-512.png
-  apple-touch-icon.png   (optional)
-  favicon-32.png         (optional)
-  favicon-48.png         (optional)
-  icons/                 (copies of the same icons)
+  icons/   (folder with the same icons)
 
-GitHub Pages URL:
-  https://vsumahrishi.github.io/snapback/
-
-After upload: wait 1–2 minutes, hard-refresh the site.
+Then open: https://vsumahrishi.github.io/snapback/
