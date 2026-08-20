@@ -2947,6 +2947,59 @@ function importICSFile(file){
   reader.readAsText(file);
 }
 
+
+function freeSlotsForDate(dateStr){
+  // Working window 8:00–18:00, 30-min steps; free = not overlapping any class/task/block
+  const dayStart = 8*60, dayEnd = 18*60, step = 30;
+  const busy = [];
+  itemsForDate(dateStr).forEach(it=>{
+    if(!it.time) return;
+    const [h,m] = it.time.split(':').map(Number);
+    let start = h*60+(m||0);
+    let end = start + 60; // default 1h if no end on item
+    // try match class with end
+    const cls = (state.classes||[]).find(c=>{
+      if(c.start !== it.time) return false;
+      if(c.scope==='session') return c.date===dateStr;
+      return c.day===mondayIndex(new Date(dateStr+'T12:00:00'));
+    });
+    if(cls && cls.end){
+      const [eh,em]=cls.end.split(':').map(Number);
+      end = eh*60+(em||0);
+    }
+    const blk = (state.studyBlocks||[]).find(b=>b.date===dateStr && b.start===it.time);
+    if(blk && blk.end){
+      const [eh,em]=blk.end.split(':').map(Number);
+      end = eh*60+(em||0);
+    }
+    if(end<=start) end = start+60;
+    busy.push({start,end,label:it.label});
+  });
+  const free = [];
+  let t = dayStart;
+  while(t < dayEnd){
+    const slotEnd = t + step;
+    const overlaps = busy.some(b => t < b.end && slotEnd > b.start);
+    if(!overlaps){
+      const pad=n=>String(n).padStart(2,'0');
+      free.push(pad(Math.floor(t/60))+':'+pad(t%60)+'–'+pad(Math.floor(slotEnd/60))+':'+pad(slotEnd%60));
+    }
+    t += step;
+  }
+  // merge consecutive free slots for readability
+  const merged = [];
+  for(const s of free){
+    if(!merged.length){ merged.push(s); continue; }
+    const prev = merged[merged.length-1];
+    const prevEnd = prev.split('–')[1];
+    const curStart = s.split('–')[0];
+    if(prevEnd === curStart){
+      merged[merged.length-1] = prev.split('–')[0]+'–'+s.split('–')[1];
+    } else merged.push(s);
+  }
+  return merged;
+}
+
 function viewCalendar(){
   const mode=state.calMode||'list';
   const ref=new Date(state.calRef+'T00:00:00');
@@ -3046,6 +3099,15 @@ function viewCalendar(){
     ${mode==='month' ? `<div class="agenda"><h3>Agenda — ${state.selectedDay}</h3>${selItems.length ? selItems.map(it=>`<div class="deadline-row"><span class="dotcolor" style="background:${it.color}"></span>${it.time?('<b>'+it.time+'</b>&nbsp;'):''}${escapeHtml(it.label)}${it.meetingUrl?`<a href="${escapeHtml(it.meetingUrl)}" target="_blank" rel="noopener" style="margin-left:8px"><button class="btn ghost sm">Join &#8599;</button></a>`:''}</div>`).join('') : '<div class="empty">Nothing scheduled.</div>'}</div>` : ''}
   </div>
 
+  <div class="card">
+    <h3>Free slots</h3>
+    <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">See open times on a day before you add a meeting.</p>
+    <div class="row">
+      <div class="field"><label>Day</label><input type="date" id="freeSlotDate" value="${state.selectedDay||todayStr()}"></div>
+      <div class="field" style="flex:0 0 auto;align-self:flex-end"><button class="btn sm" id="freeSlotBtn">Show free times</button></div>
+    </div>
+    <div id="freeSlotResult" style="margin-top:10px;font-size:.9rem"></div>
+  </div>
   <div class="card">
     <h3>Import from Google / Apple / Outlook</h3>
     <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">
@@ -3442,8 +3504,12 @@ async function ocrTimetableImage(file){
   text = text
     .replace(/[~|\[\]]+/g, ' ')
     .replace(/[|]{1,}/g, ' ')
-    .replace(/\b(ss\.|a00|hlok|eron)\b/gi, m=>({ss:'.',a00:'4:00',hlok:'Shlok',eron:'Aaron'}[m.toLowerCase()]||m))
-    .replace(/(\d)\s*[oO]\s*(\d)/g, '$1:$2')
+    .replace(/[☐☑□■●○•]+/g, ' ')
+    // 830-1240 or 830 - 1240 → 8:30-12:40 ; 230 → 2:30
+    .replace(/\b(\d{1,2})([0-5]\d)\s*[-–—to]+\s*(\d{1,2})([0-5]\d)\b/g, '$1:$2-$3:$4')
+    .replace(/\b(\d{1,2})([0-5]\d)\b/g, (m,h,min)=>{
+      const hh=parseInt(h,10); if(hh>23) return m; return hh+':'+min;
+    })
     .replace(/(\d{1,2})[\.,](\d{2})/g, '$1:$2')
     .replace(/[ \t]+/g, ' ')
     .replace(/ *\n */g, '\n')
@@ -3557,8 +3623,86 @@ function parseExcelGridTimetable(raw){
   return results.length ? results : null;
 }
 
+
+function parseNotionListTimetable(raw){
+  // Format:
+  // Mon
+  // 8:30 - 12:40: Intro to Physics
+  // Physics Lab 2
+  // 2:30: Gym
+  // Tues
+  // ...
+  const lines = String(raw||'').split(/\r?\n/).map(l=>l.replace(/[☐☑□■●○•]/g,'').trim()).filter(Boolean);
+  if(lines.length < 2) return null;
+  const dayOnly = /^(mon(?:day)?s?|tue(?:s(?:day)?)?|wed(?:nesday)?s?|thu(?:r(?:s(?:day)?)?)?|fri(?:day)?s?|sat(?:urday)?s?|sun(?:day)?s?)$/i;
+  let currentDay = -1;
+  let dayHits = 0;
+  const results = [];
+  let pending = null; // last event waiting for possible room line
+
+  function flush(){
+    if(pending){ results.push(pending); pending=null; }
+  }
+
+  function parseLineTimes(line){
+    const s = line.toLowerCase();
+    let m = s.match(/\b(\d{1,2}):(\d{2})\s*[-–—to]+\s*(\d{1,2}):(\d{2})\b/);
+    if(m){
+      const pad=n=>String(n).padStart(2,'0');
+      return {start:pad(m[1])+':'+m[2], end:pad(m[3])+':'+m[4], index:m.index, length:m[0].length};
+    }
+    m = s.match(/\b(\d{1,2}):(\d{2})\b/);
+    if(m){
+      const pad=n=>String(n).padStart(2,'0');
+      const start=pad(m[1])+':'+m[2];
+      const h=parseInt(m[1],10);
+      const end=pad((h+1)%24)+':'+m[2];
+      return {start, end, index:m.index, length:m[0].length};
+    }
+    return null;
+  }
+
+  for(const line of lines){
+    const dayMatch = line.match(dayOnly);
+    if(dayMatch){
+      flush();
+      currentDay = dayNameToIndex(dayMatch[1]);
+      if(currentDay>=0) dayHits++;
+      continue;
+    }
+    if(currentDay < 0) continue;
+    const tm = parseLineTimes(line);
+    if(tm){
+      flush();
+      let title = line.slice(0, tm.index) + line.slice(tm.index + tm.length);
+      title = title.replace(/^[\s:\-–—]+/,'').replace(/[\s:\-–—]+$/,'').trim();
+      if(!title) title = 'Class';
+      pending = {title, day:currentDay, start:tm.start, end:tm.end, room:'', scope:'semester'};
+      continue;
+    }
+    // Possible room line (no time) — attach to previous
+    if(pending && line.length < 60 && !/^\d/.test(line)){
+      pending.room = line;
+      flush();
+      continue;
+    }
+  }
+  flush();
+  if(dayHits >= 1 && results.length >= 1) return results;
+  return null;
+}
+
 function parseTimetableText(raw){
-  // Prefer Excel/grid paste when detected
+  // Normalize times like 830-1240 → 8:30-12:40 (common OCR / plain typing)
+  raw = String(raw||'')
+    .replace(/[☐☑□■●○•]/g, ' ')
+    .replace(/\b(\d{1,2})([0-5]\d)\s*[-–—to]+\s*(\d{1,2})([0-5]\d)\b/g, '$1:$2-$3:$4')
+    .replace(/\b(\d{1,2})([0-5]\d)\b/g, (m,h,min)=>{
+      const hh=parseInt(h,10); if(hh>23) return m; return hh+':'+min;
+    });
+  // Prefer structured formats first
+  const notion = parseNotionListTimetable(raw);
+  if(notion && notion.length) return notion;
   const grid = parseExcelGridTimetable(raw);
   if(grid && grid.length) return grid;
 
@@ -4789,6 +4933,15 @@ function wireView(){
     document.getElementById('calModeMonth').addEventListener('click', ()=>{ state.calMode='month'; persistRender(); });
     document.getElementById('calModeWeek').addEventListener('click', ()=>{ state.calMode='week'; persistRender(); });
     const listBtn=document.getElementById('calModeList'); if(listBtn) listBtn.addEventListener('click', ()=>{ state.calMode='list'; persistRender(); });
+    const freeBtn=document.getElementById('freeSlotBtn');
+    if(freeBtn) freeBtn.addEventListener('click', ()=>{
+      const ds=document.getElementById('freeSlotDate')?.value || todayStr();
+      const free=freeSlotsForDate(ds);
+      const box=document.getElementById('freeSlotResult');
+      if(!box) return;
+      if(!free.length) box.innerHTML='<span style="color:var(--muted)">No free 30-min slots between 8:00 and 18:00 (or day is fully busy).</span>';
+      else box.innerHTML='<b>Free on '+ds+':</b><br>'+free.map(s=>'• '+s).join('<br>');
+    });
     const icsIn=document.getElementById('icsImportInput');
     if(icsIn) icsIn.addEventListener('change', ()=>{ const f=icsIn.files&&icsIn.files[0]; if(f) importICSFile(f); icsIn.value=''; });
     main.querySelectorAll('[data-day]').forEach(el=>el.addEventListener('click', ()=>{ state.selectedDay=el.dataset.day; persistRender(); }));
