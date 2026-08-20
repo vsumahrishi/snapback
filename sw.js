@@ -1,6 +1,6 @@
 // SnapBack service worker — caches the app shell so it works offline and can be installed.
 // Bump CACHE_NAME whenever index.html changes so returning users get the update.
-const CACHE_NAME = 'snapback-cache-v19';
+const CACHE_NAME = 'snapback-cache-v20';
 
 const APP_SHELL = [
   './',
