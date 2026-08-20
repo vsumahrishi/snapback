@@ -1753,6 +1753,74 @@ function findScheduleConflicts({day, dateStr, start, end, ignoreId}){
   }
   return hits;
 }
+
+function openConflictQueue(items){
+  // items: [{entry, conflicts:[{title,start,end,kind,id?}]}]
+  state.conflictQueue = items.filter(x=>x.conflicts && x.conflicts.length);
+  state.conflictPass = items.filter(x=>!x.conflicts || !x.conflicts.length).map(x=>x.entry);
+  state.conflictIdx = 0;
+  if(!state.conflictQueue.length){
+    state.conflictPass.forEach(e=>state.classes.push(e));
+    if(state.conflictPass.length) pushUndo({type:'bulk-add-classes', items:[...state.conflictPass], label:state.conflictPass.length+' classes added — Undo'});
+    state.conflictPass=[];
+    persistRender();
+    return;
+  }
+  state.conflictModalOpen = true;
+  persistRender();
+}
+function currentConflict(){
+  const q=state.conflictQueue||[];
+  return q[state.conflictIdx]||null;
+}
+function resolveConflict(action){
+  const cur=currentConflict();
+  if(!cur) return;
+  if(action==='add'){
+    state.conflictPass.push(cur.entry);
+  } else if(action==='replace'){
+    // remove overlapping classes on same day
+    const day=cur.entry.day;
+    const s=toMinutes(cur.entry.start), e=toMinutes(cur.entry.end||cur.entry.start);
+    const endM=(e==null||e<=s)?s+60:e;
+    state.classes = state.classes.filter(c=>{
+      if(c.scope==='session') return true;
+      if(Number(c.day)!==Number(day)) return true;
+      const cs=toMinutes(c.start), ce=toMinutes(c.end||c.start);
+      if(cs==null) return true;
+      const cEnd=(ce==null||ce<=cs)?cs+60:ce;
+      return !rangesOverlap(s,endM,cs,cEnd);
+    });
+    state.conflictPass.push(cur.entry);
+  } else if(action==='skip'){
+    // do not add
+  } else if(action==='edit'){
+    const ns=document.getElementById('conflictNewStart')?.value;
+    const ne=document.getElementById('conflictNewEnd')?.value;
+    if(ns) cur.entry.start=ns;
+    if(ne) cur.entry.end=ne;
+    const again=findScheduleConflicts({day:cur.entry.day, start:cur.entry.start, end:cur.entry.end});
+    if(again.length){
+      cur.conflicts=again;
+      persistRender();
+      return; // stay on same item
+    }
+    state.conflictPass.push(cur.entry);
+  }
+  state.conflictIdx++;
+  if(state.conflictIdx >= (state.conflictQueue||[]).length){
+    state.conflictQueue.forEach(()=>{});
+    const added=state.conflictPass||[];
+    added.forEach(e=>state.classes.push(e));
+    if(added.length) pushUndo({type:'bulk-add-classes', items:[...added], label:added.length+' classes saved — Undo'});
+    state.conflictQueue=[];
+    state.conflictPass=[];
+    state.conflictIdx=0;
+    state.conflictModalOpen=false;
+  }
+  persistRender();
+}
+
 function warnIfConflicts(opts){
   const hits=findScheduleConflicts(opts);
   if(!hits.length) return true;
@@ -1806,10 +1874,16 @@ function addClass(){
   } else {
     entry.day=Number(document.getElementById('classDay')?.value || 0);
   }
-  const ok = entry.scope==='session'
-    ? warnIfConflicts({dateStr:entry.date, start, end})
-    : warnIfConflicts({day:entry.day, start, end});
-  if(!ok) return;
+  const hits = entry.scope==='session'
+    ? findScheduleConflicts({dateStr:entry.date, start, end})
+    : findScheduleConflicts({day:entry.day, start, end});
+  if(hits.length){
+    openConflictQueue([{entry, conflicts:hits}]);
+    ['classTitle','classRoom','classMeetingUrl','classTextbook'].forEach(id=>{
+      const el=document.getElementById(id); if(el) el.value='';
+    });
+    return;
+  }
   state.classes.push(entry);
   pushUndo({type:'add-class', id:entry.id, label:'Class added — Undo'});
   ['classTitle','classRoom','classMeetingUrl','classTextbook'].forEach(id=>{
@@ -2283,8 +2357,8 @@ const NAV=[
   {section:'Plan', items:[
     {id:'today', label:'Today', ico:'&#9737;'},
     {id:'tasks', label:'Tasks', ico:'&#9776;'},
-    {id:'calendar', label:'Calendar', ico:'&#128197;'},
-    {id:'semester', label:'Semester Calendar', ico:'&#127891;'},
+    {id:'calendar', label:'Your Schedule', ico:'&#128197;'},
+    {id:'semester', label:'Calendar', ico:'&#127891;'},
     {id:'projects', label:'Projects', ico:'&#128218;'},
     {id:'money', label:'Money', ico:'&#128176;'},
     {id:'habits', label:'Healthy Habits', ico:'&#127807;'},
@@ -2442,6 +2516,42 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+  // Conflict resolver (one clash at a time)
+  if(state.conflictModalOpen && currentConflict()){
+    const cur=currentConflict();
+    const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const total=(state.conflictQueue||[]).length;
+    const n=(state.conflictIdx||0)+1;
+    const e=cur.entry;
+    root.innerHTML=`<div class="overlay" id="conflictOverlay">
+      <div class="quotecard" style="max-width:420px;text-align:left">
+        <div class="qeyebrow">Scheduling conflict ${n} of ${total}</div>
+        <div style="font-weight:700;margin-bottom:8px">New: ${escapeHtml(e.title)}</div>
+        <div style="font-size:.9rem;color:var(--muted);margin-bottom:12px">${dayNames[e.day]||''} ${formatTime12(e.start)}–${formatTime12(e.end)}${e.room?' · '+escapeHtml(e.room):''}</div>
+        <div style="font-size:.85rem;font-weight:700;margin-bottom:6px">Clashes with:</div>
+        ${cur.conflicts.map(c=>`<div class="deadline-row" style="padding:6px 0">• ${escapeHtml(c.title)} (${c.start}${c.end?'–'+c.end:''})</div>`).join('')}
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
+          <div style="font-size:.8rem;color:var(--muted);margin-bottom:6px">Change new time, then Apply edit</div>
+          <div class="row">
+            <div class="field"><label>Start</label><input type="time" id="conflictNewStart" value="${e.start}"></div>
+            <div class="field"><label>End</label><input type="time" id="conflictNewEnd" value="${e.end||''}"></div>
+          </div>
+        </div>
+        <div class="qactions" style="margin-top:14px;flex-wrap:wrap;gap:8px">
+          <button class="btn sm" id="conflictEdit">Apply new time</button>
+          <button class="btn ghost sm" id="conflictReplace">Replace existing</button>
+          <button class="btn ghost sm" id="conflictAdd">Keep both</button>
+          <button class="btn danger sm" id="conflictSkip">Skip new</button>
+        </div>
+      </div>
+    </div>`;
+    document.getElementById('conflictEdit').onclick=()=>resolveConflict('edit');
+    document.getElementById('conflictReplace').onclick=()=>resolveConflict('replace');
+    document.getElementById('conflictAdd').onclick=()=>resolveConflict('add');
+    document.getElementById('conflictSkip').onclick=()=>resolveConflict('skip');
+    return;
+  }
+
   // In-app reminder banner
   if(state.reminderModalOpen && state.reminderBanner){
     root.innerHTML=`<div class="overlay" id="reminderOverlay">
@@ -3214,7 +3324,7 @@ function viewCalendar(){
   <div class="pagehead">
     <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Week &amp; month at a glance</div>
-    <h1>Calendar</h1>
+    <h1>Your Schedule</h1>
     <p>Classes, deadlines, study blocks, and your non-negotiable — color-coded so nothing hides. Export downloads a standard .ics file you can import into Google Calendar, Apple Calendar, or Outlook — no sign-in or account linking needed.</p>
   </div>
   <div class="card">
@@ -3253,7 +3363,7 @@ function viewCalendar(){
     <h3>Import from Google / Apple / Outlook</h3>
     <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">
       Export a calendar file (<b>.ics</b>) from Google Calendar, Apple Calendar, or Outlook, then choose it here. Weekly repeating events become semester classes; one-off events become appointments on this calendar.<br><br>
-      <b>Notion:</b> Notion doesn’t export .ics. Copy the timetable text and paste it under <b>Semester Calendar → Paste your timetable</b>.
+      <b>Notion:</b> Notion doesn’t export .ics. Copy the timetable text and paste it under <b>Calendar → Paste your timetable</b>.
     </p>
     <input type="file" id="icsImportInput" accept=".ics,text/calendar" style="margin-top:8px">
     <p style="font-size:.78rem;color:var(--muted);margin-top:8px">How to get a .ics file:<br>
@@ -3983,9 +4093,9 @@ function viewSemester(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Your term at a glance</div>
-    <h1>Semester Calendar</h1>
-    <p>This is your master class schedule. Everything here automatically appears on the main Calendar. You can also link textbooks to each class.</p>
+    <div class="eyebrow">Your class timetable</div>
+    <h1>Calendar</h1>
+    <p>This is your master class schedule. Everything here automatically appears on Your Schedule. You can also link textbooks to each class.</p>
   </div>
 
   <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
@@ -4070,7 +4180,7 @@ function viewProjects(){
 
   ${projects.length === 0 ? `
     <div class="card">
-      <p style="color:var(--muted)">No classes yet. Go to <b>Semester Calendar</b> and add your classes first. They will automatically appear here as projects.</p>
+      <p style="color:var(--muted)">No classes yet. Go to <b>Calendar</b> and add your classes first. They will automatically appear here as projects.</p>
     </div>` : 
     projects.map(p => `
       <div class="card">
@@ -4651,10 +4761,10 @@ function viewHelp(){
       1. On <b>Calendar</b> or a task, use <b>Export</b> / 📅 to download an <b>.ics</b> file.<br>
       2. Open that file with <b>Google Calendar</b> (Android) or <b>Apple Calendar</b> (iPhone).<br>
       3. Your watch already syncs with that phone calendar — events appear on the watch after a few minutes.<br>
-      Same idea for class times from <b>Semester Calendar</b>.</p>
+      Same idea for class times from <b>Calendar</b>.</p>
     </details>
     <details class="faqitem"><summary>Add my whole weekly timetable at once</summary>
-      <p>Open <b>Semester Calendar</b> → use <b>Paste your timetable</b>. Type or paste lines like:<br>
+      <p>Open <b>Calendar</b> → use <b>Paste your timetable</b>. Type or paste lines like:<br>
       <i>Bio on Mondays at 8:30 room 345, Chemistry at 9:30 same day, Gym Mon/Wed/Fri 4:30</i><br>
       Review the preview → confirm if classes repeat weekly → save.</p>
     </details>
@@ -5126,26 +5236,14 @@ function wireView(){
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
         </div>`;
       document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
-        const clash=[];
+        const queue=[];
         parsed.forEach(p=>{
-          findScheduleConflicts({day:p.day, start:p.start, end:p.end}).forEach(h=>{
-            clash.push(p.title+' vs '+h.title+' ('+['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][p.day]+' '+p.start+')');
-          });
+          const entry={id:uid(), title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:''};
+          const conflicts=findScheduleConflicts({day:p.day, start:p.start, end:p.end});
+          queue.push({entry, conflicts});
         });
-        if(clash.length){
-          const uniq=[...new Set(clash)].slice(0,12);
-          if(!confirm('Some slots overlap existing classes:\n\n'+uniq.join('\n')+(clash.length>12?'\n…':'')+'\n\nImport anyway?')) return;
-        }
-        const added=[];
-        parsed.forEach(p=>{
-          const id=uid();
-          const item={id, title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:''};
-          state.classes.push(item);
-          added.push(item);
-        });
-        if(added.length) pushUndo({type:'bulk-add-classes', items:added, label:added.length+' classes imported — Undo'});
         document.getElementById('ttPaste').value='';
-        persistRender();
+        openConflictQueue(queue);
       });
       document.getElementById('ttCancelBtn').addEventListener('click', ()=>{ box.innerHTML=''; });
     });
@@ -5191,26 +5289,14 @@ function wireView(){
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
         </div>`;
       document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
-        const clash=[];
+        const queue=[];
         parsed.forEach(p=>{
-          findScheduleConflicts({day:p.day, start:p.start, end:p.end}).forEach(h=>{
-            clash.push(p.title+' vs '+h.title+' ('+['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][p.day]+' '+p.start+')');
-          });
+          const entry={id:uid(), title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:''};
+          const conflicts=findScheduleConflicts({day:p.day, start:p.start, end:p.end});
+          queue.push({entry, conflicts});
         });
-        if(clash.length){
-          const uniq=[...new Set(clash)].slice(0,12);
-          if(!confirm('Some slots overlap existing classes:\n\n'+uniq.join('\n')+(clash.length>12?'\n…':'')+'\n\nImport anyway?')) return;
-        }
-        const added=[];
-        parsed.forEach(p=>{
-          const id=uid();
-          const item={id, title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:''};
-          state.classes.push(item);
-          added.push(item);
-        });
-        if(added.length) pushUndo({type:'bulk-add-classes', items:added, label:added.length+' classes imported — Undo'});
         document.getElementById('ttPaste').value='';
-        persistRender();
+        openConflictQueue(queue);
       });
       document.getElementById('ttCancelBtn').addEventListener('click', ()=>{ box.innerHTML=''; });
     });
@@ -5440,6 +5526,10 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.jigPromptOpen===undefined) state.jigPromptOpen=false;
     if(state.undoStack===undefined) state.undoStack=[];
     if(state.undoBanner===undefined) state.undoBanner=null;
+    if(state.conflictModalOpen===undefined) state.conflictModalOpen=false;
+    if(state.conflictQueue===undefined) state.conflictQueue=[];
+    if(state.conflictPass===undefined) state.conflictPass=[];
+    if(state.conflictIdx===undefined) state.conflictIdx=0;
     if(state.settings.celebrateOnComplete===undefined) state.settings.celebrateOnComplete=true;
     if(state.settings.celebrateSound===undefined) state.settings.celebrateSound=true;
     if(!Array.isArray(state.whenThen)) state.whenThen=[];
