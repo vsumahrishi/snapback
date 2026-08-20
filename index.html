@@ -290,6 +290,9 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 .switch input:checked + .slidepill{background:var(--pine)}
 .switch input:checked + .slidepill:before{transform:translateX(18px)}
 .savedmsg{font-size:.77rem;color:var(--pine);font-weight:600;height:16px}
+.undo-banner{position:sticky;top:0;z-index:50;background:var(--pine);color:#fff;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-radius:0 0 12px 12px;margin:0 0 12px}
+.undo-banner button{background:#fff;color:var(--pine);border:none;border-radius:8px;padding:8px 12px;font-weight:700;cursor:pointer}
+
 .confetti-piece{position:fixed;width:10px;height:10px;top:-12px;z-index:100;pointer-events:none;border-radius:2px;animation:confetti-fall linear forwards}
 @keyframes confetti-fall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(100vh) rotate(720deg);opacity:0}}
 
@@ -1584,6 +1587,8 @@ function toggleDone(id){
   persistRender();
 }
 function deleteTask(id){
+  const item=state.tasks.find(t=>t.id===id);
+  if(item) pushUndo({type:'delete-task', item:JSON.parse(JSON.stringify(item)), label:'Task deleted — Undo'});
   state.tasks=state.tasks.filter(t=>t.id!==id);
   if(state.timer.activeTaskId===id) state.timer.activeTaskId=null;
   persistRender();
@@ -1705,6 +1710,67 @@ function clearNonNegotiable(){ delete state.nonNegotiable[todayStr()]; persistRe
 /* ============================================================
    Classes / commitments
    ============================================================ */
+
+function toMinutes(hhmm){
+  if(!hhmm||!/^\d{1,2}:\d{2}$/.test(hhmm)) return null;
+  const [h,m]=hhmm.split(':').map(Number);
+  return h*60+m;
+}
+function rangesOverlap(a0,a1,b0,b1){
+  return a0 < b1 && b0 < a1;
+}
+/** conflicts for a weekly day index OR a concrete dateStr */
+function findScheduleConflicts({day, dateStr, start, end, ignoreId}){
+  const s=toMinutes(start), e=toMinutes(end||start);
+  if(s==null) return [];
+  const endM = e==null ? s+60 : (e<=s ? e+24*60 : e);
+  const hits=[];
+  (state.classes||[]).forEach(c=>{
+    if(ignoreId!=null && c.id===ignoreId) return;
+    let applies=false;
+    if(dateStr){
+      if(c.scope==='session') applies = c.date===dateStr;
+      else applies = c.day===mondayIndex(new Date(dateStr+'T12:00:00'));
+    } else if(day!=null){
+      applies = (c.scope!=='session' && c.day===day);
+    }
+    if(!applies) return;
+    const cs=toMinutes(c.start), ce=toMinutes(c.end||c.start);
+    if(cs==null) return;
+    const cEnd = ce==null ? cs+60 : (ce<=cs ? ce+24*60 : ce);
+    if(rangesOverlap(s,endM,cs,cEnd)) hits.push({kind:'class', title:c.title, start:c.start, end:c.end||''});
+  });
+  if(dateStr){
+    (state.studyBlocks||[]).forEach(b=>{
+      if(ignoreId!=null && b.id===ignoreId) return;
+      if(b.date!==dateStr) return;
+      const bs=toMinutes(b.start), be=toMinutes(b.end||b.start);
+      if(bs==null) return;
+      const bEnd = be==null ? bs+60 : (be<=bs ? be+24*60 : be);
+      if(rangesOverlap(s,endM,bs,bEnd)) hits.push({kind:'block', title:b.label, start:b.start, end:b.end||''});
+    });
+  }
+  return hits;
+}
+function pushUndo(entry){
+  if(!state.undoStack) state.undoStack=[];
+  state.undoStack.unshift({...entry, ts:Date.now()});
+  state.undoStack = state.undoStack.slice(0,10);
+  state.undoBanner = entry.label || 'Change saved — Undo available';
+}
+function performUndo(){
+  const u=(state.undoStack||[]).shift();
+  state.undoBanner=null;
+  if(!u) return;
+  if(u.type==='delete-class' && u.item) state.classes.push(u.item);
+  else if(u.type==='delete-task' && u.item) state.tasks.unshift(u.item);
+  else if(u.type==='delete-block' && u.item) state.studyBlocks.push(u.item);
+  else if(u.type==='delete-reminder' && u.item) state.customReminders.push(u.item);
+  else if(u.type==='add-class' && u.id!=null) state.classes=state.classes.filter(c=>c.id!==u.id);
+  else if(u.type==='add-block' && u.id!=null) state.studyBlocks=state.studyBlocks.filter(b=>b.id!==u.id);
+  persistRender();
+}
+
 function addClass(){
   const title=document.getElementById('classTitle')?.value.trim();
   if(!title) return;
@@ -1724,13 +1790,26 @@ function addClass(){
   } else {
     entry.day=Number(document.getElementById('classDay')?.value || 0);
   }
+  const conflicts = entry.scope==='session'
+    ? findScheduleConflicts({dateStr:entry.date, start, end})
+    : findScheduleConflicts({day:entry.day, start, end});
+  if(conflicts.length){
+    const msg = 'This overlaps:\n'+conflicts.map(c=>`• ${c.title} (${c.start}${c.end?'–'+c.end:''})`).join('\n')+'\n\nAdd anyway?';
+    if(!confirm(msg)) return;
+  }
   state.classes.push(entry);
+  pushUndo({type:'add-class', id:entry.id, label:'Class added — Undo'});
   ['classTitle','classRoom','classMeetingUrl','classTextbook'].forEach(id=>{
     const el=document.getElementById(id); if(el) el.value='';
   });
   persistRender();
 }
-function deleteClass(id){ state.classes=state.classes.filter(c=>c.id!==id); persistRender(); }
+function deleteClass(id){
+  const item=state.classes.find(c=>c.id===id);
+  if(item) pushUndo({type:'delete-class', item:JSON.parse(JSON.stringify(item)), label:'Class removed — Undo'});
+  state.classes=state.classes.filter(c=>c.id!==id);
+  persistRender();
+}
 
 /* ============================================================
    Time blocking
@@ -1743,11 +1822,23 @@ function addStudyBlock(){
   const end=document.getElementById('tbEnd').value;
   const meetingUrl=document.getElementById('tbMeetingUrl').value.trim();
   if(!start||!end) return;
-  state.studyBlocks.push({id:uid(),label,date,start,end,meetingUrl});
+  const conflicts=findScheduleConflicts({dateStr:date, start, end});
+  if(conflicts.length){
+    const msg='This overlaps:\n'+conflicts.map(c=>`• ${c.title} (${c.start}${c.end?'–'+c.end:''})`).join('\n')+'\n\nAdd anyway?';
+    if(!confirm(msg)) return;
+  }
+  const id=uid();
+  state.studyBlocks.push({id,label,date,start,end,meetingUrl});
+  pushUndo({type:'add-block', id, label:'Appointment added — Undo'});
   document.getElementById('tbLabel').value=''; document.getElementById('tbMeetingUrl').value='';
   persistRender();
 }
-function deleteStudyBlock(id){ state.studyBlocks=state.studyBlocks.filter(b=>b.id!==id); persistRender(); }
+function deleteStudyBlock(id){
+  const item=state.studyBlocks.find(b=>b.id===id);
+  if(item) pushUndo({type:'delete-block', item:JSON.parse(JSON.stringify(item)), label:'Appointment removed — Undo'});
+  state.studyBlocks=state.studyBlocks.filter(b=>b.id!==id);
+  persistRender();
+}
 
 /* ============================================================
    1-3-5 rule
@@ -2445,7 +2536,19 @@ function renderModal(){
   document.getElementById('quoteOverlay').addEventListener('click',(e)=>{ if(e.target.id==='quoteOverlay') closeQuote(); });
 }
 function persistRender(){ saveState(); render(); }
-function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications(); }
+function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
+  const main=document.getElementById('main');
+  if(main && state.undoBanner){
+    const bar=document.createElement('div');
+    bar.className='undo-banner';
+    bar.innerHTML='<span>'+escapeHtml(state.undoBanner)+'</span><button type="button" id="undoBtn">Undo</button>';
+    main.insertBefore(bar, main.firstChild);
+    document.getElementById('undoBtn').addEventListener('click', performUndo);
+    // auto-clear banner after 12s (undo still in stack briefly)
+    clearTimeout(window._undoBannerTimer);
+    window._undoBannerTimer=setTimeout(()=>{ state.undoBanner=null; const b=document.querySelector('.undo-banner'); if(b) b.remove(); }, 12000);
+  }
+}
 if(typeof window!=='undefined' && !window._snapbackNotifyTimer){
   window._snapbackNotifyTimer = setInterval(()=>{ try{ checkNotifications(); }catch(e){} }, 30000);
 }
@@ -5294,6 +5397,8 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.biteGuide===undefined) state.biteGuide=null;
     if(state.pendingStrategyTaskId===undefined) state.pendingStrategyTaskId=null;
     if(state.jigPromptOpen===undefined) state.jigPromptOpen=false;
+    if(state.undoStack===undefined) state.undoStack=[];
+    if(state.undoBanner===undefined) state.undoBanner=null;
     if(state.settings.celebrateOnComplete===undefined) state.settings.celebrateOnComplete=true;
     if(state.settings.celebrateSound===undefined) state.settings.celebrateSound=true;
     if(!Array.isArray(state.whenThen)) state.whenThen=[];
