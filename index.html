@@ -2948,6 +2948,25 @@ function importICSFile(file){
 }
 
 
+function formatTime12(hhmm){
+  if(!hhmm||!/^\d{2}:\d{2}$/.test(hhmm)) return hhmm||'';
+  let [h,m]=hhmm.split(':').map(Number);
+  const ap=h>=12?'PM':'AM';
+  h=h%12; if(h===0) h=12;
+  return h+':'+String(m).padStart(2,'0')+' '+ap;
+}
+function applySchoolHoursToResults(arr){
+  // Safety net: any start/end hour 1–6 → +12h (student afternoon)
+  return (arr||[]).map(p=>{
+    const fix=t=>{
+      if(!t||!/^\d{1,2}:\d{2}$/.test(t)) return t;
+      let [h,m]=t.split(':').map(Number);
+      if(h>=1&&h<=6) h+=12;
+      return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+    };
+    return {...p, start:fix(p.start), end:fix(p.end)};
+  });
+}
 function freeSlotsForDate(dateStr){
   // Working window 8:00–18:00, 30-min steps; free = not overlapping any class/task/block
   const dayStart = 8*60, dayEnd = 18*60, step = 30;
@@ -3556,8 +3575,11 @@ function parseExcelGridTimetable(raw){
 
   function splitRow(line){
     if(line.includes('\t')) return line.split('\t').map(c=>c.trim());
-    // multiple spaces (Excel sometimes pastes that way)
-    return line.trim().split(/\s{2,}|\t/).map(c=>c.trim()).filter((c,i,a)=>c||i===0);
+    // 2+ spaces or pipes
+    if(/\s{2,}/.test(line) || line.includes('|'))
+      return line.trim().split(/\s{2,}|\t|\|/).map(c=>c.trim());
+    // single spaces: keep as one row of tokens (day + cells)
+    return line.trim().split(/\s+/).map(c=>c.trim()).filter(Boolean);
   }
 
   const rows = lines.map(splitRow).filter(r=>r.some(c=>c));
@@ -3725,9 +3747,9 @@ function parseTimetableText(raw){
   const original = String(raw||'');
   // Structured parsers first (Notion / Excel) — do NOT mangle room numbers
   const notion = parseNotionListTimetable(original);
-  if(notion && notion.length) return notion;
+  if(notion && notion.length) return applySchoolHoursToResults(notion);
   const grid = parseExcelGridTimetable(original);
-  if(grid && grid.length) return grid;
+  if(grid && grid.length) return applySchoolHoursToResults(grid);
 
   // Free-text path only: light OCR time fixes (830-1240), never lone 3-digit room nums
   let src = original
@@ -4992,7 +5014,7 @@ function wireView(){
       const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
       box.innerHTML=`
         <div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} class slot(s). Save as weekly recurring?</div>
-        ${parsed.map((p,i)=>`<div class="deadline-row"><span style="flex:1"><b>${escapeHtml(p.title)}</b> · ${dayNames[p.day]} ${p.start}–${p.end}${p.room?' · room '+escapeHtml(p.room):''}</span></div>`).join('')}
+        ${parsed.map((p,i)=>`<div class="deadline-row"><span style="flex:1"><b>${escapeHtml(p.title)}</b> · ${dayNames[p.day]} ${formatTime12(p.start)}–${formatTime12(p.end)}${p.room?' · '+escapeHtml(p.room):''}</span></div>`).join('')}
         <div class="row" style="margin-top:10px">
           <button class="btn" id="ttConfirmBtn">Yes — save as weekly</button>
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
@@ -5046,7 +5068,7 @@ function wireView(){
       const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
       box.innerHTML=`
         <div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} class slot(s). Save as weekly recurring?</div>
-        ${parsed.map((p,i)=>`<div class="deadline-row"><span style="flex:1"><b>${escapeHtml(p.title)}</b> · ${dayNames[p.day]} ${p.start}–${p.end}${p.room?' · room '+escapeHtml(p.room):''}</span></div>`).join('')}
+        ${parsed.map((p,i)=>`<div class="deadline-row"><span style="flex:1"><b>${escapeHtml(p.title)}</b> · ${dayNames[p.day]} ${formatTime12(p.start)}–${formatTime12(p.end)}${p.room?' · '+escapeHtml(p.room):''}</span></div>`).join('')}
         <div class="row" style="margin-top:10px">
           <button class="btn" id="ttConfirmBtn">Yes — save as weekly</button>
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
