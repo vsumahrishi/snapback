@@ -1451,6 +1451,7 @@ function addTask(){
   const id=uid();
   state.tasks.unshift({id,title,notes:'',date,time,priority,urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{}});
   state.pendingStrategyTaskId = id;
+  pushUndo({type:'add-task', id, label:'Task added — Undo'});
   document.getElementById('newTitle').value='';
   persistRender();
 }
@@ -1723,34 +1724,42 @@ function rangesOverlap(a0,a1,b0,b1){
 function findScheduleConflicts({day, dateStr, start, end, ignoreId}){
   const s=toMinutes(start), e=toMinutes(end||start);
   if(s==null) return [];
-  const endM = e==null ? s+60 : (e<=s ? e+24*60 : e);
+  let endM = (e==null || e<=s) ? s+60 : e;
   const hits=[];
+  const targetDay = day!=null ? Number(day) : (dateStr ? mondayIndex(new Date(dateStr+'T12:00:00')) : null);
   (state.classes||[]).forEach(c=>{
-    if(ignoreId!=null && c.id===ignoreId) return;
+    if(ignoreId!=null && String(c.id)===String(ignoreId)) return;
     let applies=false;
-    if(dateStr){
-      if(c.scope==='session') applies = c.date===dateStr;
-      else applies = c.day===mondayIndex(new Date(dateStr+'T12:00:00'));
-    } else if(day!=null){
-      applies = (c.scope!=='session' && c.day===day);
+    if(c.scope==='session'){
+      applies = dateStr && c.date===dateStr;
+    } else {
+      applies = targetDay!=null && Number(c.day)===targetDay;
     }
     if(!applies) return;
     const cs=toMinutes(c.start), ce=toMinutes(c.end||c.start);
     if(cs==null) return;
-    const cEnd = ce==null ? cs+60 : (ce<=cs ? ce+24*60 : ce);
+    const cEnd = (ce==null || ce<=cs) ? cs+60 : ce;
     if(rangesOverlap(s,endM,cs,cEnd)) hits.push({kind:'class', title:c.title, start:c.start, end:c.end||''});
   });
   if(dateStr){
     (state.studyBlocks||[]).forEach(b=>{
-      if(ignoreId!=null && b.id===ignoreId) return;
+      if(ignoreId!=null && String(b.id)===String(ignoreId)) return;
       if(b.date!==dateStr) return;
       const bs=toMinutes(b.start), be=toMinutes(b.end||b.start);
       if(bs==null) return;
-      const bEnd = be==null ? bs+60 : (be<=bs ? be+24*60 : be);
+      const bEnd = (be==null || be<=bs) ? bs+60 : be;
       if(rangesOverlap(s,endM,bs,bEnd)) hits.push({kind:'block', title:b.label, start:b.start, end:b.end||''});
     });
   }
   return hits;
+}
+function warnIfConflicts(opts){
+  const hits=findScheduleConflicts(opts);
+  if(!hits.length) return true;
+  const msg='This time overlaps something already scheduled:\n\n'+
+    hits.map(c=>'• '+c.title+' ('+c.start+(c.end?'–'+c.end:'')+')').join('\n')+
+    '\n\nAdd anyway?';
+  return confirm(msg);
 }
 function pushUndo(entry){
   if(!state.undoStack) state.undoStack=[];
@@ -1766,8 +1775,15 @@ function performUndo(){
   else if(u.type==='delete-task' && u.item) state.tasks.unshift(u.item);
   else if(u.type==='delete-block' && u.item) state.studyBlocks.push(u.item);
   else if(u.type==='delete-reminder' && u.item) state.customReminders.push(u.item);
+  else if(u.type==='delete-habit' && u.item) state.habits.push(u.item);
+  else if(u.type==='delete-money' && u.item) state.money.push(u.item);
   else if(u.type==='add-class' && u.id!=null) state.classes=state.classes.filter(c=>c.id!==u.id);
   else if(u.type==='add-block' && u.id!=null) state.studyBlocks=state.studyBlocks.filter(b=>b.id!==u.id);
+  else if(u.type==='add-task' && u.id!=null) state.tasks=state.tasks.filter(t=>t.id!==u.id);
+  else if(u.type==='bulk-add-classes' && u.items){
+    const ids=new Set(u.items.map(i=>i.id));
+    state.classes=state.classes.filter(c=>!ids.has(c.id));
+  }
   persistRender();
 }
 
@@ -1790,13 +1806,10 @@ function addClass(){
   } else {
     entry.day=Number(document.getElementById('classDay')?.value || 0);
   }
-  const conflicts = entry.scope==='session'
-    ? findScheduleConflicts({dateStr:entry.date, start, end})
-    : findScheduleConflicts({day:entry.day, start, end});
-  if(conflicts.length){
-    const msg = 'This overlaps:\n'+conflicts.map(c=>`• ${c.title} (${c.start}${c.end?'–'+c.end:''})`).join('\n')+'\n\nAdd anyway?';
-    if(!confirm(msg)) return;
-  }
+  const ok = entry.scope==='session'
+    ? warnIfConflicts({dateStr:entry.date, start, end})
+    : warnIfConflicts({day:entry.day, start, end});
+  if(!ok) return;
   state.classes.push(entry);
   pushUndo({type:'add-class', id:entry.id, label:'Class added — Undo'});
   ['classTitle','classRoom','classMeetingUrl','classTextbook'].forEach(id=>{
@@ -1822,11 +1835,7 @@ function addStudyBlock(){
   const end=document.getElementById('tbEnd').value;
   const meetingUrl=document.getElementById('tbMeetingUrl').value.trim();
   if(!start||!end) return;
-  const conflicts=findScheduleConflicts({dateStr:date, start, end});
-  if(conflicts.length){
-    const msg='This overlaps:\n'+conflicts.map(c=>`• ${c.title} (${c.start}${c.end?'–'+c.end:''})`).join('\n')+'\n\nAdd anyway?';
-    if(!confirm(msg)) return;
-  }
+  if(!warnIfConflicts({dateStr:date, start, end})) return;
   const id=uid();
   state.studyBlocks.push({id,label,date,start,end,meetingUrl});
   pushUndo({type:'add-block', id, label:'Appointment added — Undo'});
@@ -2021,7 +2030,12 @@ function addCustomReminder(){
   persistRender();
 }
 function toggleReminderDone(id){ const r=state.customReminders.find(x=>x.id===id); if(!r) return; r.done=!r.done; persistRender(); }
-function deleteReminder(id){ state.customReminders=state.customReminders.filter(r=>r.id!==id); persistRender(); }
+function deleteReminder(id){
+  const item=state.customReminders.find(x=>x.id===id);
+  if(item) pushUndo({type:'delete-reminder', item:JSON.parse(JSON.stringify(item)), label:'Reminder removed — Undo'});
+  state.customReminders=state.customReminders.filter(x=>x.id!==id);
+  persistRender();
+}
 
 /* ============================================================
    Money
@@ -2036,7 +2050,12 @@ function addMoney(){
   document.getElementById('moneyTitle').value=''; document.getElementById('moneyAmt').value='';
   persistRender();
 }
-function deleteMoney(id){ state.money=state.money.filter(m=>m.id!==id); persistRender(); }
+function deleteMoney(id){
+  const item=state.money.find(x=>x.id===id);
+  if(item) pushUndo({type:'delete-money', item:JSON.parse(JSON.stringify(item)), label:'Money entry removed — Undo'});
+  state.money=state.money.filter(x=>x.id!==id);
+  persistRender();
+}
 
 /* ============================================================
    Body doubling — a structured ritual (declare a goal, work through
@@ -5107,13 +5126,24 @@ function wireView(){
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
         </div>`;
       document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
+        const clash=[];
         parsed.forEach(p=>{
-          state.classes.push({
-            id:uid(), title:p.title, day:p.day, start:p.start, end:p.end,
-            room:p.room||'', textbook:'', meetingUrl:'',
-            scope:'semester', semStart: todayStr(), semEnd:''
+          findScheduleConflicts({day:p.day, start:p.start, end:p.end}).forEach(h=>{
+            clash.push(p.title+' vs '+h.title+' ('+['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][p.day]+' '+p.start+')');
           });
         });
+        if(clash.length){
+          const uniq=[...new Set(clash)].slice(0,12);
+          if(!confirm('Some slots overlap existing classes:\n\n'+uniq.join('\n')+(clash.length>12?'\n…':'')+'\n\nImport anyway?')) return;
+        }
+        const added=[];
+        parsed.forEach(p=>{
+          const id=uid();
+          const item={id, title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:''};
+          state.classes.push(item);
+          added.push(item);
+        });
+        if(added.length) pushUndo({type:'bulk-add-classes', items:added, label:added.length+' classes imported — Undo'});
         document.getElementById('ttPaste').value='';
         persistRender();
       });
@@ -5161,13 +5191,24 @@ function wireView(){
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
         </div>`;
       document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
+        const clash=[];
         parsed.forEach(p=>{
-          state.classes.push({
-            id:uid(), title:p.title, day:p.day, start:p.start, end:p.end,
-            room:p.room||'', textbook:'', meetingUrl:'',
-            scope:'semester', semStart: todayStr(), semEnd:''
+          findScheduleConflicts({day:p.day, start:p.start, end:p.end}).forEach(h=>{
+            clash.push(p.title+' vs '+h.title+' ('+['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][p.day]+' '+p.start+')');
           });
         });
+        if(clash.length){
+          const uniq=[...new Set(clash)].slice(0,12);
+          if(!confirm('Some slots overlap existing classes:\n\n'+uniq.join('\n')+(clash.length>12?'\n…':'')+'\n\nImport anyway?')) return;
+        }
+        const added=[];
+        parsed.forEach(p=>{
+          const id=uid();
+          const item={id, title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:''};
+          state.classes.push(item);
+          added.push(item);
+        });
+        if(added.length) pushUndo({type:'bulk-add-classes', items:added, label:added.length+' classes imported — Undo'});
         document.getElementById('ttPaste').value='';
         persistRender();
       });
