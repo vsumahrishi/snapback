@@ -3534,8 +3534,9 @@ function parseTimeRangeToken(str){
   // 3:15 - 4:00 | 5:45-6:30 | 5:00 - 5:45 / 6:00 (take first range)
   const m = s.match(/(\d{1,2})[:.](\d{2})\s*[-–—to]+\s*(\d{1,2})[:.](\d{2})/);
   if(!m) return null;
+  function schoolH(h){ h=parseInt(h,10); if(h>=1&&h<=6) h+=12; return h; }
   const pad=(n)=>String(n).padStart(2,'0');
-  return {start: pad(m[1])+':'+m[2], end: pad(m[3])+':'+m[4]};
+  return {start: pad(schoolH(m[1]))+':'+m[2], end: pad(schoolH(m[3]))+':'+m[4]};
 }
 function dayNameToIndex(word){
   const k = String(word||'').toLowerCase().replace(/[^a-z]/g,'');
@@ -3625,10 +3626,14 @@ function parseExcelGridTimetable(raw){
 
 
 function parseNotionListTimetable(raw){
-  // Notion often pastes days poorly — force a line break before each day name
+  // Notion markdown: ## Mon, - [ ] 8:30: Title, *Room*
   let src = String(raw||'')
     .replace(/\u00a0/g, ' ')
-    .replace(/[☐☑□■●○•*_`]+/g, ' ');
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/^\s*[-*+]\s*\[[ xX]?\]\s*/gm, '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/\*+([^*]+)\*+/g, '$1')
+    .replace(/_([^_]+)_/g, '$1');
   src = src.replace(/\b(Mondays?|Mon|Tuesdays?|Tues|Tue|Wednesdays?|Wed|Thursdays?|Thurs|Thur|Thu|Fridays?|Fri|Saturdays?|Sat|Sundays?|Sun)\b/gi, '\n$1\n');
   const lines = src.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length);
   if(lines.length < 2) return null;
@@ -3651,17 +3656,32 @@ function parseNotionListTimetable(raw){
     if(k.startsWith('sun')) return 6;
     return -1;
   }
+  // 1:00–6:59 with no am/pm → PM (school afternoon)
+  function schoolTime(h, min, ap){
+    let hour = parseInt(h,10);
+    const mi = (min!=null && min!=='') ? parseInt(min,10) : 0;
+    const a = (ap||'').toLowerCase();
+    if(a==='pm' && hour<12) hour += 12;
+    else if(a==='am' && hour===12) hour = 0;
+    else if(!a && hour>=1 && hour<=6) hour += 12;
+    if(hour>23||mi>59) return null;
+    const pad=n=>String(n).padStart(2,'0');
+    return pad(hour)+':'+pad(mi);
+  }
   function parseLineTimes(line){
-    let m = line.match(/\b(\d{1,2}):(\d{2})\s*[-–—to]+\s*(\d{1,2}):(\d{2})\b/i);
+    let m = line.match(/\b(\d{1,2}):(\d{2})\s*(am|pm)?\s*[-–—to]+\s*(\d{1,2}):(\d{2})\s*(am|pm)?\b/i);
     if(m){
-      const pad=n=>String(parseInt(n,10)).padStart(2,'0');
-      return {start:pad(m[1])+':'+m[2], end:pad(m[3])+':'+m[4], index:m.index, length:m[0].length};
+      const start = schoolTime(m[1], m[2], m[3]);
+      const end = schoolTime(m[4], m[5], m[6]||m[3]);
+      if(start&&end) return {start, end, index:m.index, length:m[0].length};
     }
-    m = line.match(/\b(\d{1,2}):(\d{2})\b/);
+    m = line.match(/\b(\d{1,2}):(\d{2})\s*(am|pm)?\b/i);
     if(m){
-      const pad=n=>String(parseInt(n,10)).padStart(2,'0');
-      const h=parseInt(m[1],10);
-      return {start:pad(m[1])+':'+m[2], end:pad((h+1)%24)+':'+m[2], index:m.index, length:m[0].length};
+      const start = schoolTime(m[1], m[2], m[3]);
+      if(!start) return null;
+      const [hh,mm]=start.split(':').map(Number);
+      const pad=n=>String(n).padStart(2,'0');
+      return {start, end:pad((hh+1)%24)+':'+pad(mm), index:m.index, length:m[0].length};
     }
     return null;
   }
@@ -3678,7 +3698,6 @@ function parseNotionListTimetable(raw){
       if(dm){ currentDay = toDay(dm[1]); if(currentDay>=0) dayHits++; }
       else continue;
     } else if(dm && line.replace(dayRe,'').trim().length > 2){
-      // "Tue 2:00: Gym" on one line — switch day then parse rest
       currentDay = toDay(dm[1]);
       dayHits++;
     }
@@ -3686,11 +3705,12 @@ function parseNotionListTimetable(raw){
     if(tm){
       flush();
       let title = (line.slice(0, tm.index) + ' ' + line.slice(tm.index + tm.length))
-        .replace(dayRe,'').replace(/^[\s:\-–—]+|[\s:\-–—]+$/g,'').trim();
+        .replace(dayRe,'').replace(/\[\]/g,'').replace(/^[\s:\-–—]+|[\s:\-–—]+$/g,'').trim();
       if(!title) title = 'Class';
       pending = {title, day:currentDay, start:tm.start, end:tm.end, room:'', scope:'semester'};
       continue;
     }
+    // Room line: no HH:MM, not a day, not mostly digits
     if(pending && line.length < 80 && !/\d{1,2}:\d{2}/.test(line) && !dayRe.test(line)){
       pending.room = line;
       flush();
@@ -3702,26 +3722,22 @@ function parseNotionListTimetable(raw){
 }
 
 function parseTimetableText(raw){
-  raw = String(raw||'')
-    .replace(/[☐☑□■●○•*_`]+/g, ' ')
+  const original = String(raw||'');
+  // Structured parsers first (Notion / Excel) — do NOT mangle room numbers
+  const notion = parseNotionListTimetable(original);
+  if(notion && notion.length) return notion;
+  const grid = parseExcelGridTimetable(original);
+  if(grid && grid.length) return grid;
+
+  // Free-text path only: light OCR time fixes (830-1240), never lone 3-digit room nums
+  let src = original
+    .replace(/[☐☑□■●○•]+/g, ' ')
     .replace(/\u00a0/g, ' ');
-  // Only expand times that have NO colon yet (830-1240 → 8:30-12:40)
-  raw = raw.replace(/\b(\d{1,2})([0-5]\d)\s*[-–—to]+\s*(\d{1,2})([0-5]\d)\b/g, (m,h1,m1,h2,m2)=>{
+  src = src.replace(/\b(\d{1,2})([0-5]\d)\s*[-–—to]+\s*(\d{1,2})([0-5]\d)\b/g, (m,h1,m1,h2,m2)=>{
     if(parseInt(h1,10)>23||parseInt(h2,10)>23) return m;
     return h1+':'+m1+'-'+h2+':'+m2;
   });
-  raw = raw.replace(/(?<![0-9:])(\d{1,2})([0-5]\d)(?![0-9])/g, (m,h,min,offset,full)=>{
-    if(offset>0 && full[offset-1]===':') return m;
-    const hh=parseInt(h,10); if(hh>23) return m;
-    // avoid room numbers like 002 / 102 alone becoming times — only if looks like clock (8xx style with sensible hour)
-    if(hh===0 && min<10) return m;
-    return hh+':'+min;
-  });
-  // Prefer structured formats first
-  const notion = parseNotionListTimetable(raw);
-  if(notion && notion.length) return notion;
-  const grid = parseExcelGridTimetable(raw);
-  if(grid && grid.length) return grid;
+  raw = src;
 
   // Supports:
   // Bio Mon/Thur 8.00 to 8.30, Chem 9 to 10 on Tue/Fri, Math 11 to 12 on all days
