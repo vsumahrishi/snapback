@@ -3625,7 +3625,12 @@ function parseExcelGridTimetable(raw){
 
 
 function parseNotionListTimetable(raw){
-  const lines = String(raw||'').split(/\r?\n/).map(l=>l.replace(/[☐☑□■●○•*_`]/g,'').replace(/\u00a0/g,' ').trim()).filter(l=>l.length);
+  // Notion often pastes days poorly — force a line break before each day name
+  let src = String(raw||'')
+    .replace(/\u00a0/g, ' ')
+    .replace(/[☐☑□■●○•*_`]+/g, ' ');
+  src = src.replace(/\b(Mondays?|Mon|Tuesdays?|Tues|Tue|Wednesdays?|Wed|Thursdays?|Thurs|Thur|Thu|Fridays?|Fri|Saturdays?|Sat|Sundays?|Sun)\b/gi, '\n$1\n');
+  const lines = src.split(/\r?\n/).map(l=>l.trim()).filter(l=>l.length);
   if(lines.length < 2) return null;
 
   const dayRe = /^(monday|mon|tuesday|tues|tue|wednesday|wed|thursday|thurs|thur|thu|friday|fri|saturday|sat|sunday|sun)\b/i;
@@ -3635,7 +3640,6 @@ function parseNotionListTimetable(raw){
   let pending = null;
 
   function flush(){ if(pending){ results.push(pending); pending=null; } }
-
   function toDay(w){
     const k=String(w||'').toLowerCase();
     if(k.startsWith('mon')) return 0;
@@ -3647,9 +3651,7 @@ function parseNotionListTimetable(raw){
     if(k.startsWith('sun')) return 6;
     return -1;
   }
-
   function parseLineTimes(line){
-    // Prefer explicit colon times only
     let m = line.match(/\b(\d{1,2}):(\d{2})\s*[-–—to]+\s*(\d{1,2}):(\d{2})\b/i);
     if(m){
       const pad=n=>String(parseInt(n,10)).padStart(2,'0');
@@ -3659,36 +3661,36 @@ function parseNotionListTimetable(raw){
     if(m){
       const pad=n=>String(parseInt(n,10)).padStart(2,'0');
       const h=parseInt(m[1],10);
-      const start=pad(m[1])+':'+m[2];
-      const end=pad((h+1)%24)+':'+m[2];
-      return {start, end, index:m.index, length:m[0].length};
+      return {start:pad(m[1])+':'+m[2], end:pad((h+1)%24)+':'+m[2], index:m.index, length:m[0].length};
     }
     return null;
   }
 
   for(const line of lines){
     const dm = line.match(dayRe);
-    // Day header: line is mostly just the day name
-    if(dm && line.replace(dayRe,'').trim().length < 3){
+    if(dm && line.replace(dayRe,'').replace(/[^\w]/g,'').length < 2){
       flush();
       currentDay = toDay(dm[1]);
       if(currentDay>=0) dayHits++;
       continue;
     }
     if(currentDay < 0){
-      // allow first day embedded: "Mon 8:30 ..."
       if(dm){ currentDay = toDay(dm[1]); if(currentDay>=0) dayHits++; }
       else continue;
+    } else if(dm && line.replace(dayRe,'').trim().length > 2){
+      // "Tue 2:00: Gym" on one line — switch day then parse rest
+      currentDay = toDay(dm[1]);
+      dayHits++;
     }
     const tm = parseLineTimes(line);
     if(tm){
       flush();
-      let title = (line.slice(0, tm.index) + ' ' + line.slice(tm.index + tm.length)).replace(dayRe,'').replace(/^[\s:\-–—]+|[\s:\-–—]+$/g,'').trim();
+      let title = (line.slice(0, tm.index) + ' ' + line.slice(tm.index + tm.length))
+        .replace(dayRe,'').replace(/^[\s:\-–—]+|[\s:\-–—]+$/g,'').trim();
       if(!title) title = 'Class';
       pending = {title, day:currentDay, start:tm.start, end:tm.end, room:'', scope:'semester'};
       continue;
     }
-    // Room line (must not contain a clear HH:MM time)
     if(pending && line.length < 80 && !/\d{1,2}:\d{2}/.test(line) && !dayRe.test(line)){
       pending.room = line;
       flush();
