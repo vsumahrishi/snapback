@@ -2868,7 +2868,7 @@ function itemsForDate(dateStr){
     let show=false;
     if(c.scope==='session'){ show = c.date===dateStr; }
     else{ show = c.day===dow && (!c.semStart || dateStr>=c.semStart) && (!c.semEnd || dateStr<=c.semEnd); }
-    if(show) items.push({type:'class',color:'var(--blue)',time:c.start,label:c.title+(c.room?' · '+c.room:''),meetingUrl:c.meetingUrl});
+    if(show) items.push({type:'class',color:'var(--blue)',time:c.start,end:c.end||'',label:c.title+(c.room?' · '+c.room:''),meetingUrl:c.meetingUrl});
   });
   state.tasks.filter(t=>t.date===dateStr).forEach(t=>items.push({type:'task',color: t.priority==='high'?'var(--brick)':t.priority==='medium'?'var(--amber)':'var(--pine)',time:t.time||'',label:t.title+' (due)',meetingUrl:t.meetingUrl}));
   state.tasks.filter(t=>t.startDate===dateStr && t.startDate!==t.date).forEach(t=>items.push({type:'taskstart',color:'var(--blue-soft)',time:t.startTime||'',label:'Start: '+t.title,meetingUrl:t.meetingUrl}));
@@ -3042,7 +3042,7 @@ function viewCalendar(){
           ${items.length ? items.map(it=>`
             <div style="padding:10px 12px;border-bottom:1px solid var(--line)">
               <div style="font-size:.95rem">
-                <span style="font-weight:700;color:var(--ink)">${it.time ? escapeHtml(it.time) : 'All day'}</span>
+                <span style="font-weight:700;color:var(--ink)">${it.time ? escapeHtml(it.time)+(it.end?'–'+escapeHtml(it.end):'') : 'All day'}</span>
                 <span style="margin-left:8px">${escapeHtml(it.label)}</span>
               </div>
               ${it.meetingUrl?`<div style="font-size:.78rem;margin-top:2px"><a href="${escapeHtml(it.meetingUrl)}" target="_blank" rel="noopener">Join link ↗</a></div>`:''}
@@ -3569,83 +3569,67 @@ function dayNameToIndex(word){
   return -1;
 }
 function parseExcelGridTimetable(raw){
-  // Excel / Sheets paste: first row = time headers, following rows = Day + cells
-  const lines = String(raw||'').split(/\r?\n/).map(l=>l.replace(/\u00a0/g,' ').trimEnd()).filter(l=>l.trim());
+  // Tab grids OR single-space Excel paste:
+  // 3:15 - 4:00 4:00 - 4:45 5:00 - 5:45
+  // Monday Neel Shreyas / Vedha Shlok Lakshya
+  const src = String(raw||'').replace(/\u00a0/g,' ');
+  const lines = src.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
   if(lines.length < 2) return null;
 
-  function splitRow(line){
-    if(line.includes('\t')) return line.split('\t').map(c=>c.trim());
-    // 2+ spaces or pipes
-    if(/\s{2,}/.test(line) || line.includes('|'))
-      return line.trim().split(/\s{2,}|\t|\|/).map(c=>c.trim());
-    // single spaces: keep as one row of tokens (day + cells)
-    return line.trim().split(/\s+/).map(c=>c.trim()).filter(Boolean);
-  }
-
-  const rows = lines.map(splitRow).filter(r=>r.some(c=>c));
-  if(rows.length < 2) return null;
-
-  // Find header row: has 2+ time ranges
-  let headerIdx = -1;
-  let times = [];
-  for(let i=0;i<Math.min(3, rows.length);i++){
-    const parsed = rows[i].map(parseTimeRangeToken);
-    const ok = parsed.filter(Boolean);
-    if(ok.length >= 2){
-      headerIdx = i;
-      times = parsed; // keep alignment with columns (nulls for non-time cells)
-      break;
+  function schoolH(h){ h=parseInt(h,10); if(h>=1&&h<=6) h+=12; return h; }
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function extractRanges(line){
+    const re=/(\d{1,2})[:.](\d{2})\s*[-–—to]+\s*(\d{1,2})[:.](\d{2})/g;
+    const out=[]; let m;
+    while((m=re.exec(line))){
+      out.push({start:pad(schoolH(m[1]))+':'+m[2], end:pad(schoolH(m[3]))+':'+m[4]});
     }
+    return out;
   }
-  if(headerIdx < 0) return null;
-
-  // Map column index -> time
-  const colTimes = {};
-  times.forEach((t,i)=>{ if(t) colTimes[i]=t; });
-  // If first header cell is empty and times start at col 1, day is col 0
-  const results = [];
-  for(let r=headerIdx+1;r<rows.length;r++){
-    const row = rows[r];
-    if(!row.length) continue;
-    // Day may be first cell, or first non-empty before times
-    let day = dayNameToIndex(row[0]);
-    let startCol = 0;
-    if(day < 0){
-      // try any cell that looks like a day
-      for(let i=0;i<row.length;i++){
-        const d = dayNameToIndex(row[i]);
-        if(d>=0){ day=d; startCol=i; break; }
+  function splitNameCells(rest){
+    rest = rest.replace(/(\S)\s*\/\s*/g, '$1 / ');
+    const parts = rest.trim().split(/\s+/).filter(Boolean);
+    const cells=[];
+    let i=0;
+    while(i<parts.length){
+      let cell=parts[i++];
+      while(i<parts.length && (parts[i]==='/' || /\/$/.test(cell))){
+        if(parts[i]==='/'){ cell += ' / '; i++; if(i<parts.length) cell += parts[i++]; }
+        else { cell += parts[i++]; }
       }
+      if(/^\d{1,2}:\d{2}$/.test(cell) || cell==='-') continue;
+      cells.push(cell.replace(/\s*\/\s*/g,' / ').replace(/\s+/g,' ').trim());
     }
-    if(day < 0) continue;
-
-    // Cells: prefer columns that had times in header
-    const timeCols = Object.keys(colTimes).map(Number).sort((a,b)=>a-b);
-    if(timeCols.length){
-      // align: if header had leading blank, times at 1..n and data day at 0, values at 1..n
-      timeCols.forEach((ci)=>{
-        const t = colTimes[ci];
-        // data column often same index as header; if header col0 was blank text, values match
-        let val = String(row[ci] || '').trim();
-        if(!val) return;
-        if(dayNameToIndex(val)>=0) return;
-        results.push({title: val.replace(/\s+/g,' ').trim(), day, start:t.start, end:t.end, room:'', scope:'semester'});
-      });
-    } else {
-      // fallback sequential
-      let ti = 0;
-      const onlyTimes = times.filter(Boolean);
-      for(let i=1;i<row.length;i++){
-        const val = String(row[i]||'').trim();
-        if(!val || !onlyTimes[ti]) continue;
-        const t = onlyTimes[ti++];
-        results.push({title:val, day, start:t.start, end:t.end, room:'', scope:'semester'});
-      }
-    }
+    return cells;
   }
-  return results.length ? results : null;
+
+  let times=[], headerIdx=-1;
+  for(let i=0;i<Math.min(5,lines.length);i++){
+    const r=extractRanges(lines[i]);
+    if(r.length>=2){ times=r; headerIdx=i; break; }
+  }
+  if(headerIdx<0||!times.length) return null;
+
+  const results=[];
+  for(let r=headerIdx+1;r<lines.length;r++){
+    const line=lines[r];
+    const dayMatch=line.match(/^(monday|mon|tuesday|tues|tue|wednesday|wed|thursday|thurs|thur|thu|friday|fri|saturday|sat|sunday|sun)\b/i);
+    if(!dayMatch) continue;
+    const day=dayNameToIndex(dayMatch[1]);
+    if(day<0) continue;
+    let rest=line.slice(dayMatch[0].length).trim();
+    rest=rest.replace(/(\d{1,2})[:.](\d{2})\s*[-–—to]+\s*(\d{1,2})[:.](\d{2})/g,' ').trim();
+    if(!rest) continue;
+    const cells=splitNameCells(rest);
+    const offset=Math.max(0, times.length-cells.length);
+    cells.forEach((title,i)=>{
+      const ti=i+offset;
+      if(ti>=times.length||!title) return;
+      results.push({title, day, start:times[ti].start, end:times[ti].end, room:'', scope:'semester'});
+    });
+  }
+  return results.length?results:null;
 }
-
 
 function parseNotionListTimetable(raw){
   // Notion markdown: ## Mon, - [ ] 8:30: Title, *Room*
@@ -3745,11 +3729,11 @@ function parseNotionListTimetable(raw){
 
 function parseTimetableText(raw){
   const original = String(raw||'');
-  // Structured parsers first (Notion / Excel) — do NOT mangle room numbers
-  const notion = parseNotionListTimetable(original);
-  if(notion && notion.length) return applySchoolHoursToResults(notion);
+  // Excel grid if first lines contain 2+ time ranges (before Notion steals the text)
   const grid = parseExcelGridTimetable(original);
   if(grid && grid.length) return applySchoolHoursToResults(grid);
+  const notion = parseNotionListTimetable(original);
+  if(notion && notion.length) return applySchoolHoursToResults(notion);
 
   // Free-text path only: light OCR time fixes (830-1240), never lone 3-digit room nums
   let src = original
