@@ -3437,11 +3437,29 @@ async function ocrTimetableImage(file){
       }
     }
   });
-  const text=(result && result.data && result.data.text) ? result.data.text.trim() : '';
+  let text=(result && result.data && result.data.text) ? result.data.text.trim() : '';
+  // Light cleanup of common OCR noise on timetables
+  text = text
+    .replace(/[~|\[\]]+/g, ' ')
+    .replace(/[|]{1,}/g, ' ')
+    .replace(/\b(ss\.|a00|hlok|eron)\b/gi, m=>({ss:'.',a00:'4:00',hlok:'Shlok',eron:'Aaron'}[m.toLowerCase()]||m))
+    .replace(/(\d)\s*[oO]\s*(\d)/g, '$1:$2')
+    .replace(/(\d{1,2})[\.,](\d{2})/g, '$1:$2')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .trim();
   if(area) area.value = text;
-  if(status) status.textContent = text
-    ? 'Done — check the text below, fix any mistakes, then Preview classes.'
-    : 'No text found. Try a clearer screenshot or paste from Excel instead.';
+  const hasDay = /\b(mon|tue|wed|thu|fri|sat|sun)/i.test(text);
+  const hasTime = /\d{1,2}\s*[:.]\s*\d{2}/.test(text);
+  if(status){
+    if(!text){
+      status.textContent = 'No text found. Paste the grid from Excel instead (more accurate for tables).';
+    } else if(!hasDay || !hasTime){
+      status.textContent = 'OCR could not read days/times clearly. Please paste from Excel (select cells → Copy → Paste here), or edit the text box by hand, then Preview.';
+    } else {
+      status.textContent = 'Done — fix any wrong names/times in the box below, then Preview classes. For Excel grids, paste is usually more accurate than a screenshot.';
+    }
+  }
   return text;
 }
 
@@ -4782,7 +4800,7 @@ function wireView(){
       const box=document.getElementById('ttPreview');
       if(!box) return;
       if(!parsed.length){
-        box.innerHTML='<div class="empty">Could not read any classes. Try: Subject on Monday at 9:00 room 101</div>';
+        box.innerHTML='<div class="empty">Could not read a full timetable from that text.<br><br><b>Best method for Excel:</b> In Excel select the whole grid (including time headers and day names) → Copy → Paste into the box above → Preview.<br><br>Screenshots often confuse OCR on tables. Typed lines also work: <i>Bio Mon 8:30, Chem Tue 10:00</i></div>';
         return;
       }
       const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -4836,7 +4854,7 @@ function wireView(){
       const box=document.getElementById('ttPreview');
       if(!box) return;
       if(!parsed.length){
-        box.innerHTML='<div class="empty">Could not read any classes. Try: Subject on Monday at 9:00 room 101</div>';
+        box.innerHTML='<div class="empty">Could not read a full timetable from that text.<br><br><b>Best method for Excel:</b> In Excel select the whole grid (including time headers and day names) → Copy → Paste into the box above → Preview.<br><br>Screenshots often confuse OCR on tables. Typed lines also work: <i>Bio Mon 8:30, Chem Tue 10:00</i></div>';
         return;
       }
       const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
