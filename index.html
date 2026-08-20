@@ -2081,10 +2081,38 @@ function closeQuote(){ state.quoteModalOpen=false; renderModal(); }
 /* ============================================================
    Deadline notifications (in-browser, while tab is open)
    ============================================================ */
-function checkNotifications(){
+function playReminderChime(){
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC) return;
+    const ctx=new AC();
+    const o=ctx.createOscillator();
+    const g=ctx.createGain();
+    o.type='sine'; o.frequency.value=880;
+    g.gain.value=0.0001;
+    o.connect(g); g.connect(ctx.destination);
+    const t=ctx.currentTime;
+    g.gain.exponentialRampToValueAtTime(0.25, t+0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t+0.6);
+    o.start(t); o.stop(t+0.65);
+  }catch(e){}
+}
+function fireReminder(body){
   const canNotify = state.settings.notifyBrowser && ('Notification' in window) && Notification.permission==='granted';
+  if(canNotify){ try{ new Notification('SnapBack', {body, tag:'snapback-reminder'}); }catch(e){} }
+  playReminderChime();
+  state.reminderBanner = body;
+  // soft in-app banner via modal flag
+  if(!state.jigPromptOpen && !state.pendingStrategyTaskId && !state.quoteModalOpen){
+    state.reminderModalOpen = true;
+    try{ renderModal(); }catch(e){}
+  }
+}
+function checkNotifications(){
   let changed=false;
   const now=Date.now();
+  if(!state.notifiedKeys) state.notifiedKeys=[];
+
   state.tasks.filter(t=>!t.done && t.date && (t.reminderLeads||[]).length).forEach(t=>{
     const dueDate=new Date(t.date+'T00:00:00');
     (t.reminderLeads||[]).forEach(th=>{
@@ -2093,26 +2121,45 @@ function checkNotifications(){
       const [hh,mm]=(t.reminderTime||'09:00').split(':').map(Number);
       target.setHours(hh,mm,0,0);
       const key=t.id+':due:'+th;
-      if(now>=target.getTime() && !state.notifiedKeys.includes(key)){
-        if(canNotify) new Notification('SnapBack', {body: th===0 ? `Due today: ${t.title}` : `Due in ${th} day${th>1?'s':''}: ${t.title}`});
+      if(now>=target.getTime() && now < target.getTime()+2*60*60*1000 && !state.notifiedKeys.includes(key)){
+        fireReminder(th===0 ? `Due today: ${t.title}` : `Due in ${th} day${th>1?'s':''}: ${t.title}`);
         state.notifiedKeys.push(key); changed=true;
       }
     });
   });
+
   state.tasks.filter(t=>!t.done && t.startDate && t.startTime && (t.startReminderMinutes||[]).length).forEach(t=>{
     const startAt=new Date(t.startDate+'T'+t.startTime+':00');
     (t.startReminderMinutes||[]).forEach(mins=>{
       const target=new Date(startAt.getTime() - mins*60000);
       const key=t.id+':start:'+mins;
-      if(now>=target.getTime() && !state.notifiedKeys.includes(key)){
-        if(canNotify) new Notification('SnapBack', {body: mins===0 ? `Starting now: ${t.title}` : `Starts in ${mins} min: ${t.title}`});
+      if(now>=target.getTime() && now < target.getTime()+30*60*1000 && !state.notifiedKeys.includes(key)){
+        fireReminder(mins===0 ? `Starting now: ${t.title}` : `Starts in ${mins} min: ${t.title}`);
         state.notifiedKeys.push(key); changed=true;
       }
     });
   });
-  state.customReminders.filter(r=>!r.done && !r.notified).forEach(r=>{
+
+  // Classes today — remind 15 minutes before
+  const today=todayStr();
+  const dow=mondayIndex(new Date(today+'T12:00:00'));
+  (state.classes||[]).forEach(c=>{
+    let applies=false;
+    if(c.scope==='session' && c.date===today) applies=true;
+    if(c.scope!=='session' && c.day===dow) applies=true;
+    if(!applies || !c.start) return;
+    const startAt=new Date(today+'T'+c.start+':00');
+    const target=new Date(startAt.getTime() - 15*60000);
+    const key='class:'+c.id+':15:'+today;
+    if(now>=target.getTime() && now < startAt.getTime()+5*60*1000 && !state.notifiedKeys.includes(key)){
+      fireReminder(`In 15 min: ${c.title} (${c.start}${c.room?' · '+c.room:''})`);
+      state.notifiedKeys.push(key); changed=true;
+    }
+  });
+
+  (state.customReminders||[]).filter(r=>!r.done && !r.notified).forEach(r=>{
     if(now >= new Date(r.when).getTime()){
-      if(canNotify) new Notification('SnapBack', {body:r.title});
+      fireReminder(r.title);
       r.notified=true; changed=true;
     }
   });
@@ -2285,6 +2332,23 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+  // In-app reminder banner
+  if(state.reminderModalOpen && state.reminderBanner){
+    root.innerHTML=`<div class="overlay" id="reminderOverlay">
+      <div class="quotecard" style="text-align:center;max-width:360px">
+        <div class="qeyebrow">Reminder</div>
+        <div class="qtext" style="font-size:1.1rem">${escapeHtml(state.reminderBanner)}</div>
+        <div class="qactions" style="margin-top:14px">
+          <button class="btn sm" id="reminderOk">Got it</button>
+        </div>
+      </div>
+    </div>`;
+    document.getElementById('reminderOk').addEventListener('click', ()=>{
+      state.reminderModalOpen=false; state.reminderBanner=null; renderModal();
+    });
+    return;
+  }
+
   // Celebration jig prompt
   if(state.jigPromptOpen){
     root.innerHTML=`<div class="overlay" id="jigOverlay">
@@ -2382,6 +2446,9 @@ function renderModal(){
 }
 function persistRender(){ saveState(); render(); }
 function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications(); }
+if(typeof window!=='undefined' && !window._snapbackNotifyTimer){
+  window._snapbackNotifyTimer = setInterval(()=>{ try{ checkNotifications(); }catch(e){} }, 30000);
+}
 function renderTimerOnly(){
   if(state.view!=='timer') return;
   const ring=document.getElementById('ringfg'); const timeEl=document.getElementById('timeLabel');
@@ -2666,18 +2733,24 @@ function nextWeekdayDateStr(dayIdx){
   const d=new Date(now); d.setDate(now.getDate()+delta);
   return toDateStr(d);
 }
+
 function exportTaskICS(taskId){
   const t=findTask(taskId); if(!t || !t.date) return;
   const d=t.date.replace(/-/g,''); const start=(t.time||'09:00').replace(':','')+'00';
   const lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//SnapBack//EN','CALSCALE:GREGORIAN',
     'BEGIN:VEVENT',`UID:task${t.id}@snapback`,`DTSTAMP:${icsStamp(new Date())}`,`DTSTART:${d}T${start}`,`DTEND:${d}T${start}`,`SUMMARY:${icsEscape(t.title)}`];
   if(t.meetingUrl) lines.push(`URL:${icsEscape(t.meetingUrl)}`);
+  lines.push(...icsAlarm(15));
   lines.push('END:VEVENT','END:VCALENDAR');
   const blob=new Blob([lines.join('\r\n')],{type:'text/calendar'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download=`snapback-${t.title.replace(/[^a-z0-9]+/gi,'-').toLowerCase().slice(0,30)}.ics`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function icsAlarm(minutesBefore){
+  return ['BEGIN:VALARM','ACTION:DISPLAY',`DESCRIPTION:SnapBack reminder`,`TRIGGER:-PT${minutesBefore}M`,'END:VALARM'];
 }
 function exportICS(){
   const lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//SnapBack//EN','CALSCALE:GREGORIAN'];
@@ -2686,6 +2759,7 @@ function exportICS(){
     const d=t.date.replace(/-/g,''); const start=(t.time||'09:00').replace(':','')+'00';
     lines.push('BEGIN:VEVENT',`UID:task${t.id}@focuspod`,`DTSTAMP:${stamp}`,`DTSTART:${d}T${start}`,`DTEND:${d}T${start}`,`SUMMARY:${icsEscape(t.title)}`);
     if(t.meetingUrl) lines.push(`URL:${icsEscape(t.meetingUrl)}`);
+    lines.push(...icsAlarm(15));
     lines.push('END:VEVENT');
   });
   state.classes.forEach(c=>{
@@ -2699,12 +2773,14 @@ function exportICS(){
     }
     if(c.room) lines.push(`LOCATION:${icsEscape(c.room)}`);
     if(c.meetingUrl) lines.push(`URL:${icsEscape(c.meetingUrl)}`);
+    lines.push(...icsAlarm(15));
     lines.push('END:VEVENT');
   });
   state.studyBlocks.forEach(b=>{
     const d=b.date.replace(/-/g,'');
     lines.push('BEGIN:VEVENT',`UID:block${b.id}@focuspod`,`DTSTAMP:${stamp}`,`DTSTART:${d}T${b.start.replace(':','')}00`,`DTEND:${d}T${b.end.replace(':','')}00`,`SUMMARY:${icsEscape(b.label)}`);
     if(b.meetingUrl) lines.push(`URL:${icsEscape(b.meetingUrl)}`);
+    lines.push(...icsAlarm(15));
     lines.push('END:VEVENT');
   });
   lines.push('END:VCALENDAR');
@@ -3335,85 +3411,107 @@ function viewTimeBlocking(){
    Timetable natural-language parser
    ============================================================ */
 function parseTimetableText(raw){
-  const dayMap = {
-    mon:0, monday:0, mondays:0,
-    tue:1, tues:1, tuesday:1, tuesdays:1,
-    wed:2, wednesday:2, wednesdays:2,
-    thu:3, thur:3, thurs:3, thursday:3, thursdays:3,
-    fri:4, friday:4, fridays:4,
-    sat:5, saturday:5, saturdays:5,
-    sun:6, sunday:6, sundays:6
-  };
+  // Supports:
+  // Bio Mon/Thur 8.00 to 8.30, Chem 9 to 10 on Tue/Fri, Math 11 to 12 on all days
+  // Mon 8:30-12:40 Intro to Physics room Lab 2
   const results = [];
-  // Split on commas / semicolons / newlines, but keep "Mon/Wed/Fri" groups intact
-  const chunks = raw.split(/[\n;]+|\s*,\s*(?=[A-Za-z])/).map(s=>s.trim()).filter(Boolean);
-  let lastDays = [0]; // default Monday if unspecified
-  for(let chunk of chunks){
-    const lower = chunk.toLowerCase();
-    // days: mon/wed/fri or Mondays or Mon and Wed
-    const dayHits = [];
-    const dayRe = /\b(mon(?:day)?s?|tue(?:s|sday)?s?|wed(?:nesday)?s?|thu(?:r?s|rsday)?s?|fri(?:day)?s?|sat(?:urday)?s?|sun(?:day)?s?)\b/g;
-    let m;
-    while((m = dayRe.exec(lower))){
-      const key = m[1].replace(/days?$/,'day').replace(/s$/,'');
-      // normalize
-      let k = m[1].toLowerCase();
-      if(k.startsWith('mon')) dayHits.push(0);
-      else if(k.startsWith('tue')) dayHits.push(1);
-      else if(k.startsWith('wed')) dayHits.push(2);
-      else if(k.startsWith('thu')) dayHits.push(3);
-      else if(k.startsWith('fri')) dayHits.push(4);
-      else if(k.startsWith('sat')) dayHits.push(5);
-      else if(k.startsWith('sun')) dayHits.push(6);
-    }
-    if(lower.includes('same day') && !dayHits.length) dayHits.push(...lastDays);
-    // slash groups already caught by dayRe if written Mon/Wed/Fri
-    if(dayHits.length) lastDays = [...new Set(dayHits)];
-    const days = dayHits.length ? [...new Set(dayHits)] : lastDays;
+  const chunks = String(raw||'')
+    .split(/\n|;/)
+    .flatMap(line => {
+      // split on commas that are not inside numbers like 8.00
+      return line.split(/,(?=\s*[A-Za-z])/);
+    })
+    .map(s => s.trim())
+    .filter(Boolean);
 
-    // time ranges: 8:30 - 12:40 or 8.30-12.40 or single 2:30
-    let start = '';
-    let end = '';
-    const rangeM = lower.match(/\b(\d{1,2})[:.](\d{2})\s*(am|pm)?\s*[-–—to]+\s*(\d{1,2})[:.](\d{2})\s*(am|pm)?\b/);
-    const timeM = rangeM || lower.match(/\b(\d{1,2})[:.](\d{2})\s*(am|pm)?\b/);
-    if(timeM){
-      let h = parseInt(timeM[1],10);
-      const min = timeM[2];
-      const ap = timeM[3];
-      if(ap==='pm' && h<12) h += 12;
-      if(ap==='am' && h===12) h = 0;
-      start = String(h).padStart(2,'0') + ':' + min;
-      if(rangeM){
-        let h2 = parseInt(rangeM[4],10);
-        const min2 = rangeM[5];
-        const ap2 = rangeM[6];
-        if(ap2==='pm' && h2<12) h2 += 12;
-        if(ap2==='am' && h2===12) h2 = 0;
-        end = String(h2).padStart(2,'0') + ':' + min2;
-      } else {
-        const [hh,mm] = start.split(':').map(Number);
-        end = String((hh+1)%24).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+  function parseDays(str){
+    const s = str.toLowerCase();
+    if(/\ball\s*days?\b|\bevery\s*day\b|\bdaily\b/.test(s)) return [0,1,2,3,4,5,6];
+    if(/\bweekdays?\b/.test(s)) return [0,1,2,3,4];
+    const hits = [];
+    const re = /\b(mon(?:days?)?|tue(?:s(?:days?)?)?|wed(?:nesdays?)?|thu(?:r(?:s(?:days?)?)?|rsdays?)?|fri(?:days?)?|sat(?:urdays?)?|sun(?:days?)?)\b/g;
+    let m;
+    while((m = re.exec(s))){
+      const k = m[1].toLowerCase();
+      if(k.startsWith('mon')) hits.push(0);
+      else if(k.startsWith('tue')) hits.push(1);
+      else if(k.startsWith('wed')) hits.push(2);
+      else if(k.startsWith('thu')) hits.push(3);
+      else if(k.startsWith('fri')) hits.push(4);
+      else if(k.startsWith('sat')) hits.push(5);
+      else if(k.startsWith('sun')) hits.push(6);
+    }
+    // Mon/Thu or Mon-Fri style already covered by re on each token; also split slashes
+    return [...new Set(hits)];
+  }
+
+  function parseTimeToken(h, m, ap){
+    let hour = parseInt(h, 10);
+    let min = m != null && m !== '' ? parseInt(m, 10) : 0;
+    if(isNaN(hour)) return null;
+    if(isNaN(min)) min = 0;
+    const a = (ap||'').toLowerCase();
+    if(a === 'pm' && hour < 12) hour += 12;
+    if(a === 'am' && hour === 12) hour = 0;
+    if(hour > 23 || min > 59) return null;
+    return String(hour).padStart(2,'0') + ':' + String(min).padStart(2,'0');
+  }
+
+  function parseTimes(str){
+    const s = str.toLowerCase();
+    // 8:30 - 12:40 | 8.00 to 8.30 | 9 to 10 | 11-12
+    let m = s.match(/\b(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\s*(?:-|–|—|to)\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\b/);
+    if(m){
+      const start = parseTimeToken(m[1], m[2], m[3]);
+      const end = parseTimeToken(m[4], m[5], m[6] || m[3]);
+      if(start && end) return {start, end};
+    }
+    m = s.match(/\b(\d{1,2})(?:[:.](\d{2}))\s*(am|pm)?\b/);
+    if(m){
+      const start = parseTimeToken(m[1], m[2], m[3]);
+      if(start){
+        const [hh, mm] = start.split(':').map(Number);
+        const end = String((hh+1)%24).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
+        return {start, end};
       }
     }
-    // room
+    // bare hour 9 or 11
+    m = s.match(/\b(\d{1,2})\s*(am|pm)?\b/);
+    if(m){
+      const start = parseTimeToken(m[1], '00', m[2]);
+      if(start){
+        const hh = parseInt(start.slice(0,2),10);
+        const end = String((hh+1)%24).padStart(2,'0') + ':00';
+        return {start, end};
+      }
+    }
+    return null;
+  }
+
+  for(const chunk of chunks){
+    const days = parseDays(chunk);
+    const times = parseTimes(chunk);
+    if(!times) continue;
+    const useDays = days.length ? days : [0]; // default Mon only if no day found — better than silent fail
+
     let room = '';
-    const roomM = chunk.match(/\broom\s*(?:no\.?|number|#)?\s*([A-Za-z0-9\-]+)/i) || chunk.match(/\b(?:hall|rm)\s*([A-Za-z0-9\-]+)/i);
+    const roomM = chunk.match(/\broom\s*(?:no\.?|number|#)?\s*([A-Za-z0-9\-]+)/i)
+      || chunk.match(/\b(?:hall|lab|rm)\s*([A-Za-z0-9\-]+)/i);
     if(roomM) room = roomM[1];
 
-    // title: strip day/time/room phrases
     let title = chunk
-      .replace(/\b(mon(?:day)?s?|tue(?:s|sday)?s?|wed(?:nesday)?s?|thu(?:r?s|rsday)?s?|fri(?:day)?s?|sat(?:urday)?s?|sun(?:day)?s?)(\s*\/\s*(mon(?:day)?s?|tue(?:s|sday)?s?|wed(?:nesday)?s?|thu(?:r?s|rsday)?s?|fri(?:day)?s?|sat(?:urday)?s?|sun(?:day)?s?))*/gi, '')
-      .replace(/\b(on|at|same day)\b/gi, ' ')
-      .replace(/\b\d{1,2}[:.]\d{2}\s*(am|pm)?\b/gi, '')
-      .replace(/\broom\s*(?:no\.?|number|#)?\s*[A-Za-z0-9\-]+/gi, '')
-      .replace(/\b(?:hall|rm)\s*[A-Za-z0-9\-]+/gi, '')
+      .replace(/\b(mon(?:days?)?|tue(?:s(?:days?)?)?|wed(?:nesdays?)?|thu(?:r(?:s(?:days?)?)?|rsdays?)?|fri(?:days?)?|sat(?:urdays?)?|sun(?:days?)?)\b/gi, ' ')
+      .replace(/\b(all\s*days?|every\s*day|daily|weekdays?|on|at|same\s*day|to)\b/gi, ' ')
+      .replace(/\b\d{1,2}(?:[:.]\d{2})?\s*(am|pm)?(\s*(-|–|—|to)\s*\d{1,2}(?:[:.]\d{2})?\s*(am|pm)?)?/gi, ' ')
+      .replace(/\broom\s*(?:no\.?|number|#)?\s*[A-Za-z0-9\-]+/gi, ' ')
+      .replace(/\b(?:hall|lab|rm)\s*[A-Za-z0-9\-]+/gi, ' ')
+      .replace(/[\/|,]+/g, ' ')
       .replace(/\s{2,}/g, ' ')
-      .replace(/^[\s,.\-]+|[\s,.\-]+$/g, '')
       .trim();
     if(!title) title = 'Class';
-    if(!start) continue;
-    for(const d of days){
-      results.push({title, day:d, start, end, room, scope:'semester'});
+
+    for(const d of useDays){
+      results.push({title, day:d, start:times.start, end:times.end, room, scope:'semester'});
     }
   }
   return results;
