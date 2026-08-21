@@ -4080,7 +4080,8 @@ function parseTimetableText(raw){
 
   function parseDays(str){
     const s = str.toLowerCase();
-    if(/\ball\s*days?\b|\bevery\s*day\b|\bdaily\b/.test(s)) return [0,1,2,3,4,5,6];
+    // "all days" / every day / daily — NOT "all day" (that means full-day duration)
+    if(/\ball\s*days\b|\bevery\s*day\b|\bdaily\b/.test(s)) return [0,1,2,3,4,5,6];
     if(/\bweekdays?\b/.test(s)) return [0,1,2,3,4];
     const hits = [];
     const re = /\b(mon(?:days?)?|tue(?:s(?:days?)?)?|wed(?:nesdays?)?|thu(?:r(?:s(?:days?)?)?|rsdays?)?|fri(?:days?)?|sat(?:urdays?)?|sun(?:days?)?)\b/g;
@@ -4106,14 +4107,20 @@ function parseTimetableText(raw){
     if(isNaN(min)) min = 0;
     const a = (ap||'').toLowerCase();
     if(a === 'pm' && hour < 12) hour += 12;
-    if(a === 'am' && hour === 12) hour = 0;
+    else if(a === 'am' && hour === 12) hour = 0;
+    // School heuristic: 1–6 with no am/pm → afternoon (3 → 15:00)
+    else if(!a && hour >= 1 && hour <= 6) hour += 12;
     if(hour > 23 || min > 59) return null;
     return String(hour).padStart(2,'0') + ':' + String(min).padStart(2,'0');
   }
 
   function parseTimes(str){
     const s = str.toLowerCase();
-    // 8:30 - 12:40 | 8.00 to 8.30 | 9 to 10 | 11-12
+    // all day / whole day / entire day
+    if(/\b(all\s*day|whole\s*day|entire\s*day|full\s*day)\b/.test(s)){
+      return {start:'08:00', end:'18:00', allDay:true};
+    }
+    // 8:30 - 12:40 | 8.00 to 8.30 | 9 to 10 | 11-12 | 3 to 5
     let m = s.match(/\b(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\s*(?:-|–|—|to)\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\b/);
     if(m){
       const start = parseTimeToken(m[1], m[2], m[3]);
@@ -4146,7 +4153,7 @@ function parseTimetableText(raw){
     const days = parseDays(chunk);
     const times = parseTimes(chunk);
     if(!times) continue;
-    const useDays = days.length ? days : [0]; // default Mon only if no day found — better than silent fail
+    const useDays = days.length ? days : [0];
 
     let room = '';
     const roomM = chunk.match(/\broom\s*(?:no\.?|number|#)?\s*([A-Za-z0-9\-]+)/i)
@@ -4155,20 +4162,20 @@ function parseTimetableText(raw){
 
     let title = chunk
       .replace(/\b(mon(?:days?)?|tue(?:s(?:days?)?)?|wed(?:nesdays?)?|thu(?:r(?:s(?:days?)?)?|rsdays?)?|fri(?:days?)?|sat(?:urdays?)?|sun(?:days?)?)\b/gi, ' ')
-      .replace(/\b(all\s*days?|every\s*day|daily|weekdays?|on|at|same\s*day|to)\b/gi, ' ')
+      .replace(/\b(all\s*days?|every\s*day|daily|weekdays?|all\s*day|whole\s*day|entire\s*day|full\s*day|on|at|same\s*day|to)\b/gi, ' ')
       .replace(/\b\d{1,2}(?:[:.]\d{2})?\s*(am|pm)?(\s*(-|–|—|to)\s*\d{1,2}(?:[:.]\d{2})?\s*(am|pm)?)?/gi, ' ')
       .replace(/\broom\s*(?:no\.?|number|#)?\s*[A-Za-z0-9\-]+/gi, ' ')
       .replace(/\b(?:hall|lab|rm)\s*[A-Za-z0-9\-]+/gi, ' ')
       .replace(/[\/|,]+/g, ' ')
       .replace(/\s{2,}/g, ' ')
       .trim();
-    if(!title) title = 'Class';
+    if(!title) title = times.allDay ? 'All-day class' : 'Class';
 
     for(const d of useDays){
       results.push({title, day:d, start:times.start, end:times.end, room, scope:'semester'});
     }
   }
-  return results;
+  return applySchoolHoursToResults(results);
 }
 
 
