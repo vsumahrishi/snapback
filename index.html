@@ -1851,6 +1851,9 @@ function performUndo(){
   else if(u.type==='bulk-add-classes' && u.items){
     const ids=new Set(u.items.map(i=>i.id));
     state.classes=state.classes.filter(c=>!ids.has(c.id));
+  } else if(u.type==='bulk-add-blocks' && u.items){
+    const ids=new Set(u.items.map(i=>i.id));
+    state.studyBlocks=state.studyBlocks.filter(b=>!ids.has(b.id));
   }
   persistRender();
 }
@@ -1981,6 +1984,23 @@ function wireSchedForm(){
   };
   if(typeEl) typeEl.addEventListener('change', sync);
   if(repEl) repEl.addEventListener('change', sync);
+  // When start changes, set end = start + 1 hour (if end is empty or still at/before start)
+  const startEl=document.getElementById('schedStart');
+  const endEl=document.getElementById('schedEnd');
+  function bumpEndFromStart(){
+    if(!startEl || !endEl || !startEl.value) return;
+    const [h,m]=startEl.value.split(':').map(Number);
+    let eh=h+1, em=m;
+    if(eh>=24) eh=eh%24;
+    const pad=n=>String(n).padStart(2,'0');
+    const next=pad(eh)+':'+pad(em);
+    // Always update end when start changes so 10:30 → 11:30
+    endEl.value=next;
+  }
+  if(startEl){
+    startEl.addEventListener('change', bumpEndFromStart);
+    startEl.addEventListener('input', bumpEndFromStart);
+  }
   sync();
   const btn=document.getElementById('addSchedBtn');
   if(btn) btn.addEventListener('click', addScheduleItem);
@@ -3947,7 +3967,7 @@ async function ocrTimetableImage(file){
     } else if(!hasDay || !hasTime){
       status.textContent = 'OCR could not read days/times clearly. Please paste from Excel (select cells → Copy → Paste here), or edit the text box by hand, then Preview.';
     } else {
-      status.textContent = 'Done — fix any wrong names/times in the box below, then Preview classes. For Excel grids, paste is usually more accurate than a screenshot.';
+      status.textContent = 'Done — fix any wrong names/times in the box below, then Preview. For Excel grids, paste is usually more accurate than a screenshot.';
     }
   }
   return text;
@@ -4277,22 +4297,32 @@ function viewSemester(){
     <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Your class timetable</div>
     <h1>Calendar</h1>
-    <p>This is your master class schedule. Everything here automatically appears on Your Schedule. You can also link textbooks to each class.</p>
+    <p>Your master schedule — classes, study, workouts, appointments. Everything appears on Your Schedule. Use Quick add for several items, or Add to schedule for one item with more detail.</p>
   </div>
 
   <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
-    <h3 style="margin:0 0 6px">Add your timetable</h3>
+    <h3 style="margin:0 0 6px">Quick add (paste or type)</h3>
     <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">
-      <b>Option 1:</b> Upload a screenshot of your Excel / college timetable.<br>
-      <b>Option 2:</b> Paste the grid from Excel, or type lines like <i>Bio Mon 8:30 room 345</i>.
+      Put several things at once — classes, gym, study, anything.<br>
+      <b>Option 1:</b> Upload a screenshot of a schedule.<br>
+      <b>Option 2:</b> Paste from Excel/Notion, or type lines like <i>Bio Mon 8:30</i> or <i>Gym Tue 3 to 5</i>.<br>
+      Prefer one item with more detail? Use <b>Add to schedule</b> below.
     </p>
+    <div class="row" style="margin-bottom:8px">
+      <div class="field"><label>These items are</label>
+        <select id="ttRepeatMode">
+          <option value="weekly">Every week (same days each week)</option>
+          <option value="once">One time only (this week’s dates)</option>
+        </select>
+      </div>
+    </div>
     <div class="row" style="margin-bottom:10px;align-items:center">
       <input type="file" id="ttImageInput" accept="image/*" capture="environment" style="flex:1">
       <button class="btn sm" id="ttOcrBtn" style="flex:0 0 auto">Read screenshot</button>
     </div>
     <div id="ttOcrStatus" style="font-size:.82rem;color:var(--muted);margin-bottom:8px"></div>
     <textarea id="ttPaste" rows="4" placeholder="Text appears here after OCR, or paste Excel grid / type classes…" style="width:100%"></textarea>
-    <button class="btn" id="ttParseBtn" style="margin-top:10px">Preview classes</button>
+    <button class="btn" id="ttParseBtn" style="margin-top:10px">Preview</button>
     <div id="ttPreview" style="margin-top:12px"></div>
   </div>
 
@@ -5448,10 +5478,10 @@ function wireView(){
       }
       const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
       box.innerHTML=`
-        <div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} class slot(s). Save as weekly recurring?</div>
+        <div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} item(s). Save them?</div>
         ${parsed.map((p,i)=>`<div class="deadline-row"><span style="flex:1"><b>${escapeHtml(p.title)}</b> · ${dayNames[p.day]} ${formatTime12(p.start)}–${formatTime12(p.end)}${p.room?' · '+escapeHtml(p.room):''}</span></div>`).join('')}
         <div class="row" style="margin-top:10px">
-          <button class="btn" id="ttConfirmBtn">Yes — save as weekly</button>
+          <button class="btn" id="ttConfirmBtn">Yes — save</button>
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
         </div>`;
       document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
@@ -5481,9 +5511,36 @@ function wireView(){
             return {...p, start:toAM(p.start), end:toAM(p.end)};
           });
         }
+        const once = (document.getElementById('ttRepeatMode')?.value === 'once');
+        function nextDateForDay(dayIdx){
+          // Mon=0..Sun=6 → next date matching that weekday from today
+          const d=new Date(); d.setHours(12,0,0,0);
+          const jsDay = (dayIdx+1)%7; // Mon=0 → 1, Sun=6 → 0
+          for(let i=0;i<7;i++){
+            if(d.getDay()===jsDay) return toDateStr(d);
+            d.setDate(d.getDate()+1);
+          }
+          return todayStr();
+        }
+        if(once){
+          const added=[];
+          list.forEach(p=>{
+            const date=nextDateForDay(p.day);
+            if(!warnIfConflicts({dateStr:date, start:p.start, end:p.end})) return;
+            const id=uid();
+            const item={id, label:p.title, date, start:p.start, end:p.end, meetingUrl:'', room:p.room||'', kind:'other', alarmMinutes:15};
+            state.studyBlocks.push(item);
+            added.push(item);
+          });
+          if(added.length) pushUndo({type:'bulk-add-blocks', items:added, label:added.length+' items saved — Undo'});
+          document.getElementById('ttPaste').value='';
+          document.getElementById('ttPreview').innerHTML='';
+          persistRender();
+          return;
+        }
         const queue=[];
         list.forEach(p=>{
-          const entry={id:uid(), title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:''};
+          const entry={id:uid(), title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:'', kind:'class', alarmMinutes:15};
           const conflicts=findScheduleConflicts({day:p.day, start:p.start, end:p.end});
           queue.push({entry, conflicts});
         });
@@ -5528,10 +5585,10 @@ function wireView(){
       }
       const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
       box.innerHTML=`
-        <div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} class slot(s). Save as weekly recurring?</div>
+        <div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} item(s). Save them?</div>
         ${parsed.map((p,i)=>`<div class="deadline-row"><span style="flex:1"><b>${escapeHtml(p.title)}</b> · ${dayNames[p.day]} ${formatTime12(p.start)}–${formatTime12(p.end)}${p.room?' · '+escapeHtml(p.room):''}</span></div>`).join('')}
         <div class="row" style="margin-top:10px">
-          <button class="btn" id="ttConfirmBtn">Yes — save as weekly</button>
+          <button class="btn" id="ttConfirmBtn">Yes — save</button>
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
         </div>`;
       document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
@@ -5561,9 +5618,36 @@ function wireView(){
             return {...p, start:toAM(p.start), end:toAM(p.end)};
           });
         }
+        const once = (document.getElementById('ttRepeatMode')?.value === 'once');
+        function nextDateForDay(dayIdx){
+          // Mon=0..Sun=6 → next date matching that weekday from today
+          const d=new Date(); d.setHours(12,0,0,0);
+          const jsDay = (dayIdx+1)%7; // Mon=0 → 1, Sun=6 → 0
+          for(let i=0;i<7;i++){
+            if(d.getDay()===jsDay) return toDateStr(d);
+            d.setDate(d.getDate()+1);
+          }
+          return todayStr();
+        }
+        if(once){
+          const added=[];
+          list.forEach(p=>{
+            const date=nextDateForDay(p.day);
+            if(!warnIfConflicts({dateStr:date, start:p.start, end:p.end})) return;
+            const id=uid();
+            const item={id, label:p.title, date, start:p.start, end:p.end, meetingUrl:'', room:p.room||'', kind:'other', alarmMinutes:15};
+            state.studyBlocks.push(item);
+            added.push(item);
+          });
+          if(added.length) pushUndo({type:'bulk-add-blocks', items:added, label:added.length+' items saved — Undo'});
+          document.getElementById('ttPaste').value='';
+          document.getElementById('ttPreview').innerHTML='';
+          persistRender();
+          return;
+        }
         const queue=[];
         list.forEach(p=>{
-          const entry={id:uid(), title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:''};
+          const entry={id:uid(), title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:'', kind:'class', alarmMinutes:15};
           const conflicts=findScheduleConflicts({day:p.day, start:p.start, end:p.end});
           queue.push({entry, conflicts});
         });
