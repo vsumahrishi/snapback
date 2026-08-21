@@ -1754,6 +1754,66 @@ function findScheduleConflicts({day, dateStr, start, end, ignoreId}){
   return hits;
 }
 
+
+function finishTtSave(list, asPM){
+  if(asPM !== null){
+    list = list.map(p=>{
+      if(!p.ambiguous || p._timeEdited) return p;
+      const toAM = (t)=>{
+        let [h,m]=t.split(':').map(Number);
+        if(h>=13 && h<=23) h-=12;
+        return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+      };
+      const toPM = (t)=>{
+        let [h,m]=t.split(':').map(Number);
+        if(h>=1 && h<=11) h+=12;
+        return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+      };
+      if(asPM) return {...p, start:toPM(p.start), end:toPM(p.end)};
+      return {...p, start:toAM(p.start), end:toAM(p.end)};
+    });
+  }
+  const once = (document.getElementById('ttRepeatMode')?.value === 'once') || list.some(p=>p.oneOff||p.date);
+  function nextDateForDay(dayIdx){
+    const d=new Date(); d.setHours(12,0,0,0);
+    const jsDay = (dayIdx+1)%7;
+    for(let i=0;i<7;i++){
+      if(d.getDay()===jsDay) return toDateStr(d);
+      d.setDate(d.getDate()+1);
+    }
+    return todayStr();
+  }
+  if(once){
+    const added=[];
+    list.forEach(p=>{
+      const date=p.date || nextDateForDay(p.day);
+      if(!warnIfConflicts({dateStr:date, start:p.start, end:p.end})) return;
+      const id=uid();
+      const item={id, label:p.title, date, start:p.start, end:p.end, meetingUrl:'', room:p.room||'', kind:'other', alarmMinutes:15};
+      state.studyBlocks.push(item);
+      added.push(item);
+    });
+    if(added.length) pushUndo({type:'bulk-add-blocks', items:added, label:added.length+' items saved — Undo'});
+  } else {
+    const queue=[];
+    list.forEach(p=>{
+      const entry={id:uid(), title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:'', kind:'class', alarmMinutes:15};
+      const conflicts=findScheduleConflicts({day:p.day, start:p.start, end:p.end});
+      queue.push({entry, conflicts});
+    });
+    openConflictQueue(queue);
+    state.ampmPromptOpen=false;
+    state.ampmPrompt=null;
+    persistRender();
+    return;
+  }
+  const paste=document.getElementById('ttPaste'); if(paste) paste.value='';
+  const prev=document.getElementById('ttPreview'); if(prev) prev.innerHTML='';
+  state.ampmPromptOpen=false;
+  state.ampmPrompt=null;
+  persistRender();
+}
+
 function openConflictQueue(items){
   // items: [{entry, conflicts:[{title,start,end,kind,id?}]}]
   state.conflictQueue = items.filter(x=>x.conflicts && x.conflicts.length);
@@ -2708,6 +2768,38 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+  // AM/PM choice (SnapBack branded — not browser "github.io says")
+  if(state.ampmPromptOpen && state.ampmPrompt){
+    root.innerHTML=`<div class="overlay" id="ampmOverlay">
+      <div class="quotecard" style="max-width:400px;text-align:left">
+        <div class="qeyebrow">SnapBack</div>
+        <div style="font-weight:700;margin-bottom:8px">Morning or afternoon?</div>
+        <p style="font-size:.9rem;color:var(--muted);margin:0 0 12px">
+          You didn't write am or pm for ${state.ampmPrompt.ambCount} time(s). Which should we use?
+        </p>
+        <div class="qactions" style="flex-wrap:wrap;gap:8px">
+          <button class="btn" id="ampmPM">Afternoon (PM)</button>
+          <button class="btn ghost" id="ampmAM">Morning (AM)</button>
+          <button class="btn ghost" id="ampmCancel">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+    document.getElementById('ampmPM').onclick=()=>{
+      const list=state.ampmPrompt.list;
+      state.ampmPromptOpen=false; state.ampmPrompt=null;
+      finishTtSave(list, true);
+    };
+    document.getElementById('ampmAM').onclick=()=>{
+      const list=state.ampmPrompt.list;
+      state.ampmPromptOpen=false; state.ampmPrompt=null;
+      finishTtSave(list, false);
+    };
+    document.getElementById('ampmCancel').onclick=()=>{
+      state.ampmPromptOpen=false; state.ampmPrompt=null; persistRender();
+    };
+    return;
+  }
+
   // Conflict resolver (one clash at a time)
   if(state.conflictModalOpen && currentConflict()){
     const cur=currentConflict();
@@ -4152,6 +4244,95 @@ function parseNotionListTimetable(raw){
   return null;
 }
 
+
+function parseDatedOneOffs(raw){
+  // Finds: Title + time + on 26th / on the 26th / on 26
+  // Multiple clauses joined by "and"
+  let text = String(raw||'').replace(/\b(\d{1,2})[.:](\d{2})\b/g,'$1:$2');
+  // Split on "and" when followed by time-ish or "at"
+  const parts = text.split(/\band\b/i).map(s=>s.trim()).filter(Boolean);
+  const clauses = parts.length > 1 ? parts : [text];
+  const results = [];
+  let carryTitle = '';
+
+  function resolveDay(dom){
+    const n = parseInt(dom,10);
+    if(!(n>=1 && n<=31)) return null;
+    const now = new Date();
+    let y = now.getFullYear(), m = now.getMonth(); // 0-based
+    let candidate = new Date(y, m, n, 12, 0, 0);
+    // if that date already passed this month, try next month
+    const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if(candidate < today0){
+      m += 1;
+      if(m>11){ m=0; y+=1; }
+      candidate = new Date(y, m, n, 12, 0, 0);
+    }
+    return toDateStr(candidate);
+  }
+
+  function parseTimeIn(s){
+    let m = s.match(/\b(\d{1,2}):(\d{2})\s*(am|pm)?\b/i);
+    if(m){
+      let h=parseInt(m[1],10), min=parseInt(m[2],10);
+      const ap=(m[3]||'').toLowerCase();
+      let amb=!ap;
+      if(ap==='pm'&&h<12) h+=12;
+      else if(ap==='am'&&h===12) h=0;
+      else if(!ap && h>=1 && h<=6) h+=12;
+      const pad=x=>String(x).padStart(2,'0');
+      const start=pad(h)+':'+pad(min);
+      const end=pad((h+1)%24)+':'+pad(min);
+      return {start, end, ambiguous:amb};
+    }
+    m = s.match(/\b(?:at\s+)?(\d{1,2})(?!:\d{2})\s*(am|pm)?\b/i);
+    if(m){
+      let h=parseInt(m[1],10);
+      const ap=(m[2]||'').toLowerCase();
+      let amb=!ap;
+      if(ap==='pm'&&h<12) h+=12;
+      else if(ap==='am'&&h===12) h=0;
+      else if(!ap && h>=1 && h<=6) h+=12;
+      const pad=x=>String(x).padStart(2,'0');
+      return {start:pad(h)+':00', end:pad((h+1)%24)+':00', ambiguous:amb};
+    }
+    return null;
+  }
+
+  for(let i=0;i<clauses.length;i++){
+    let clause = clauses[i];
+    // day of month: require 26th / on 26 (not bare 11 from 11:15)
+    const dayM = clause.match(/\b(?:on\s+)?(?:the\s+)?(\d{1,2})(st|nd|rd|th)\b/i)
+      || clause.match(/\bon\s+(?:the\s+)?(\d{1,2})\b/i);
+    if(!dayM) continue;
+    const dateStr = resolveDay(dayM[1]);
+    if(!dateStr) continue;
+    const times = parseTimeIn(clause);
+    if(!times) continue;
+    let title = clause
+      .replace(/\b(?:on\s+)?(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\b/gi, ' ')
+      .replace(/\b(\d{1,2}):(\d{2})\s*(am|pm)?\b/gi, ' ')
+      .replace(/\b(?:at\s+)?(\d{1,2})\s*(am|pm)?\b/gi, ' ')
+      .replace(/\b(on|at|the|and|to)\b/gi, ' ')
+      .replace(/\b(st|nd|rd|th)\b/gi, ' ')
+      .replace(/[.,]+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    if(!title && carryTitle) title = carryTitle;
+    if(title) carryTitle = title;
+    title = title.replace(/[:\-–—]+$/g,'').trim();
+    if(!title) title = 'Appointment';
+    // day index for display compatibility + date for one-off
+    const d = new Date(dateStr+'T12:00:00');
+    const day = mondayIndex(d);
+    results.push({
+      title, day, start:times.start, end:times.end, room:'',
+      scope:'session', date:dateStr, ambiguous:!!times.ambiguous, oneOff:true
+    });
+  }
+  return results.length ? results : null;
+}
+
 function parseTimetableText(raw){
   const original = String(raw||'');
   // Excel grid if first lines contain 2+ time ranges (before Notion steals the text)
@@ -4160,15 +4341,21 @@ function parseTimetableText(raw){
   const notion = parseNotionListTimetable(original);
   if(notion && notion.length) return applySchoolHoursToResults(notion);
 
-  // Free-text path only: light OCR time fixes (830-1240), never lone 3-digit room nums
+  // Free-text path
   let src = original
     .replace(/[☐☑□■●○•]+/g, ' ')
     .replace(/\u00a0/g, ' ');
+  // 11.15 → 11:15
+  src = src.replace(/\b(\d{1,2})[.:](\d{2})\b/g, '$1:$2');
   src = src.replace(/\b(\d{1,2})([0-5]\d)\s*[-–—to]+\s*(\d{1,2})([0-5]\d)\b/g, (m,h1,m1,h2,m2)=>{
     if(parseInt(h1,10)>23||parseInt(h2,10)>23) return m;
     return h1+':'+m1+'-'+h2+':'+m2;
   });
   raw = src;
+
+  // Dated one-offs: "Gouri Assessment 11:15 on 26th and at 9 on 27th"
+  const dated = parseDatedOneOffs(raw);
+  if(dated && dated.length) return dated;
 
   // Supports:
   // Bio Mon/Thur 8.00 to 8.30, Chem 9 to 10 on Tue/Fri, Math 11 to 12 on all days
@@ -5477,41 +5664,86 @@ function wireView(){
         return;
       }
       const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+      window._ttParsed = parsed;
       box.innerHTML=`
-        <div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} item(s). Save them?</div>
-        ${parsed.map((p,i)=>`<div class="deadline-row"><span style="flex:1"><b>${escapeHtml(p.title)}</b> · ${dayNames[p.day]} ${formatTime12(p.start)}–${formatTime12(p.end)}${p.room?' · '+escapeHtml(p.room):''}</span></div>`).join('')}
+        <div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} item(s). Edit anything below, then save.</div>
+        ${parsed.map((p,i)=>`
+          <div class="card" style="margin-bottom:8px;padding:10px" data-tt-idx="${i}">
+            <div class="field"><label>Name</label><input class="tt-edit-title" data-i="${i}" value="${escapeHtml(p.title)}"></div>
+            <div class="row" style="margin-top:6px">
+              ${p.oneOff||p.date?`
+                <div class="field"><label>Date</label><input type="date" class="tt-edit-date" data-i="${i}" value="${p.date||''}"></div>
+              `:`
+                <div class="field"><label>Day</label>
+                  <select class="tt-edit-day" data-i="${i}">
+                    ${dayNames.map((d,di)=>`<option value="${di}" ${di===p.day?'selected':''}>${d}</option>`).join('')}
+                  </select>
+                </div>
+              `}
+              <div class="field"><label>Start</label><input type="time" class="tt-edit-start" data-i="${i}" value="${p.start}"></div>
+              <div class="field"><label>End</label><input type="time" class="tt-edit-end" data-i="${i}" value="${p.end}"></div>
+            </div>
+            <button type="button" class="btn ghost sm tt-remove" data-i="${i}" style="margin-top:6px">Remove this</button>
+          </div>`).join('')}
         <div class="row" style="margin-top:10px">
           <button class="btn" id="ttConfirmBtn">Yes — save</button>
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
         </div>`;
-      document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
-        let list = parsed.slice();
-        const amb = list.filter(p=>p.ambiguous);
-        if(amb.length){
-          const sample = amb.slice(0,3).map(p=>formatTime12(p.start)+'–'+formatTime12(p.end)+' '+p.title).join(', ');
-          const asPM = confirm(
-            'Some times had no AM or PM written (e.g. "'+sample+'").\n\n'+
-            'OK = afternoon (PM)\n'+
-            'Cancel = morning (AM)\n\n'+
-            'Tip: next time type 3pm or 8am to skip this question.'
-          );
-          list = list.map(p=>{
-            if(!p.ambiguous) return p;
-            const toAM = (t)=>{
-              let [h,m]=t.split(':').map(Number);
-              if(h>=13 && h<=23) h-=12;
-              return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
-            };
-            const toPM = (t)=>{
-              let [h,m]=t.split(':').map(Number);
-              if(h>=1 && h<=11) h+=12;
-              return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
-            };
-            if(asPM) return {...p, start:toPM(p.start), end:toPM(p.end)};
-            return {...p, start:toAM(p.start), end:toAM(p.end)};
+      box.querySelectorAll('.tt-remove').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const i=Number(btn.dataset.i);
+          // harvest current edits first
+          window._ttParsed = window._ttParsed.map((p,j)=>{
+            const titleEl=box.querySelector('.tt-edit-title[data-i="'+j+'"]');
+            const startEl=box.querySelector('.tt-edit-start[data-i="'+j+'"]');
+            const endEl=box.querySelector('.tt-edit-end[data-i="'+j+'"]');
+            const dateEl=box.querySelector('.tt-edit-date[data-i="'+j+'"]');
+            const out={...p};
+            if(titleEl) out.title=titleEl.value.trim()||out.title;
+            if(startEl&&startEl.value) out.start=startEl.value;
+            if(endEl&&endEl.value) out.end=endEl.value;
+            if(dateEl&&dateEl.value) out.date=dateEl.value;
+            return out;
           });
+          window._ttParsed.splice(i,1);
+          if(!window._ttParsed.length){ box.innerHTML=''; return; }
+          // re-show editable list
+          const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+          const parsed=window._ttParsed;
+          box.innerHTML=`<div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} item(s). Edit anything below, then save.</div>`+
+            parsed.map((p,i)=>`<div class="card" style="margin-bottom:8px;padding:10px"><div class="field"><label>Name</label><input class="tt-edit-title" data-i="${i}" value="${escapeHtml(p.title)}"></div><div class="row" style="margin-top:6px">${p.oneOff||p.date?`<div class="field"><label>Date</label><input type="date" class="tt-edit-date" data-i="${i}" value="${p.date||''}"></div>`:`<div class="field"><label>Day</label><select class="tt-edit-day" data-i="${i}">${dayNames.map((d,di)=>`<option value="${di}" ${di===p.day?'selected':''}>${d}</option>`).join('')}</select></div>`}<div class="field"><label>Start</label><input type="time" class="tt-edit-start" data-i="${i}" value="${p.start}"></div><div class="field"><label>End</label><input type="time" class="tt-edit-end" data-i="${i}" value="${p.end}"></div></div><button type="button" class="btn ghost sm tt-remove" data-i="${i}" style="margin-top:6px">Remove this</button></div>`).join('')+
+            `<div class="row" style="margin-top:10px"><button class="btn" id="ttConfirmBtn">Yes — save</button><button class="btn ghost" id="ttCancelBtn">Cancel</button></div>`;
+          // re-bind by simulating - user clicks Preview again if needed; simple: location reload form
+          ttParseBtn.click();
+        });
+      });
+      document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
+        // Apply any edits from the preview fields
+        let list = (window._ttParsed || parsed).slice();
+        list = list.map((p,i)=>{
+          const titleEl=box.querySelector('.tt-edit-title[data-i="'+i+'"]');
+          const startEl=box.querySelector('.tt-edit-start[data-i="'+i+'"]');
+          const endEl=box.querySelector('.tt-edit-end[data-i="'+i+'"]');
+          const dateEl=box.querySelector('.tt-edit-date[data-i="'+i+'"]');
+          const dayEl=box.querySelector('.tt-edit-day[data-i="'+i+'"]');
+          const out={...p};
+          if(titleEl) out.title=titleEl.value.trim()||out.title;
+          if(startEl&&startEl.value){ out.start=startEl.value; out._timeEdited=true; out.ambiguous=false; }
+          if(endEl&&endEl.value){ out.end=endEl.value; out._timeEdited=true; out.ambiguous=false; }
+          if(dateEl&&dateEl.value){ out.date=dateEl.value; out.oneOff=true; out.day=mondayIndex(new Date(dateEl.value+'T12:00:00')); }
+          if(dayEl) out.day=Number(dayEl.value);
+          return out;
+        }).filter(Boolean);
+        // If times were edited in the preview form, trust them — no AM/PM popup
+        // Only ask when still marked ambiguous AND user did not touch time fields
+        const amb = list.filter(p=>p.ambiguous && !p._timeEdited);
+        if(amb.length){
+          state.ampmPrompt = { list, ambCount: amb.length };
+          state.ampmPromptOpen = true;
+          persistRender();
+          return; // continue after user picks in modal
         }
-        const once = (document.getElementById('ttRepeatMode')?.value === 'once');
+        const once = (document.getElementById('ttRepeatMode')?.value === 'once') || list.some(p=>p.oneOff||p.date);
         function nextDateForDay(dayIdx){
           // Mon=0..Sun=6 → next date matching that weekday from today
           const d=new Date(); d.setHours(12,0,0,0);
@@ -5525,7 +5757,7 @@ function wireView(){
         if(once){
           const added=[];
           list.forEach(p=>{
-            const date=nextDateForDay(p.day);
+            const date=p.date || nextDateForDay(p.day);
             if(!warnIfConflicts({dateStr:date, start:p.start, end:p.end})) return;
             const id=uid();
             const item={id, label:p.title, date, start:p.start, end:p.end, meetingUrl:'', room:p.room||'', kind:'other', alarmMinutes:15};
@@ -5584,41 +5816,86 @@ function wireView(){
         return;
       }
       const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+      window._ttParsed = parsed;
       box.innerHTML=`
-        <div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} item(s). Save them?</div>
-        ${parsed.map((p,i)=>`<div class="deadline-row"><span style="flex:1"><b>${escapeHtml(p.title)}</b> · ${dayNames[p.day]} ${formatTime12(p.start)}–${formatTime12(p.end)}${p.room?' · '+escapeHtml(p.room):''}</span></div>`).join('')}
+        <div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} item(s). Edit anything below, then save.</div>
+        ${parsed.map((p,i)=>`
+          <div class="card" style="margin-bottom:8px;padding:10px" data-tt-idx="${i}">
+            <div class="field"><label>Name</label><input class="tt-edit-title" data-i="${i}" value="${escapeHtml(p.title)}"></div>
+            <div class="row" style="margin-top:6px">
+              ${p.oneOff||p.date?`
+                <div class="field"><label>Date</label><input type="date" class="tt-edit-date" data-i="${i}" value="${p.date||''}"></div>
+              `:`
+                <div class="field"><label>Day</label>
+                  <select class="tt-edit-day" data-i="${i}">
+                    ${dayNames.map((d,di)=>`<option value="${di}" ${di===p.day?'selected':''}>${d}</option>`).join('')}
+                  </select>
+                </div>
+              `}
+              <div class="field"><label>Start</label><input type="time" class="tt-edit-start" data-i="${i}" value="${p.start}"></div>
+              <div class="field"><label>End</label><input type="time" class="tt-edit-end" data-i="${i}" value="${p.end}"></div>
+            </div>
+            <button type="button" class="btn ghost sm tt-remove" data-i="${i}" style="margin-top:6px">Remove this</button>
+          </div>`).join('')}
         <div class="row" style="margin-top:10px">
           <button class="btn" id="ttConfirmBtn">Yes — save</button>
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
         </div>`;
-      document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
-        let list = parsed.slice();
-        const amb = list.filter(p=>p.ambiguous);
-        if(amb.length){
-          const sample = amb.slice(0,3).map(p=>formatTime12(p.start)+'–'+formatTime12(p.end)+' '+p.title).join(', ');
-          const asPM = confirm(
-            'Some times had no AM or PM written (e.g. "'+sample+'").\n\n'+
-            'OK = afternoon (PM)\n'+
-            'Cancel = morning (AM)\n\n'+
-            'Tip: next time type 3pm or 8am to skip this question.'
-          );
-          list = list.map(p=>{
-            if(!p.ambiguous) return p;
-            const toAM = (t)=>{
-              let [h,m]=t.split(':').map(Number);
-              if(h>=13 && h<=23) h-=12;
-              return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
-            };
-            const toPM = (t)=>{
-              let [h,m]=t.split(':').map(Number);
-              if(h>=1 && h<=11) h+=12;
-              return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
-            };
-            if(asPM) return {...p, start:toPM(p.start), end:toPM(p.end)};
-            return {...p, start:toAM(p.start), end:toAM(p.end)};
+      box.querySelectorAll('.tt-remove').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const i=Number(btn.dataset.i);
+          // harvest current edits first
+          window._ttParsed = window._ttParsed.map((p,j)=>{
+            const titleEl=box.querySelector('.tt-edit-title[data-i="'+j+'"]');
+            const startEl=box.querySelector('.tt-edit-start[data-i="'+j+'"]');
+            const endEl=box.querySelector('.tt-edit-end[data-i="'+j+'"]');
+            const dateEl=box.querySelector('.tt-edit-date[data-i="'+j+'"]');
+            const out={...p};
+            if(titleEl) out.title=titleEl.value.trim()||out.title;
+            if(startEl&&startEl.value) out.start=startEl.value;
+            if(endEl&&endEl.value) out.end=endEl.value;
+            if(dateEl&&dateEl.value) out.date=dateEl.value;
+            return out;
           });
+          window._ttParsed.splice(i,1);
+          if(!window._ttParsed.length){ box.innerHTML=''; return; }
+          // re-show editable list
+          const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+          const parsed=window._ttParsed;
+          box.innerHTML=`<div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} item(s). Edit anything below, then save.</div>`+
+            parsed.map((p,i)=>`<div class="card" style="margin-bottom:8px;padding:10px"><div class="field"><label>Name</label><input class="tt-edit-title" data-i="${i}" value="${escapeHtml(p.title)}"></div><div class="row" style="margin-top:6px">${p.oneOff||p.date?`<div class="field"><label>Date</label><input type="date" class="tt-edit-date" data-i="${i}" value="${p.date||''}"></div>`:`<div class="field"><label>Day</label><select class="tt-edit-day" data-i="${i}">${dayNames.map((d,di)=>`<option value="${di}" ${di===p.day?'selected':''}>${d}</option>`).join('')}</select></div>`}<div class="field"><label>Start</label><input type="time" class="tt-edit-start" data-i="${i}" value="${p.start}"></div><div class="field"><label>End</label><input type="time" class="tt-edit-end" data-i="${i}" value="${p.end}"></div></div><button type="button" class="btn ghost sm tt-remove" data-i="${i}" style="margin-top:6px">Remove this</button></div>`).join('')+
+            `<div class="row" style="margin-top:10px"><button class="btn" id="ttConfirmBtn">Yes — save</button><button class="btn ghost" id="ttCancelBtn">Cancel</button></div>`;
+          // re-bind by simulating - user clicks Preview again if needed; simple: location reload form
+          ttParseBtn.click();
+        });
+      });
+      document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
+        // Apply any edits from the preview fields
+        let list = (window._ttParsed || parsed).slice();
+        list = list.map((p,i)=>{
+          const titleEl=box.querySelector('.tt-edit-title[data-i="'+i+'"]');
+          const startEl=box.querySelector('.tt-edit-start[data-i="'+i+'"]');
+          const endEl=box.querySelector('.tt-edit-end[data-i="'+i+'"]');
+          const dateEl=box.querySelector('.tt-edit-date[data-i="'+i+'"]');
+          const dayEl=box.querySelector('.tt-edit-day[data-i="'+i+'"]');
+          const out={...p};
+          if(titleEl) out.title=titleEl.value.trim()||out.title;
+          if(startEl&&startEl.value){ out.start=startEl.value; out._timeEdited=true; out.ambiguous=false; }
+          if(endEl&&endEl.value){ out.end=endEl.value; out._timeEdited=true; out.ambiguous=false; }
+          if(dateEl&&dateEl.value){ out.date=dateEl.value; out.oneOff=true; out.day=mondayIndex(new Date(dateEl.value+'T12:00:00')); }
+          if(dayEl) out.day=Number(dayEl.value);
+          return out;
+        }).filter(Boolean);
+        // If times were edited in the preview form, trust them — no AM/PM popup
+        // Only ask when still marked ambiguous AND user did not touch time fields
+        const amb = list.filter(p=>p.ambiguous && !p._timeEdited);
+        if(amb.length){
+          state.ampmPrompt = { list, ambCount: amb.length };
+          state.ampmPromptOpen = true;
+          persistRender();
+          return; // continue after user picks in modal
         }
-        const once = (document.getElementById('ttRepeatMode')?.value === 'once');
+        const once = (document.getElementById('ttRepeatMode')?.value === 'once') || list.some(p=>p.oneOff||p.date);
         function nextDateForDay(dayIdx){
           // Mon=0..Sun=6 → next date matching that weekday from today
           const d=new Date(); d.setHours(12,0,0,0);
@@ -5632,7 +5909,7 @@ function wireView(){
         if(once){
           const added=[];
           list.forEach(p=>{
-            const date=nextDateForDay(p.day);
+            const date=p.date || nextDateForDay(p.day);
             if(!warnIfConflicts({dateStr:date, start:p.start, end:p.end})) return;
             const id=uid();
             const item={id, label:p.title, date, start:p.start, end:p.end, meetingUrl:'', room:p.room||'', kind:'other', alarmMinutes:15};
@@ -5886,6 +6163,8 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.conflictQueue===undefined) state.conflictQueue=[];
     if(state.conflictPass===undefined) state.conflictPass=[];
     if(state.conflictIdx===undefined) state.conflictIdx=0;
+    if(state.ampmPromptOpen===undefined) state.ampmPromptOpen=false;
+    if(state.ampmPrompt===undefined) state.ampmPrompt=null;
     if(state.settings.celebrateOnComplete===undefined) state.settings.celebrateOnComplete=true;
     if(state.settings.celebrateSound===undefined) state.settings.celebrateSound=true;
     if(!Array.isArray(state.whenThen)) state.whenThen=[];
