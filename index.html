@@ -1901,6 +1901,91 @@ function deleteClass(id){
 /* ============================================================
    Time blocking
    ============================================================ */
+
+function addScheduleItem(){
+  const type = document.getElementById('schedType')?.value || 'class';
+  const other = document.getElementById('schedOtherTitle')?.value.trim() || '';
+  let title = document.getElementById('schedTitle')?.value.trim() || '';
+  if(type === 'other'){
+    title = other || title;
+    if(!title){ alert('Type a name for Other.'); return; }
+  } else {
+    if(!title){
+      const defaults = {class:'Class', study:'Study block', workout:'Workout', appointment:'Appointment'};
+      title = defaults[type] || 'Event';
+    }
+  }
+  const typeLabel = {class:'Class', study:'Study', workout:'Workout', appointment:'Appointment', other:'Other'}[type] || type;
+  if(type !== 'other' && type !== 'class'){
+    // prefix for clarity on calendar
+    if(!title.toLowerCase().startsWith(typeLabel.toLowerCase())) title = typeLabel + ': ' + title;
+  }
+  const repeat = document.getElementById('schedRepeat')?.value || 'weekly';
+  const start = document.getElementById('schedStart')?.value || '09:00';
+  const end = document.getElementById('schedEnd')?.value || '10:00';
+  const room = document.getElementById('schedRoom')?.value.trim() || '';
+  const meetingUrl = document.getElementById('schedUrl')?.value.trim() || '';
+  const alarmMin = Number(document.getElementById('schedAlarm')?.value || 0);
+
+  if(repeat === 'once'){
+    const date = document.getElementById('schedDate')?.value || todayStr();
+    if(!warnIfConflicts({dateStr:date, start, end})) return;
+    const id = uid();
+    // one-off → studyBlocks (shows on Your Schedule that day)
+    state.studyBlocks.push({
+      id, label:title, date, start, end, meetingUrl, room,
+      kind:type, alarmMinutes:alarmMin
+    });
+    pushUndo({type:'add-block', id, label:'Saved — Undo'});
+    // schedule native/web reminder if alarm set
+    if(alarmMin > 0){
+      try{
+        const [hh,mm]=start.split(':').map(Number);
+        const when=new Date(date+'T00:00:00'); when.setHours(hh,mm,0,0); when.setMinutes(when.getMinutes()-alarmMin);
+        if(typeof scheduleNativeNotification==='function'){
+          scheduleNativeNotification({key:'sched-'+id, title:'Reminder', body:title+' at '+start, when});
+        }
+      }catch(e){}
+    }
+  } else {
+    const day = Number(document.getElementById('schedDay')?.value || 0);
+    if(!warnIfConflicts({day, start, end})) return;
+    const id = uid();
+    state.classes.push({
+      id, title, day, start, end, room, meetingUrl, textbook:'',
+      scope: type==='class' ? 'semester' : 'recurring',
+      kind:type, alarmMinutes:alarmMin,
+      semStart: todayStr(), semEnd:''
+    });
+    pushUndo({type:'add-class', id, label:'Saved — Undo'});
+  }
+  ['schedTitle','schedOtherTitle','schedRoom','schedUrl'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  persistRender();
+}
+function wireSchedForm(){
+  const typeEl=document.getElementById('schedType');
+  const repEl=document.getElementById('schedRepeat');
+  const sync=()=>{
+    const other=typeEl && typeEl.value==='other';
+    const once=repEl && repEl.value==='once';
+    const ow=document.getElementById('schedOtherWrap');
+    const tw=document.getElementById('schedTitleWrap');
+    const dw=document.getElementById('schedDayWrap');
+    const datew=document.getElementById('schedDateWrap');
+    if(ow) ow.style.display = other ? '' : 'none';
+    if(tw) tw.style.display = other ? 'none' : '';
+    if(dw) dw.style.display = once ? 'none' : '';
+    if(datew) datew.style.display = once ? '' : 'none';
+  };
+  if(typeEl) typeEl.addEventListener('change', sync);
+  if(repEl) repEl.addEventListener('change', sync);
+  sync();
+  const btn=document.getElementById('addSchedBtn');
+  if(btn) btn.addEventListener('click', addScheduleItem);
+}
+
 function addStudyBlock(){
   const label=document.getElementById('tbLabel').value.trim();
   if(!label) return;
@@ -4100,50 +4185,52 @@ function parseTimetableText(raw){
     return [...new Set(hits)];
   }
 
-  function parseTimeToken(h, m, ap){
+  function parseTimeToken(h, m, ap, preferPM){
     let hour = parseInt(h, 10);
     let min = m != null && m !== '' ? parseInt(m, 10) : 0;
     if(isNaN(hour)) return null;
     if(isNaN(min)) min = 0;
     const a = (ap||'').toLowerCase();
+    let ambiguous = false;
     if(a === 'pm' && hour < 12) hour += 12;
     else if(a === 'am' && hour === 12) hour = 0;
-    // School heuristic: 1–6 with no am/pm → afternoon (3 → 15:00)
-    else if(!a && hour >= 1 && hour <= 6) hour += 12;
+    else if(!a){
+      // No am/pm written → always ask the user later
+      ambiguous = true;
+      // Preview default: 1–6 afternoon (school), 7–11 morning, 12 noon
+      if(preferPM !== false && hour >= 1 && hour <= 6) hour += 12;
+    }
     if(hour > 23 || min > 59) return null;
-    return String(hour).padStart(2,'0') + ':' + String(min).padStart(2,'0');
+    return { time: String(hour).padStart(2,'0') + ':' + String(min).padStart(2,'0'), ambiguous };
   }
 
   function parseTimes(str){
     const s = str.toLowerCase();
-    // all day / whole day / entire day
     if(/\b(all\s*day|whole\s*day|entire\s*day|full\s*day)\b/.test(s)){
-      return {start:'08:00', end:'18:00', allDay:true};
+      return {start:'08:00', end:'18:00', allDay:true, ambiguous:false};
     }
-    // 8:30 - 12:40 | 8.00 to 8.30 | 9 to 10 | 11-12 | 3 to 5
     let m = s.match(/\b(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\s*(?:-|–|—|to)\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\b/);
     if(m){
-      const start = parseTimeToken(m[1], m[2], m[3]);
-      const end = parseTimeToken(m[4], m[5], m[6] || m[3]);
-      if(start && end) return {start, end};
+      const st = parseTimeToken(m[1], m[2], m[3]);
+      const en = parseTimeToken(m[4], m[5], m[6] || m[3]);
+      if(st && en) return {start:st.time, end:en.time, ambiguous: !!(st.ambiguous||en.ambiguous)};
     }
     m = s.match(/\b(\d{1,2})(?:[:.](\d{2}))\s*(am|pm)?\b/);
     if(m){
-      const start = parseTimeToken(m[1], m[2], m[3]);
-      if(start){
-        const [hh, mm] = start.split(':').map(Number);
+      const st = parseTimeToken(m[1], m[2], m[3]);
+      if(st){
+        const [hh, mm] = st.time.split(':').map(Number);
         const end = String((hh+1)%24).padStart(2,'0') + ':' + String(mm).padStart(2,'0');
-        return {start, end};
+        return {start:st.time, end, ambiguous:st.ambiguous};
       }
     }
-    // bare hour 9 or 11
     m = s.match(/\b(\d{1,2})\s*(am|pm)?\b/);
     if(m){
-      const start = parseTimeToken(m[1], '00', m[2]);
-      if(start){
-        const hh = parseInt(start.slice(0,2),10);
+      const st = parseTimeToken(m[1], '00', m[2]);
+      if(st){
+        const hh = parseInt(st.time.slice(0,2),10);
         const end = String((hh+1)%24).padStart(2,'0') + ':00';
-        return {start, end};
+        return {start:st.time, end, ambiguous:st.ambiguous};
       }
     }
     return null;
@@ -4162,17 +4249,17 @@ function parseTimetableText(raw){
 
     let title = chunk
       .replace(/\b(mon(?:days?)?|tue(?:s(?:days?)?)?|wed(?:nesdays?)?|thu(?:r(?:s(?:days?)?)?|rsdays?)?|fri(?:days?)?|sat(?:urdays?)?|sun(?:days?)?)\b/gi, ' ')
-      .replace(/\b(all\s*days?|every\s*day|daily|weekdays?|all\s*day|whole\s*day|entire\s*day|full\s*day|on|at|same\s*day|to)\b/gi, ' ')
+      .replace(/\b(all\s*days?|every\s*day|daily|weekdays?|all\s*day|whole\s*day|entire\s*day|full\s*day|on|at|same\s*day|to|and)\b/gi, ' ')
       .replace(/\b\d{1,2}(?:[:.]\d{2})?\s*(am|pm)?(\s*(-|–|—|to)\s*\d{1,2}(?:[:.]\d{2})?\s*(am|pm)?)?/gi, ' ')
       .replace(/\broom\s*(?:no\.?|number|#)?\s*[A-Za-z0-9\-]+/gi, ' ')
       .replace(/\b(?:hall|lab|rm)\s*[A-Za-z0-9\-]+/gi, ' ')
-      .replace(/[\/|,]+/g, ' ')
+      .replace(/[\/|,\.]+/g, ' ')
       .replace(/\s{2,}/g, ' ')
       .trim();
     if(!title) title = times.allDay ? 'All-day class' : 'Class';
 
     for(const d of useDays){
-      results.push({title, day:d, start:times.start, end:times.end, room, scope:'semester'});
+      results.push({title, day:d, start:times.start, end:times.end, room, scope:'semester', ambiguous:!!times.ambiguous});
     }
   }
   return applySchoolHoursToResults(results);
@@ -4210,25 +4297,61 @@ function viewSemester(){
   </div>
 
   <div class="card">
-    <h3>Add a class</h3>
+    <h3>Add to schedule</h3>
+    <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">Class, study, workout, appointment — once or every week. Optional alarm before it starts.</p>
     <div class="row">
-      <div class="field" style="flex:2"><label>Class name</label><input id="classTitle" placeholder="e.g. Intro to Psychology"></div>
-      <div class="field"><label>Day</label>
-        <select id="classDay">
-          ${days.map((d,i)=>`<option value="${i}">${d}</option>`).join('')}
+      <div class="field"><label>Type</label>
+        <select id="schedType">
+          <option value="class">Class</option>
+          <option value="study">Study block</option>
+          <option value="workout">Workout</option>
+          <option value="appointment">Appointment</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="field" style="flex:2;display:none" id="schedOtherWrap">
+        <label>What is it?</label>
+        <input id="schedOtherTitle" placeholder="Type a name…">
+      </div>
+      <div class="field" style="flex:2" id="schedTitleWrap">
+        <label>Name</label>
+        <input id="schedTitle" placeholder="e.g. Biology, Gym, Doctor">
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div class="field"><label>When</label>
+        <select id="schedRepeat">
+          <option value="weekly">Every week</option>
+          <option value="once">One time only</option>
+        </select>
+      </div>
+      <div class="field" id="schedDayWrap">
+        <label>Day</label>
+        <select id="schedDay">${days.map((d,i)=>`<option value="${i}">${d}</option>`).join('')}</select>
+      </div>
+      <div class="field" id="schedDateWrap" style="display:none">
+        <label>Date</label>
+        <input type="date" id="schedDate" value="${todayStr()}">
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div class="field"><label>Start</label><input id="schedStart" type="time" value="09:00"></div>
+      <div class="field"><label>End</label><input id="schedEnd" type="time" value="10:00"></div>
+      <div class="field"><label>Alarm</label>
+        <select id="schedAlarm">
+          <option value="0">No alarm</option>
+          <option value="5">5 min before</option>
+          <option value="15" selected>15 min before</option>
+          <option value="30">30 min before</option>
+          <option value="60">1 hour before</option>
         </select>
       </div>
     </div>
     <div class="row" style="margin-top:8px">
-      <div class="field"><label>Start</label><input id="classStart" type="time" value="09:00"></div>
-      <div class="field"><label>End</label><input id="classEnd" type="time" value="10:15"></div>
-      <div class="field"><label>Room</label><input id="classRoom" placeholder="Hall B"></div>
+      <div class="field"><label>Place / room</label><input id="schedRoom" placeholder="Optional"></div>
+      <div class="field" style="flex:2"><label>Link (meet / maps)</label><input id="schedUrl" placeholder="Optional https://…"></div>
     </div>
-    <div class="row" style="margin-top:8px">
-      <div class="field" style="flex:2"><label>Textbook / materials (optional)</label><input id="classTextbook" placeholder="e.g. Myers Psychology 12th ed."></div>
-      <div class="field"><label>Meeting link</label><input id="classMeetingUrl" placeholder="https://..."></div>
-    </div>
-    <button class="btn" id="addClassBtn" style="margin-top:12px">Add class</button>
+    <button class="btn" id="addSchedBtn" style="margin-top:12px">Save to schedule</button>
   </div>
 
   <div class="card">
@@ -5312,6 +5435,7 @@ function wireView(){
     if(icsIn) icsIn.addEventListener('change', ()=>{ const f=icsIn.files&&icsIn.files[0]; if(f) importICSFile(f); icsIn.value=''; });
     main.querySelectorAll('[data-day]').forEach(el=>el.addEventListener('click', ()=>{ state.selectedDay=el.dataset.day; persistRender(); }));
     const addClassBtn=document.getElementById('addClassBtn'); if(addClassBtn) addClassBtn.addEventListener('click', addClass);
+    if(document.getElementById('addSchedBtn')) wireSchedForm();
     const ttParseBtn=document.getElementById('ttParseBtn');
     if(ttParseBtn) ttParseBtn.addEventListener('click', ()=>{
       const raw=document.getElementById('ttPaste')?.value||'';
@@ -5331,8 +5455,34 @@ function wireView(){
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
         </div>`;
       document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
+        let list = parsed.slice();
+        const amb = list.filter(p=>p.ambiguous);
+        if(amb.length){
+          const sample = amb.slice(0,3).map(p=>formatTime12(p.start)+'–'+formatTime12(p.end)+' '+p.title).join(', ');
+          const asPM = confirm(
+            'Some times had no AM or PM written (e.g. "'+sample+'").\n\n'+
+            'OK = afternoon (PM)\n'+
+            'Cancel = morning (AM)\n\n'+
+            'Tip: next time type 3pm or 8am to skip this question.'
+          );
+          list = list.map(p=>{
+            if(!p.ambiguous) return p;
+            const toAM = (t)=>{
+              let [h,m]=t.split(':').map(Number);
+              if(h>=13 && h<=23) h-=12;
+              return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+            };
+            const toPM = (t)=>{
+              let [h,m]=t.split(':').map(Number);
+              if(h>=1 && h<=11) h+=12;
+              return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+            };
+            if(asPM) return {...p, start:toPM(p.start), end:toPM(p.end)};
+            return {...p, start:toAM(p.start), end:toAM(p.end)};
+          });
+        }
         const queue=[];
-        parsed.forEach(p=>{
+        list.forEach(p=>{
           const entry={id:uid(), title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:''};
           const conflicts=findScheduleConflicts({day:p.day, start:p.start, end:p.end});
           queue.push({entry, conflicts});
@@ -5355,6 +5505,7 @@ function wireView(){
 
   if(state.view==='semester'){
     const addClassBtn=document.getElementById('addClassBtn'); if(addClassBtn) addClassBtn.addEventListener('click', addClass);
+    if(document.getElementById('addSchedBtn')) wireSchedForm();
     const ttOcrBtn=document.getElementById('ttOcrBtn');
     if(ttOcrBtn) ttOcrBtn.addEventListener('click', async ()=>{
       const input=document.getElementById('ttImageInput');
@@ -5384,8 +5535,34 @@ function wireView(){
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
         </div>`;
       document.getElementById('ttConfirmBtn').addEventListener('click', ()=>{
+        let list = parsed.slice();
+        const amb = list.filter(p=>p.ambiguous);
+        if(amb.length){
+          const sample = amb.slice(0,3).map(p=>formatTime12(p.start)+'–'+formatTime12(p.end)+' '+p.title).join(', ');
+          const asPM = confirm(
+            'Some times had no AM or PM written (e.g. "'+sample+'").\n\n'+
+            'OK = afternoon (PM)\n'+
+            'Cancel = morning (AM)\n\n'+
+            'Tip: next time type 3pm or 8am to skip this question.'
+          );
+          list = list.map(p=>{
+            if(!p.ambiguous) return p;
+            const toAM = (t)=>{
+              let [h,m]=t.split(':').map(Number);
+              if(h>=13 && h<=23) h-=12;
+              return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+            };
+            const toPM = (t)=>{
+              let [h,m]=t.split(':').map(Number);
+              if(h>=1 && h<=11) h+=12;
+              return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+            };
+            if(asPM) return {...p, start:toPM(p.start), end:toPM(p.end)};
+            return {...p, start:toAM(p.start), end:toAM(p.end)};
+          });
+        }
         const queue=[];
-        parsed.forEach(p=>{
+        list.forEach(p=>{
           const entry={id:uid(), title:p.title, day:p.day, start:p.start, end:p.end, room:p.room||'', textbook:'', meetingUrl:'', scope:'semester', semStart: todayStr(), semEnd:''};
           const conflicts=findScheduleConflicts({day:p.day, start:p.start, end:p.end});
           queue.push({entry, conflicts});
