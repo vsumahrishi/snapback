@@ -1444,10 +1444,13 @@ function addTask(){
   const priority=document.getElementById('newPriority').value;
   const reminderTime=document.getElementById('newReminderTime')?.value || '09:00';
   const leads=[];
-  if(document.getElementById('newLead7')?.checked) leads.push(7);
-  if(document.getElementById('newLead3')?.checked) leads.push(3);
-  if(document.getElementById('newLead1')?.checked) leads.push(1);
+  const dueDate = document.getElementById('newDate')?.value || date;
+  const daysUntil = dueDate ? Math.round((new Date(dueDate+'T12:00:00') - new Date(todayStr()+'T12:00:00'))/86400000) : 99;
+  if(daysUntil >= 7 && document.getElementById('newLead7')?.checked) leads.push(7);
+  if(daysUntil >= 3 && document.getElementById('newLead3')?.checked) leads.push(3);
+  if(daysUntil >= 1 && document.getElementById('newLead1')?.checked) leads.push(1);
   if(document.getElementById('newLead0')?.checked) leads.push(0);
+  if(!leads.length) leads.push(0);
   const id=uid();
   state.tasks.unshift({id,title,notes:'',date,time,priority,urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{}});
   state.pendingStrategyTaskId = id;
@@ -1603,10 +1606,10 @@ function rescheduleTask(id, days){
   t.date=toDateStr(base);
   persistRender();
 }
-function goFocusWithTask(id){ state.timer.activeTaskId=id; state.view='timer'; persistRender(); }
-function goCheeseWithTask(id){ state.cheeseTaskId=id; state.view='bitesize'; persistRender(); }
-function goEisenhower(){ state.view='eisenhower'; persistRender(); }
-function goTimeBlocking(){ state.view='timeblocking'; persistRender(); }
+function goFocusWithTask(id){ state.timer.activeTaskId=id; navigateTo('timer'); }
+function goCheeseWithTask(id){ state.cheeseTaskId=id; navigateTo('bitesize'); }
+function goEisenhower(){ navigateTo('eisenhower'); }
+function goTimeBlocking(){ navigateTo('timeblocking'); }
 
 function daysUntil(dateStr){
   if(!dateStr) return null;
@@ -1911,7 +1914,9 @@ function performUndo(){
   else if(u.type==='bulk-add-classes' && u.items){
     const ids=new Set(u.items.map(i=>i.id));
     state.classes=state.classes.filter(c=>!ids.has(c.id));
-  } else if(u.type==='bulk-add-blocks' && u.items){
+  } else if(u.type==='delete-journal' && u.item){ state.journal=state.journal||[]; state.journal.unshift(u.item); }
+  else if(u.type==='add-journal' && u.id){ state.journal=(state.journal||[]).filter(j=>j.id!==u.id); }
+  else if(u.type==='bulk-add-blocks' && u.items){
     const ids=new Set(u.items.map(i=>i.id));
     state.studyBlocks=state.studyBlocks.filter(b=>!ids.has(b.id));
   }
@@ -2614,6 +2619,7 @@ const NAV=[
     {id:'projects', label:'Projects', ico:'&#128218;'},
     {id:'money', label:'Money', ico:'&#128176;'},
     {id:'habits', label:'Healthy Habits', ico:'&#127807;'},
+    {id:'journal', label:'Journal', ico:'&#128221;'},
     {id:'stats', label:'Stats', ico:'&#128202;'}
   ]},
   {section:'Focus techniques', items:[
@@ -2632,7 +2638,7 @@ const NAV=[
     {id:'help', label:'Help & FAQ', ico:'&#10067;'}
   ]}
 ];
-function setView(v){ state.view=v; persistRender(); }
+function setView(v){ navigateTo(v); }
 
 /* ============================================================
    Render shell
@@ -2732,7 +2738,7 @@ function renderMain(){
   const views={today:viewToday,tasks:viewTasks,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
     eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,
     bodydouble:viewBodyDouble,settings:viewSettings,
-    habits:viewHabits,studytools:viewStudyTools,stats:viewStats,help:viewHelp};
+    habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp};
   try{
     el.innerHTML=(views[state.view]||viewToday)();
     wireView();
@@ -2768,6 +2774,72 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+  // Task action sheet
+  if(state.taskMenuOpen && state.taskMenuId){
+    const t = findTask(state.taskMenuId);
+    if(!t){ state.taskMenuOpen=false; }
+    else {
+      root.innerHTML=`<div class="overlay" id="taskMenuOverlay">
+        <div class="quotecard" style="max-width:400px;text-align:left">
+          <div class="qeyebrow">SnapBack</div>
+          <div style="font-weight:700;margin-bottom:4px">${escapeHtml(t.title)}</div>
+          <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">What do you want to do?</p>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <button class="btn" id="tmDone">${t.done?'Mark as not done':'Mark as done'}</button>
+            <button class="btn ghost" id="tmResched">Reschedule…</button>
+            <button class="btn ghost" id="tmRemind">Change reminder…</button>
+            <button class="btn ghost" id="tmFocus">Start Focus Pod</button>
+            <button class="btn ghost" id="tmEdit">Edit title / details</button>
+            <button class="btn danger ghost" id="tmDelete">Delete task</button>
+            <button class="btn ghost" id="tmClose">Close</button>
+          </div>
+          <div id="tmExtra" style="margin-top:12px"></div>
+        </div>
+      </div>`;
+      document.getElementById('tmClose').onclick=()=>closeTaskMenu();
+      document.getElementById('tmDone').onclick=()=>{
+        t.done=!t.done;
+        if(t.done) pushUndo({type:'toggle-done', id:t.id, was:false, label:'Marked done — Undo'});
+        closeTaskMenu();
+      };
+      document.getElementById('tmFocus').onclick=()=>{ closeTaskMenu(); goFocusWithTask(t.id); };
+      document.getElementById('tmEdit').onclick=()=>{
+        closeTaskMenu();
+        navigateTo('tasks');
+        setTimeout(()=>{
+          const el=document.querySelector('.ttitle-edit[data-id="'+t.id+'"]')||document.querySelector('[data-action="task-menu"][data-id="'+t.id+'"]');
+          if(el) el.scrollIntoView({behavior:'smooth',block:'center'});
+        },200);
+      };
+      document.getElementById('tmDelete').onclick=()=>{
+        if(confirm('Delete this task?')){ deleteTask(t.id); closeTaskMenu(); }
+      };
+      document.getElementById('tmResched').onclick=()=>{
+        const box=document.getElementById('tmExtra');
+        box.innerHTML=`<div class="field"><label>New date</label><input type="date" id="tmNewDate" value="${t.date||todayStr()}"></div>
+          <div class="field"><label>New time</label><input type="time" id="tmNewTime" value="${t.time||''}"></div>
+          <button class="btn sm" id="tmSaveDate" style="margin-top:8px">Save date</button>`;
+        document.getElementById('tmSaveDate').onclick=()=>{
+          t.date=document.getElementById('tmNewDate').value;
+          t.time=document.getElementById('tmNewTime').value;
+          closeTaskMenu();
+        };
+      };
+      document.getElementById('tmRemind').onclick=()=>{
+        const box=document.getElementById('tmExtra');
+        box.innerHTML=`<div class="field"><label>Remind at</label><input type="time" id="tmRemTime" value="${t.reminderTime||'09:00'}"></div>
+          <label style="font-size:.85rem"><input type="checkbox" id="tmLead0" ${(t.reminderLeads||[]).includes(0)?'checked':''}> On the day</label>
+          <button class="btn sm" id="tmSaveRem" style="margin-top:8px">Save reminder</button>`;
+        document.getElementById('tmSaveRem').onclick=()=>{
+          t.reminderTime=document.getElementById('tmRemTime').value;
+          t.reminderLeads = document.getElementById('tmLead0').checked ? [0] : [];
+          closeTaskMenu();
+        };
+      };
+      return;
+    }
+  }
+
   // AM/PM choice (SnapBack branded — not browser "github.io says")
   if(state.ampmPromptOpen && state.ampmPrompt){
     root.innerHTML=`<div class="overlay" id="ampmOverlay">
@@ -2948,6 +3020,35 @@ function renderModal(){
   document.getElementById('qClose').addEventListener('click', closeQuote);
   document.getElementById('quoteOverlay').addEventListener('click',(e)=>{ if(e.target.id==='quoteOverlay') closeQuote(); });
 }
+
+function openTaskMenu(id){
+  state.taskMenuId = id;
+  state.taskMenuOpen = true;
+  persistRender();
+}
+function closeTaskMenu(){
+  state.taskMenuOpen = false;
+  state.taskMenuId = null;
+  persistRender();
+}
+
+function navigateTo(view){
+  if(!state.navHistory) state.navHistory=[];
+  if(state.view && state.view !== view){
+    state.navHistory.push(state.view);
+    if(state.navHistory.length > 30) state.navHistory.shift();
+  }
+  state.view = view;
+  persistRender();
+}
+function goBack(){
+  if(state.navHistory && state.navHistory.length){
+    state.view = state.navHistory.pop();
+  } else {
+    state.view = 'today';
+  }
+  persistRender();
+}
 function persistRender(){ saveState(); render(); try{ syncNativeClassReminders(); }catch(e){} }
 function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
   const main=document.getElementById('main');
@@ -3126,11 +3227,10 @@ function taskCard(t){
   const sugg=suggestTechnique(t);
   const chunkInfo = t.chunks && t.chunks.length ? `<span class="badge low">${t.chunks.filter(c=>c.done).length}/${t.chunks.length} bites</span>` : '';
   const frogStyle = t.frog ? 'border-left:5px solid var(--gold)' : '';
-  return `<li class="taskcard ${t.done?'done':''}" style="${frogStyle}">
+  return `<li class="taskcard ${t.done?'done':''}" style="${frogStyle};cursor:pointer" data-action="task-menu" data-id="${t.id}">
     <div class="trow-top">
-      <input type="checkbox" class="check" ${t.done?'checked':''} data-action="toggle-done" data-id="${t.id}">
       <div style="flex:1;min-width:0">
-        <input type="text" class="ttitle-edit" value="${escapeHtml(t.title)}" data-action="set-title" data-id="${t.id}" placeholder="Task title">
+        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${escapeHtml(t.title)}${t.done?' <span class="badge low">done</span>':''}</div>
         
         <!-- Dates & Priority -->
         <div class="tmeta">
@@ -3185,7 +3285,7 @@ function viewTasks(){
   const items = list.length ? list.map(taskCard).join('') : `<div class="empty">Nothing here. Add a task above, or pick a different filter.</div>`;
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Today is ${new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</div>
     <h1>Tasks</h1>
     <p>Give each task a date and time, tag it Must-do or Frog (the one you're dreading), and let the suggestion nudge you to the right technique.</p>
@@ -3212,16 +3312,19 @@ function viewTasks(){
         </div>
       </div>
     </div>
-    <div class="row" style="margin-top:12px;align-items:center">
-      <span style="font-size:.82rem;color:var(--muted);white-space:nowrap">Ask AI:</span>
-      <select id="aiHelperSelect" style="max-width:140px">
-        <option value="grok">Grok</option>
-        <option value="chatgpt">ChatGPT</option>
-        <option value="claude">Claude</option>
-        <option value="gemini">Gemini</option>
-        <option value="perplexity">Perplexity</option>
-      </select>
-      <button class="btn ghost sm" id="askAiBtn" style="flex:0 0 auto">Open AI ↗</button>
+    <div style="margin-top:14px;padding:12px;background:var(--pine-soft);border-radius:12px;border:1px solid var(--pine)">
+      <div style="font-weight:700;font-size:.9rem;margin-bottom:4px">Need help with this task?</div>
+      <p style="font-size:.82rem;color:var(--muted);margin:0 0 8px">Ask AI for ideas, a plan, or how to break it down.</p>
+      <div class="row" style="align-items:center">
+        <select id="aiHelperSelect" style="max-width:140px">
+          <option value="grok">Grok</option>
+          <option value="chatgpt">ChatGPT</option>
+          <option value="claude">Claude</option>
+          <option value="gemini">Gemini</option>
+          <option value="perplexity">Perplexity</option>
+        </select>
+        <button class="btn sm" id="askAiBtn" style="flex:0 0 auto">Yes — ask AI ↗</button>
+      </div>
     </div>
     <button class="btn" id="addTaskBtn" style="margin-top:14px;width:100%">Add task</button>
   </div>
@@ -3607,7 +3710,7 @@ function viewCalendar(){
   const selItems=itemsForDate(state.selectedDay);
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Week &amp; month at a glance</div>
     <h1>Your Schedule</h1>
     <p>Classes, deadlines, study blocks, and your non-negotiable — color-coded so nothing hides. Export downloads a standard .ics file you can import into Google Calendar, Apple Calendar, or Outlook — no sign-in or account linking needed.</p>
@@ -3784,7 +3887,7 @@ function viewMoney(){
   const catRows=Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Keep it simple</div>
     <h1>Money</h1>
     <p>A quick log — impulsive spending is easier to catch when it's visible. Export or copy a summary any time to share with a parent or just keep for your own records.</p>
@@ -3832,7 +3935,7 @@ function viewTimer(){
   const dots=Array.from({length:s.sessionsBeforeLong}).map((_,i)=>`<div class="dot ${(t.sessionCount % s.sessionsBeforeLong)>i?'filled':''}"></div>`).join('');
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Pomodoro-style</div>
     <h1>Focus Pod</h1>
     <p>One task, one timer. Turn on Soundscape sync in Settings and your background sound will start and stop with each session automatically.</p>
@@ -3899,7 +4002,7 @@ function viewEisenhower(){
   const listOrEmpty=(arr)=>arr.length?arr.map(card).join(''):`<div style="font-size:.77rem;color:var(--muted)">Nothing here</div>`;
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Whole-list view</div><h1>Eisenhower Matrix</h1><p>Tap Urgent / Important on any task to move it between quadrants.</p>
   </div>
   <div class="matrix">
@@ -3938,7 +4041,7 @@ function viewBiteSize(){
   </div>` : '';
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Small bites, big progress</div><h1>Bite Size</h1><p>Big tasks feel scary. Break them into tiny bites you can finish in 5–15 minutes. Order doesn't matter — just keep taking bites.</p>
   </div>
   ${guideBanner}
@@ -3979,7 +4082,7 @@ function viewTimeBlocking(){
   const blocks=state.studyBlocks.filter(b=>b.date===date).sort((a,b)=>a.start.localeCompare(b.start));
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Make time visible</div><h1>Time Blocking</h1><p>Vague plans like "study all evening" don't happen. Give the work a start time, an end time, and a name.</p>
   </div>
   <div class="card">
@@ -4481,7 +4584,7 @@ function viewSemester(){
   }));
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Your class timetable</div>
     <h1>Calendar</h1>
     <p>Your master schedule — classes, study, workouts, appointments. Everything appears on Your Schedule. Use Quick add for several items, or Add to schedule for one item with more detail.</p>
@@ -4607,7 +4710,7 @@ function viewProjects(){
 
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Classes = projects</div>
     <h1>Projects</h1>
     <p>Every class is a project. See related tasks and progress for each subject in one place.</p>
@@ -4663,7 +4766,7 @@ function viewRule135(){
   </div>`;
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">A hard ceiling on today</div>
     <h1>Focus Plate</h1>
     <p>One big thing. Three medium things. Five small things. That's the whole list for today — nothing else counts.</p>
@@ -4711,7 +4814,7 @@ function viewBodyDouble(){
 
   if(bd.stage==='pick'){
     return `
-    <div class="pagehead"><button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button><div class="eyebrow">Work alongside... yourself, with structure</div><h1>Body Doubling</h1><p>Real body doubling works because of a ritual: declare a goal out loud, work inside a fixed block, check out at the end. These three session styles borrow that structure so you get the accountability without needing to book or match with anyone.</p></div>
+    <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">Work alongside... yourself, with structure</div><h1>Body Doubling</h1><p>Real body doubling works because of a ritual: declare a goal out loud, work inside a fixed block, check out at the end. These three session styles borrow that structure so you get the accountability without needing to book or match with anyone.</p></div>
     <div class="grid3">
       ${Object.entries(BD_TEMPLATES).map(([key,t])=>`<div class="card">
         <h3>${t.name}</h3>
@@ -4819,12 +4922,59 @@ function habitHistoryCell(h, day){
   if(h.type==='note') return `<span style="font-size:.72rem" title="${escapeHtml(v)}">${escapeHtml(String(v).slice(0,10))}${String(v).length>10?'&hellip;':''}</span>`;
   return v ? '<span style="color:var(--pine);font-weight:700">&#10003;</span>' : '<span style="color:var(--line)">&middot;</span>';
 }
+
+function viewJournal(){
+  if(!state.journal) state.journal=[];
+  const today=todayStr();
+  const entries=[...state.journal].sort((a,b)=>(b.date+b.time).localeCompare(a.date+a.time));
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+    <div class="eyebrow">Capture it before it vanishes</div>
+    <h1>Journal</h1>
+    <p>Quick notes for sudden thoughts — no structure required.</p>
+  </div>
+  <div class="card">
+    <h3>New note</h3>
+    <textarea id="journalText" rows="3" placeholder="What's on your mind?" style="width:100%"></textarea>
+    <button class="btn" id="journalSave" style="margin-top:10px">Save note</button>
+  </div>
+  <div class="card">
+    <h3>Recent</h3>
+    ${entries.length ? entries.map(e=>`
+      <div class="deadline-row" style="align-items:flex-start">
+        <div style="flex:1">
+          <div style="font-size:.75rem;color:var(--muted)">${e.date} ${e.time||''}</div>
+          <div style="white-space:pre-wrap">${escapeHtml(e.text)}</div>
+        </div>
+        <button class="btn ghost sm" data-action="delete-journal" data-id="${e.id}">✕</button>
+      </div>`).join('') : '<div class="empty">No notes yet.</div>'}
+  </div>`;
+}
+function addJournalEntry(){
+  const text=(document.getElementById('journalText')?.value||'').trim();
+  if(!text) return;
+  if(!state.journal) state.journal=[];
+  const now=new Date();
+  const time=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  state.journal.unshift({id:uid(), text, date:todayStr(), time});
+  state.journal=state.journal.slice(0,100);
+  pushUndo({type:'add-journal', id:state.journal[0].id, label:'Note saved — Undo'});
+  persistRender();
+}
+function deleteJournalEntry(id){
+  const item=(state.journal||[]).find(j=>j.id===id);
+  if(item) pushUndo({type:'delete-journal', item:JSON.parse(JSON.stringify(item)), label:'Note deleted — Undo'});
+  state.journal=(state.journal||[]).filter(j=>j.id!==id);
+  persistRender();
+}
+
 function viewHabits(){
   const today=todayStr();
   const todayLog=state.habitLog[today]||{};
   const days=last7Days();
   return `
-  <div class="pagehead"><button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button><div class="eyebrow">The basics hold everything else up</div><h1>Healthy Habits</h1><p>Focus is hard to sustain on no sleep, no food, no movement, and too much scrolling. Quick daily check-ins — check your phone's own Screen Time / Digital Wellbeing report and log the minutes here.</p></div>
+  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">The basics hold everything else up</div><h1>Healthy Habits</h1><p>Focus is hard to sustain on no sleep, no food, no movement, and too much scrolling. Quick daily check-ins — check your phone's own Screen Time / Digital Wellbeing report and log the minutes here.</p></div>
   <div class="card">
     <h3>Today</h3>
     <div class="mustcould" style="grid-template-columns:1fr">
@@ -5009,7 +5159,7 @@ function viewWhenThen(){
   const list = state.whenThen || [];
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">If-then plans that stick</div>
     <h1>When-Then Rules</h1>
     <p>Pair a hard task with a clear reward. Write it as: <b>When</b> I finish X, <b>then</b> I get to do Y.</p>
@@ -5055,7 +5205,7 @@ function viewRewarding(){
   const list = state.rewardingRoutines || [];
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Pair the boring with the fun</div>
     <h1>Rewarding Routines</h1>
     <p>Attach something you tend to avoid to something you actually want. The reward only happens after the hard part.</p>
@@ -5090,7 +5240,7 @@ function viewStrategic(){
   const list = state.strategicPlans || [];
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Implementation intentions</div>
     <h1>Strategic Scheduling</h1>
     <p>Write down <b>when</b>, <b>where</b>, and <b>how</b> you will do the thing. Vague plans fail; specific ones get done.</p>
@@ -5138,7 +5288,7 @@ function viewFlipScript(){
   const custom = state.flipScripts || [];
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Change the story you tell yourself</div>
     <h1>Flip the Script</h1>
     <p>When your brain says something discouraging, answer with a kinder, more useful line. Practice the flip until it becomes automatic.</p>
@@ -5182,7 +5332,7 @@ function viewFlipScript(){
 function viewHelp(){
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">How to actually use it</div><h1>Help &amp; FAQ</h1><p>Short how-tos first. Then what each section is for.</p>
   </div>
 
@@ -5243,7 +5393,7 @@ function viewHelp(){
 
 function viewStudyTools(){
   return `
-  <div class="pagehead"><button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button><div class="eyebrow">Free, organized by what you're trying to do</div><h1>Study Tools</h1><p>External tools, opened in a new tab — grouped by task so you're not hunting for the right one.</p></div>
+  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">Free, organized by what you're trying to do</div><h1>Study Tools</h1><p>External tools, opened in a new tab — grouped by task so you're not hunting for the right one.</p></div>
   ${STUDY_TOOLS.map(cat=>`<div class="card">
     <h3>${escapeHtml(cat.category)}</h3>
     ${cat.tools.map(t=>`<div class="deadline-row">
@@ -5287,7 +5437,7 @@ function viewStats(){
   const earned=moneyInRange.filter(m=>m.type==='income').reduce((a,b)=>a+b.amount,0);
 
   return `
-  <div class="pagehead"><button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button><div class="eyebrow">Zoom out and see the shape of it</div><h1>Stats</h1><p>Pick a range and see what actually happened — completed, left out, and everything in between.</p></div>
+  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">Zoom out and see the shape of it</div><h1>Stats</h1><p>Pick a range and see what actually happened — completed, left out, and everything in between.</p></div>
 
   <div class="card">
     <div class="filters">
@@ -5411,7 +5561,7 @@ function viewSettings(){
   const s=state.settings;
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="back-to-today" style="margin-bottom:8px">← Back</button>
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Make it yours</div><h1>Settings</h1><p>Changes apply immediately.</p>
   </div>
   <div class="card">
@@ -5607,6 +5757,24 @@ function wireView(){
 
   if(state.view==='tasks'){
     const addBtn=document.getElementById('addTaskBtn'); if(addBtn) addBtn.addEventListener('click', addTask);
+
+    const newDateEl=document.getElementById('newDate');
+    function syncLeadOptions(){
+      const due=newDateEl?.value || todayStr();
+      const daysUntil=Math.round((new Date(due+'T12:00:00') - new Date(todayStr()+'T12:00:00'))/86400000);
+      const map={newLead7:7,newLead3:3,newLead1:1,newLead0:0};
+      Object.keys(map).forEach(id=>{
+        const el=document.getElementById(id);
+        if(!el) return;
+        const lab=el.closest('label');
+        if(map[id]===0){ if(lab) lab.style.display=''; return; }
+        const show = daysUntil >= map[id];
+        if(lab) lab.style.display = show ? '' : 'none';
+        if(!show) el.checked=false;
+      });
+    }
+    if(newDateEl){ newDateEl.addEventListener('change', syncLeadOptions); syncLeadOptions(); }
+
     const quickBtn=document.getElementById('quickAddBtn'); if(quickBtn) quickBtn.addEventListener('click', quickAddTask);
     const askAiBtn=document.getElementById('askAiBtn');
     if(askAiBtn) askAiBtn.addEventListener('click', ()=>{
@@ -5939,6 +6107,9 @@ function wireView(){
     const addBtn=document.getElementById('addReminderBtn'); if(addBtn) addBtn.addEventListener('click', addCustomReminder);
   }
 
+  if(state.view==='journal'){
+    const js=document.getElementById('journalSave'); if(js) js.addEventListener('click', addJournalEntry);
+  }
   if(state.view==='habits'){
     const addHabitBtn=document.getElementById('addHabitBtn'); if(addHabitBtn) addHabitBtn.addEventListener('click', addHabit);
     const breatheBtn=document.getElementById('breatheBtn'); if(breatheBtn) breatheBtn.addEventListener('click', openBreathingPause);
@@ -6165,6 +6336,9 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.conflictIdx===undefined) state.conflictIdx=0;
     if(state.ampmPromptOpen===undefined) state.ampmPromptOpen=false;
     if(state.ampmPrompt===undefined) state.ampmPrompt=null;
+    if(state.navHistory===undefined) state.navHistory=[];
+    if(state.taskMenuOpen===undefined) state.taskMenuOpen=false;
+    if(state.journal===undefined) state.journal=[];
     if(state.settings.celebrateOnComplete===undefined) state.settings.celebrateOnComplete=true;
     if(state.settings.celebrateSound===undefined) state.settings.celebrateSound=true;
     if(!Array.isArray(state.whenThen)) state.whenThen=[];
