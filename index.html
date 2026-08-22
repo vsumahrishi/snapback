@@ -224,7 +224,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 .faqitem p{font-size:.85rem;color:var(--muted);margin:0 0 12px}
 
 /* Calendar */
-.calnav{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.calnav{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .calnav .spacer{flex:1}
 .monthgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
 .dowhead{font-size:.68rem;text-transform:uppercase;color:var(--muted);text-align:center;font-weight:700;padding-bottom:3px}
@@ -352,6 +352,8 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
   .strategy-box input{margin-bottom:6px}
 }
 </style>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 </head>
 <body>
 <div class="app">
@@ -919,6 +921,7 @@ function emptyState(){
 function defaultState(){
   return {
     view:'today',
+    profile:{name:'', grade:'', school:'', notes:''},
     filter:'all',
     calMode:'list',
     calRef: todayStr(),
@@ -2540,40 +2543,65 @@ async function syncNativeClassReminders(){
   if(!isNativeApp()) return;
   const ok = await ensureNotifyPermission();
   if(!ok) return;
-  // Next 14 days: 15 min before each class occurrence
-  const dayNames=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   for(let offset=0; offset<14; offset++){
     const d=new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()+offset);
     const ds=toDateStr(d);
-    const dow=mondayIndex(d); // Mon=0..Sun=6 in app
+    const dow=mondayIndex(d);
     (state.classes||[]).forEach(c=>{
       let applies=false;
       if(c.scope==='session') applies = c.date===ds;
       else applies = Number(c.day)===dow;
       if(!applies || !c.start) return;
+      const mins = (c.alarmMinutes!=null)?Number(c.alarmMinutes):15;
+      if(mins<=0) return;
       const [hh,mm]=(c.start||'09:00').split(':').map(Number);
       const startAt=new Date(ds+'T00:00:00'); startAt.setHours(hh,mm,0,0);
-      const when=new Date(startAt.getTime()-15*60000);
+      const when=new Date(startAt.getTime()-mins*60000);
       scheduleNativeNotification({
         key: 'class-'+c.id+'-'+ds,
-        title: 'Class in 15 min',
+        title: 'In '+mins+' min',
         body: (c.title||'Class')+(c.room?' · '+c.room:'')+' at '+c.start,
         when
       });
     });
+    (state.studyBlocks||[]).forEach(b=>{
+      if(b.date!==ds || !b.start) return;
+      const mins=(b.alarmMinutes!=null)?Number(b.alarmMinutes):15;
+      if(mins<=0) return;
+      const [hh,mm]=b.start.split(':').map(Number);
+      const startAt=new Date(ds+'T00:00:00'); startAt.setHours(hh,mm,0,0);
+      const when=new Date(startAt.getTime()-mins*60000);
+      scheduleNativeNotification({
+        key:'block-'+b.id,
+        title:'In '+mins+' min',
+        body:(b.label||'Appointment')+' at '+b.start,
+        when
+      });
+    });
   }
-  // Tasks with date+time: 15 min before due time same day
-  (state.tasks||[]).filter(t=>!t.done && t.date && t.time).forEach(t=>{
-    const [hh,mm]=t.time.split(':').map(Number);
-    const startAt=new Date(t.date+'T00:00:00'); startAt.setHours(hh,mm,0,0);
-    const when=new Date(startAt.getTime()-15*60000);
-    scheduleNativeNotification({
-      key: 'task-'+t.id,
-      title: 'Upcoming task',
-      body: t.title,
-      when
+  (state.tasks||[]).filter(t=>!t.done && t.date).forEach(t=>{
+    const leads=(t.reminderLeads&&t.reminderLeads.length)?t.reminderLeads:[0];
+    const rt=t.reminderTime||t.time||'09:00';
+    leads.forEach(daysBefore=>{
+      const d=new Date(t.date+'T12:00:00');
+      d.setDate(d.getDate()-daysBefore);
+      const [hh,mm]=rt.split(':').map(Number);
+      d.setHours(hh||9,mm||0,0,0);
+      scheduleNativeNotification({
+        key:'task-'+t.id+'-'+daysBefore,
+        title: daysBefore===0?'Task due today':'Task in '+daysBefore+' day(s)',
+        body:t.title,
+        when:d
+      });
     });
   });
+  // Non-negotiable today
+  const nn=state.nonNegotiable&&state.nonNegotiable[todayStr()];
+  if(nn && nn.remindAt){
+    const [hh,mm]=nn.remindAt.split(':').map(Number);
+    const when=new Date(); when.setHours(hh,mm,0,0);
+    scheduleNativeNotification({key:'nn-'+todayStr(), title:'Non-negotiable', body:nn.text, when});
+  }
 }
 
 function checkNotifications(){
@@ -2801,6 +2829,31 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+  // Wake-up math
+  if(state.wakeMathOpen && state.wakeMath){
+    const m=state.wakeMath;
+    const snoozes=(state.wakeAlarm&&state.wakeAlarm.snoozesLeft)||0;
+    root.innerHTML=`<div class="overlay" style="background:rgba(0,0,0,.85)">
+      <div class="quotecard" style="max-width:360px;text-align:center">
+        <div class="qeyebrow">SnapBack alarm</div>
+        <div style="font-size:1.4rem;font-weight:800;margin:8px 0">Time to wake up</div>
+        <p style="color:var(--muted);font-size:.9rem">Solve to stop the alarm</p>
+        <div style="font-size:2rem;font-weight:800;margin:16px 0">${m.a} + ${m.b} = ?</div>
+        <input type="number" id="wakeAnswer" inputmode="numeric" style="font-size:1.4rem;text-align:center;width:120px;padding:12px;border-radius:12px;border:2px solid var(--pine)" />
+        <div class="qactions" style="margin-top:16px;flex-direction:column;gap:8px">
+          <button class="btn" id="wakeSubmit">Stop alarm</button>
+          <button class="btn ghost" id="wakeSnoozeBtn" ${snoozes<=0?'disabled':''}>Snooze 5 min (${snoozes} left)</button>
+        </div>
+      </div>
+    </div>`;
+    const ans=document.getElementById('wakeAnswer');
+    if(ans) setTimeout(()=>ans.focus(),200);
+    document.getElementById('wakeSubmit').onclick=()=>wakeDismissMath(document.getElementById('wakeAnswer')?.value);
+    document.getElementById('wakeSnoozeBtn').onclick=()=>wakeSnooze();
+    if(ans) ans.addEventListener('keydown', e=>{ if(e.key==='Enter') wakeDismissMath(ans.value); });
+    return;
+  }
+
   // Task action sheet
   if(state.taskMenuOpen && state.taskMenuId){
     const t = findTask(state.taskMenuId);
@@ -3077,6 +3130,221 @@ function goBack(){
   persistRender();
 }
 
+
+/* ============================================================
+   Cloud sync (Firebase) — laptop + phone same data live
+   ============================================================ */
+let _db = null;
+let _unsubSync = null;
+let _syncApplying = false;
+let _syncTimer = null;
+
+function getFirebaseConfig(){
+  try {
+    const raw = localStorage.getItem('snapback_fb_config');
+    if(!raw) return null;
+    return JSON.parse(raw);
+  } catch(e){ return null; }
+}
+function setFirebaseConfig(cfg){
+  localStorage.setItem('snapback_fb_config', JSON.stringify(cfg));
+}
+function getSyncCode(){
+  return (localStorage.getItem('snapback_sync_code')||'').trim().toUpperCase();
+}
+function setSyncCode(code){
+  localStorage.setItem('snapback_sync_code', (code||'').trim().toUpperCase());
+}
+function initFirebase(){
+  const cfg = getFirebaseConfig();
+  if(!cfg || !cfg.apiKey || !cfg.projectId) return null;
+  if(typeof firebase === 'undefined') return null;
+  try{
+    if(!firebase.apps.length) firebase.initializeApp(cfg);
+    _db = firebase.firestore();
+    return _db;
+  }catch(e){ console.warn('firebase init', e); return null; }
+}
+function syncPayloadFromState(){
+  const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm'];
+  const payload = {};
+  keys.forEach(k=>{ if(state[k]!==undefined) payload[k]=state[k]; });
+  payload.updatedAt = new Date().toISOString();
+  return payload;
+}
+function applyCloudPayload(payload){
+  if(!payload || typeof payload!=='object') return;
+  _syncApplying = true;
+  const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm'];
+  keys.forEach(k=>{ if(payload[k]!==undefined) state[k]=payload[k]; });
+  try{ saveState(); }catch(e){}
+  _syncApplying = false;
+  render();
+}
+function startCloudSync(){
+  if(_unsubSync){ try{ _unsubSync(); }catch(e){} _unsubSync=null; }
+  const code = getSyncCode();
+  if(!code || code.length < 4) return;
+  const db = initFirebase();
+  if(!db) return;
+  const ref = db.collection('snapback').doc(code);
+  _unsubSync = ref.onSnapshot(snap=>{
+    if(!snap.exists) return;
+    const data = snap.data();
+    if(!data) return;
+    // avoid echo loop: skip if we just wrote
+    if(data.updatedAt && state._lastCloudWrite && data.updatedAt === state._lastCloudWrite) return;
+    applyCloudPayload(data);
+  }, err=> console.warn('sync listen', err));
+}
+function pushCloudSync(){
+  if(_syncApplying) return;
+  const code = getSyncCode();
+  if(!code || code.length < 4) return;
+  const db = initFirebase();
+  if(!db) return;
+  clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(()=>{
+    try{
+      const payload = syncPayloadFromState();
+      state._lastCloudWrite = payload.updatedAt;
+      db.collection('snapback').doc(code).set(payload, { merge: true });
+    }catch(e){ console.warn('sync push', e); }
+  }, 800);
+}
+
+
+/* ============================================================
+   Wake-up alarm — math dismiss + 2 snoozes
+   ============================================================ */
+function nextWakeDate(from){
+  const wa=state.wakeAlarm||{};
+  if(!wa.enabled||!wa.time) return null;
+  const [hh,mm]=(wa.time||'07:00').split(':').map(Number);
+  const days=wa.days&&wa.days.length?wa.days:[0,1,2,3,4,5,6];
+  let d=new Date(from||Date.now());
+  for(let i=0;i<8;i++){
+    const cand=new Date(d);
+    if(i>0) cand.setDate(cand.getDate()+i);
+    else {
+      // today: only if time still ahead
+    }
+    const dayIdx=mondayIndex(cand); // Mon=0
+    if(days.indexOf(dayIdx)<0) continue;
+    const when=new Date(cand);
+    when.setHours(hh,mm,0,0);
+    if(when.getTime() > Date.now()+5000) return when;
+  }
+  return null;
+}
+function scheduleWakeAlarms(){
+  const wa=state.wakeAlarm||{};
+  if(!wa.enabled) return;
+  const when=nextWakeDate();
+  if(!when) return;
+  if(typeof scheduleNativeNotification==='function'){
+    scheduleNativeNotification({
+      key:'wake-main',
+      title:'Wake up — SnapBack',
+      body:'Time to get up. Open SnapBack to stop the alarm.',
+      when
+    });
+  }
+  // Also schedule browser-side check
+  const ms=when.getTime()-Date.now();
+  if(ms>0 && ms<86400000*2){
+    clearTimeout(window._wakeTimer);
+    window._wakeTimer=setTimeout(()=>triggerWakeMath('alarm'), Math.min(ms, 2147483647));
+  }
+}
+function triggerWakeMath(reason){
+  const a=Math.floor(Math.random()*8)+2;
+  const b=Math.floor(Math.random()*8)+2;
+  state.wakeMath={a,b,answer:a+b,reason:reason||'alarm'};
+  state.wakeMathOpen=true;
+  try{ playWakeBeep(); }catch(e){}
+  persistRender();
+}
+function playWakeBeep(){
+  try{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const o=ctx.createOscillator(); const g=ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value=880; g.gain.value=0.15;
+    o.start();
+    setTimeout(()=>{ o.stop(); ctx.close(); }, 400);
+    // repeat a few times
+    let n=0;
+    const id=setInterval(()=>{
+      n++;
+      if(n>8||!state.wakeMathOpen){ clearInterval(id); return; }
+      try{
+        const c=new (window.AudioContext||window.webkitAudioContext)();
+        const o2=c.createOscillator(); const g2=c.createGain();
+        o2.connect(g2); g2.connect(c.destination);
+        o2.frequency.value=880; g2.gain.value=0.12;
+        o2.start(); setTimeout(()=>{o2.stop();c.close();},300);
+      }catch(e){}
+    }, 1200);
+    window._wakeBeepInterval=id;
+  }catch(e){}
+}
+function stopWakeBeep(){
+  clearInterval(window._wakeBeepInterval);
+}
+function wakeSnooze(){
+  const wa=state.wakeAlarm||{};
+  if((wa.snoozesLeft||0)<=0){
+    alert('No snoozes left — solve the math to stop.');
+    return;
+  }
+  wa.snoozesLeft=(wa.snoozesLeft||1)-1;
+  stopWakeBeep();
+  state.wakeMathOpen=false;
+  state.wakeMath=null;
+  const when=new Date(Date.now()+5*60000);
+  if(typeof scheduleNativeNotification==='function'){
+    scheduleNativeNotification({
+      key:'wake-snooze-'+Date.now(),
+      title:'Snooze over — SnapBack',
+      body:'Wake-up again. Open the app.',
+      when
+    });
+  }
+  clearTimeout(window._wakeTimer);
+  window._wakeTimer=setTimeout(()=>triggerWakeMath('snooze'), 5*60000);
+  persistRender();
+}
+function wakeDismissMath(answer){
+  const m=state.wakeMath;
+  if(!m) return;
+  if(Number(answer)!==m.answer){
+    alert('Not quite — try again.');
+    return;
+  }
+  stopWakeBeep();
+  state.wakeMathOpen=false;
+  state.wakeMath=null;
+  if(state.wakeAlarm) state.wakeAlarm.snoozesLeft=state.wakeAlarm.snoozesMax||2;
+  scheduleWakeAlarms(); // next day
+  persistRender();
+}
+function saveWakeAlarmFromForm(){
+  if(!state.wakeAlarm) state.wakeAlarm={};
+  state.wakeAlarm.enabled=!!document.getElementById('wakeEnabled')?.checked;
+  state.wakeAlarm.time=document.getElementById('wakeTime')?.value||'07:00';
+  state.wakeAlarm.snoozesMax=2;
+  state.wakeAlarm.snoozesLeft=2;
+  const days=[];
+  for(let i=0;i<7;i++){
+    if(document.getElementById('wakeDay'+i)?.checked) days.push(i);
+  }
+  state.wakeAlarm.days=days.length?days:[0,1,2,3,4];
+  scheduleWakeAlarms();
+  persistRender();
+  alert(state.wakeAlarm.enabled?'Wake-up alarm saved and scheduled.':'Wake-up alarm off.');
+}
+
 function exportBackup(){
   const data = {
     version: 1,
@@ -3118,7 +3386,7 @@ function importBackupFile(file){
   reader.readAsText(file);
 }
 
-function persistRender(){ saveState(); render(); try{ syncNativeClassReminders(); }catch(e){} }
+function persistRender(){ saveState(); render(); try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} }
 function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
   const main=document.getElementById('main');
   if(main && state.undoBanner){
@@ -3137,7 +3405,7 @@ function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal()
     window._undoBannerTimer=setTimeout(()=>{ state.undoBanner=null; const b=document.querySelector('.undo-banner'); if(b) b.remove(); }, 12000);
   }
 }
-if(typeof window!=='undefined'){ setTimeout(()=>{ try{ ensureNotifyPermission(); syncNativeClassReminders(); }catch(e){} }, 2000); }
+if(typeof window!=='undefined'){ setTimeout(()=>{ try{ ensureNotifyPermission(); syncNativeClassReminders(); scheduleWakeAlarms(); startCloudSync(); }catch(e){} }, 2000); }
 if(typeof window!=='undefined' && !window._snapbackNotifyTimer){
   window._snapbackNotifyTimer = setInterval(()=>{ try{ checkNotifications(); }catch(e){} }, 30000);
 }
@@ -3173,7 +3441,7 @@ function viewToday(){
   ${installBannerHtml()}
   <div class="pagehead">
     <div class="eyebrow">${new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</div>
-    <h1>Today</h1>
+    <h1>${state.profile&&state.profile.name ? escapeHtml(state.profile.name)+"\u2019s day" : "Today"}</h1>
     <p>Just today. Not the whole semester.</p>
   </div>
 
@@ -3530,7 +3798,9 @@ function exportWeekGrid(){
     .day{text-align:left;font-weight:700;white-space:nowrap}
     .legend{margin-top:16px;display:flex;gap:16px;font-size:13px}
     .swatch{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:4px;vertical-align:middle}
-  </style></head><body>
+  </style>  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+</head><body>
   <h1>Week at a glance</h1>
   <p>Week of ${weekDates[0]} — free time is green, busy is red. Print or save as PDF.</p>
   <table><thead><tr><th>Day</th>${hours.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>`;
@@ -5638,18 +5908,54 @@ function viewSettings(){
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Make it yours</div><h1>Settings</h1>
+    <div class="card">
+      <h3 style="margin:0 0 6px">Your profile</h3>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">This app is personal — your name and schedule stay yours. Each student uses their own profile and their own sync code.</p>
+      <div class="field"><label>Your name</label><input id="profileName" placeholder="e.g. Gouri" value="${escapeHtml((state.profile&&state.profile.name)||'')}"></div>
+      <div class="row" style="margin-top:8px">
+        <div class="field"><label>Grade / year</label><input id="profileGrade" placeholder="e.g. 11" value="${escapeHtml((state.profile&&state.profile.grade)||'')}"></div>
+        <div class="field"><label>School / college</label><input id="profileSchool" placeholder="Optional" value="${escapeHtml((state.profile&&state.profile.school)||'')}"></div>
+      </div>
+      <div class="field" style="margin-top:8px"><label>Notes</label><input id="profileNotes" placeholder="Anything helpful" value="${escapeHtml((state.profile&&state.profile.notes)||'')}"></div>
+      <button class="btn sm" id="saveProfileBtn" style="margin-top:10px">Save profile</button>
+    </div>
+
+    
+    <div class="card" style="border-color:var(--gold)">
+      <h3 style="margin:0 0 6px">Wake-up alarm</h3>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Rings even if the app was closed (best on the phone APK). Stop it with simple math. Two 5-minute snoozes.</p>
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:10px">
+        <input type="checkbox" id="wakeEnabled" ${(state.wakeAlarm&&state.wakeAlarm.enabled)?'checked':''}> Enable wake-up alarm
+      </label>
+      <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${(state.wakeAlarm&&state.wakeAlarm.time)||'07:00'}"></div>
+      <div style="margin-top:8px;font-size:.8rem;color:var(--muted)">Days</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
+        ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label style="font-size:.8rem"><input type="checkbox" id="wakeDay${i}" ${(state.wakeAlarm&&state.wakeAlarm.days&&state.wakeAlarm.days.indexOf(i)>=0)?'checked':(i<5&&!(state.wakeAlarm&&state.wakeAlarm.days)?'checked':'')}> ${d}</label>`).join('')}
+      </div>
+      <button class="btn sm" id="saveWakeBtn" style="margin-top:12px">Save wake-up alarm</button>
+      <button class="btn ghost sm" id="testWakeBtn" style="margin-top:12px;margin-left:8px">Test math screen</button>
+    </div>
+
     <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
-      <h3 style="margin:0 0 6px">Sync laptop &amp; phone</h3>
+      <h3 style="margin:0 0 6px">Live sync — your devices only</h3>
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">
-        SnapBack stores data on each device. To keep them the same: <b>Export</b> on one device, send the file (Drive/WhatsApp), then <b>Import</b> on the other.
+        Keeps <b>this student's</b> laptop and phone in sync. Use a private sync code (like a password) — do not share it with other students. Each person has their own code and their own data.
       </p>
-      <div class="row">
-        <button class="btn sm" id="exportBackupBtn">Export backup</button>
+      <div class="field"><label>Your private sync code</label>
+        <input id="syncCodeInput" placeholder="e.g. GOURI-STUDY-9xK2" value="">
+      </div>
+      <div class="field" style="margin-top:8px"><label>Firebase config (paste once from Firebase console)</label>
+        <textarea id="fbConfigInput" rows="5" placeholder='{ "apiKey": "...", "projectId": "...", ... }' style="width:100%;font-size:.75rem"></textarea>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn sm" id="saveSyncBtn">Save &amp; start live sync</button>
+        <button class="btn ghost sm" id="exportBackupBtn">Export file backup</button>
         <label class="btn ghost sm" style="display:inline-block;cursor:pointer">
-          Import backup
+          Import file
           <input type="file" id="importBackupInput" accept="application/json,.json" style="display:none">
         </label>
       </div>
+      <p id="syncStatus" style="font-size:.8rem;color:var(--muted);margin:8px 0 0"></p>
     </div><p>Changes apply immediately.</p>
   </div>
   <div class="card">
@@ -6340,6 +6646,42 @@ function wireView(){
   if(state.view==='settings'){
     const ex=document.getElementById('exportBackupBtn'); if(ex) ex.addEventListener('click', exportBackup);
     const imp=document.getElementById('importBackupInput'); if(imp) imp.addEventListener('change', e=>{ if(e.target.files[0]) importBackupFile(e.target.files[0]); });
+    const sc=document.getElementById('syncCodeInput'); if(sc) sc.value=getSyncCode();
+    const fb=document.getElementById('fbConfigInput'); if(fb){ const c=getFirebaseConfig(); if(c) fb.value=JSON.stringify(c,null,2); }
+    const saveWake=document.getElementById('saveWakeBtn');
+    if(saveWake) saveWake.addEventListener('click', saveWakeAlarmFromForm);
+    const testWake=document.getElementById('testWakeBtn');
+    if(testWake) testWake.addEventListener('click', ()=>triggerWakeMath('test'));
+    const saveProfile=document.getElementById('saveProfileBtn');
+    if(saveProfile) saveProfile.addEventListener('click', ()=>{
+      if(!state.profile) state.profile={};
+      state.profile.name=(document.getElementById('profileName')?.value||'').trim();
+      state.profile.grade=(document.getElementById('profileGrade')?.value||'').trim();
+      state.profile.school=(document.getElementById('profileSchool')?.value||'').trim();
+      state.profile.notes=(document.getElementById('profileNotes')?.value||'').trim();
+      persistRender();
+      alert('Profile saved'+(state.profile.name?': '+state.profile.name:''));
+    });
+    const saveSync=document.getElementById('saveSyncBtn');
+    if(saveSync) saveSync.addEventListener('click', ()=>{
+      const code=(document.getElementById('syncCodeInput')?.value||'').trim();
+      const raw=(document.getElementById('fbConfigInput')?.value||'').trim();
+      if(code.length<4){ alert('Choose a sync code of at least 4 characters.'); return; }
+      try{
+        const cfg=JSON.parse(raw);
+        if(!cfg.apiKey||!cfg.projectId) throw new Error('need apiKey and projectId');
+        setFirebaseConfig(cfg);
+        setSyncCode(code);
+        initFirebase();
+        startCloudSync();
+        pushCloudSync();
+        const st=document.getElementById('syncStatus');
+        if(st) st.textContent='Live sync on. Use the same code + config on your other device.';
+        alert('Live sync started for this student only.\n\nOn the PHONE app, enter the SAME private sync code and Firebase config, then Save.\n\nDo not give this code to other students.');
+      }catch(e){
+        alert('Firebase config must be valid JSON from the Firebase console.');
+      }
+    });
 
     const bind=(id,key,parse)=>{ const el=document.getElementById(id); if(!el) return; el.addEventListener('change', ()=>{ updateSetting(key, parse?parse(el.value):el.value); flashSaved(); }); };
     bind('setWork','workMin',Number); bind('setShort','shortBreakMin',Number); bind('setLong','longBreakMin',Number); bind('setSessions','sessionsBeforeLong',Number);
@@ -6430,6 +6772,10 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.navHistory===undefined) state.navHistory=[];
     if(state.taskMenuOpen===undefined) state.taskMenuOpen=false;
     if(state.journal===undefined) state.journal=[];
+    if(!state.profile) state.profile={name:'', grade:'', school:'', notes:''};
+    if(!state.wakeAlarm) state.wakeAlarm={enabled:false,time:'07:00',days:[0,1,2,3,4],snoozesMax:2,snoozesLeft:2};
+    if(state.wakeMathOpen===undefined) state.wakeMathOpen=false;
+    if(state.wakeMath===undefined) state.wakeMath=null;
     if(state.settings.celebrateOnComplete===undefined) state.settings.celebrateOnComplete=true;
     if(state.settings.celebrateSound===undefined) state.settings.celebrateSound=true;
     if(!Array.isArray(state.whenThen)) state.whenThen=[];
