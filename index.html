@@ -1429,7 +1429,7 @@ function quickAddTask(){
   if(!raw) return;
   const parsed=parseQuickAdd(raw);
   const id=uid();
-  state.tasks.unshift({id,title:parsed.title,notes:'',date:parsed.date,time:parsed.time,priority:'medium',urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:[7,3,1,0],reminderTime:'09:00',startDate:'',startTime:'',startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:parsed.title},strategic:{what:parsed.title},flip:{}});
+  state.tasks.unshift({id,title:parsed.title,notes:'',date:parsed.date,time:parsed.time,priority:'medium',urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:[0],reminderTime:'',startDate:'',startTime:'',startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:parsed.title},strategic:{what:parsed.title},flip:{}});
   state.pendingStrategyTaskId = id;
   input.value='';
   persistRender();
@@ -1442,7 +1442,7 @@ function addTask(){
   const startDate=document.getElementById('newStartDate')?.value || '';
   const startTime=document.getElementById('newStartTime')?.value || '';
   const priority=document.getElementById('newPriority').value;
-  const reminderTime=document.getElementById('newReminderTime')?.value || '09:00';
+  const reminderTime=document.getElementById('newReminderTime')?.value || time || '09:00';
   const leads=[];
   const dueDate = document.getElementById('newDate')?.value || date;
   const daysUntil = dueDate ? Math.round((new Date(dueDate+'T12:00:00') - new Date(todayStr()+'T12:00:00'))/86400000) : 99;
@@ -1455,6 +1455,22 @@ function addTask(){
   state.tasks.unshift({id,title,notes:'',date,time,priority,urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{}});
   state.pendingStrategyTaskId = id;
   pushUndo({type:'add-task', id, label:'Task added — Undo'});
+  try{
+    if(date && (leads||[]).length){
+      leads.forEach(daysBefore=>{
+        const d=new Date(date+'T12:00:00');
+        d.setDate(d.getDate()-daysBefore);
+        const [hh,mm]=(reminderTime||time||'09:00').split(':').map(Number);
+        d.setHours(hh||9, mm||0, 0, 0);
+        scheduleNativeNotification({
+          key:'task-'+id+'-'+daysBefore,
+          title: daysBefore===0 ? 'Task due today' : 'Task in '+daysBefore+' day(s)',
+          body: title,
+          when: d
+        });
+      });
+    }
+  }catch(e){}
   document.getElementById('newTitle').value='';
   persistRender();
 }
@@ -2490,9 +2506,19 @@ async function scheduleNativeNotification({key, title, body, when}){
   const ok = await ensureNotifyPermission();
   if(!ok) return false;
   const at = when instanceof Date ? when : new Date(when);
-  if(at.getTime() <= Date.now()+5000) return false; // only future
+  if(at.getTime() <= Date.now()+3000) return false;
   try{
     const { LocalNotifications } = window.Capacitor.Plugins;
+    try {
+      await LocalNotifications.createChannel({
+        id: 'snapback',
+        name: 'SnapBack reminders',
+        importance: 5,
+        visibility: 1,
+        sound: 'default',
+        vibration: true
+      });
+    } catch(e) {}
     const id = notifIdFromKey(key);
     await LocalNotifications.cancel({ notifications: [{ id }] });
     await LocalNotifications.schedule({
@@ -2500,8 +2526,9 @@ async function scheduleNativeNotification({key, title, body, when}){
         id,
         title: title || 'SnapBack',
         body: body || '',
-        schedule: { at },
-        sound: undefined,
+        schedule: { at, allowWhileIdle: true },
+        channelId: 'snapback',
+        sound: 'default',
         smallIcon: 'ic_stat_icon',
         extra: { key }
       }]
@@ -3049,16 +3076,63 @@ function goBack(){
   }
   persistRender();
 }
+
+function exportBackup(){
+  const data = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    state: JSON.parse(JSON.stringify(state))
+  };
+  // strip transient UI flags
+  const s = data.state;
+  delete s.taskMenuOpen; delete s.ampmPromptOpen; delete s.conflictModalOpen;
+  delete s.undoBanner; delete s.navHistory;
+  const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'snapback-backup-'+todayStr()+'.json';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+  alert('Backup file downloaded.\\n\\nSend this file to your other device (WhatsApp/Drive/Email), then open SnapBack there → Settings → Import backup.');
+}
+function importBackupFile(file){
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const data = JSON.parse(reader.result);
+      const incoming = data.state || data;
+      if(!incoming || typeof incoming !== 'object') throw new Error('Invalid file');
+      if(!confirm('Replace ALL data on this device with the backup?\\n\\nThis cannot be undone (unless you exported first).')) return;
+      // merge carefully - full replace of main data keys
+      const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','timer','bodyDouble'];
+      keys.forEach(k=>{ if(incoming[k] !== undefined) state[k]=incoming[k]; });
+      if(incoming.settings) state.settings = incoming.settings;
+      saveState();
+      persistRender();
+      alert('Backup imported. Your schedule should match the other device.');
+    }catch(e){
+      console.error(e);
+      alert('Could not read that backup file.');
+    }
+  };
+  reader.readAsText(file);
+}
+
 function persistRender(){ saveState(); render(); try{ syncNativeClassReminders(); }catch(e){} }
 function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
   const main=document.getElementById('main');
   if(main && state.undoBanner){
     const bar=document.createElement('div');
     bar.className='undo-banner';
-    bar.innerHTML='<span>'+escapeHtml(state.undoBanner)+'</span><button type="button" id="undoBtn">Undo</button>';
+    bar.innerHTML='<span style="flex:1">'+escapeHtml(state.undoBanner)+'</span>'+
+      '<button type="button" id="undoBtn">Undo</button>'+
+      '<button type="button" id="undoDismiss" style="background:transparent;color:#fff;border:1px solid rgba(255,255,255,.5)">Dismiss</button>';
     main.insertBefore(bar, main.firstChild);
     document.getElementById('undoBtn').addEventListener('click', performUndo);
-    // auto-clear banner after 12s (undo still in stack briefly)
+    document.getElementById('undoDismiss').addEventListener('click', ()=>{
+      state.undoBanner=null;
+      bar.remove();
+    });
     clearTimeout(window._undoBannerTimer);
     window._undoBannerTimer=setTimeout(()=>{ state.undoBanner=null; const b=document.querySelector('.undo-banner'); if(b) b.remove(); }, 12000);
   }
@@ -3114,6 +3188,7 @@ function viewToday(){
     ` : `
       <div class="row" style="margin-top:8px">
         <input id="nnInput" placeholder="One thing that must happen today — a study block, a workout, anything">
+        <input type="time" id="nnRemindTime" title="Reminder time" style="flex:0 0 auto;max-width:110px">
         <button class="btn gold sm" id="nnSet" style="flex:0 0 auto">Set it</button>
       </div>
     `}
@@ -3301,12 +3376,12 @@ function viewTasks(){
     <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
       <div style="font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px">ALARM / REMINDER</div>
       <div class="row">
-        <div class="field"><label>Remind me at</label><input id="newReminderTime" type="time" value="09:00"></div>
+        <div class="field"><label>Remind me at</label><input id="newReminderTime" type="time" value="" placeholder="Same as due time"></div>
         <div class="field"><label>Also alert</label>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
-            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead7" checked> 7 days before</label>
-            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead3" checked> 3 days</label>
-            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead1" checked> 1 day</label>
+            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead7"> 7 days before</label>
+            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead3"> 3 days</label>
+            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead1"> 1 day</label>
             <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead0" checked> On the day</label>
           </div>
         </div>
@@ -5562,7 +5637,20 @@ function viewSettings(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Make it yours</div><h1>Settings</h1><p>Changes apply immediately.</p>
+    <div class="eyebrow">Make it yours</div><h1>Settings</h1>
+    <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
+      <h3 style="margin:0 0 6px">Sync laptop &amp; phone</h3>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">
+        SnapBack stores data on each device. To keep them the same: <b>Export</b> on one device, send the file (Drive/WhatsApp), then <b>Import</b> on the other.
+      </p>
+      <div class="row">
+        <button class="btn sm" id="exportBackupBtn">Export backup</button>
+        <label class="btn ghost sm" style="display:inline-block;cursor:pointer">
+          Import backup
+          <input type="file" id="importBackupInput" accept="application/json,.json" style="display:none">
+        </label>
+      </div>
+    </div><p>Changes apply immediately.</p>
   </div>
   <div class="card">
     <div class="setgroup"><h4>Appearance</h4>
@@ -6250,6 +6338,9 @@ function wireView(){
   }
 
   if(state.view==='settings'){
+    const ex=document.getElementById('exportBackupBtn'); if(ex) ex.addEventListener('click', exportBackup);
+    const imp=document.getElementById('importBackupInput'); if(imp) imp.addEventListener('change', e=>{ if(e.target.files[0]) importBackupFile(e.target.files[0]); });
+
     const bind=(id,key,parse)=>{ const el=document.getElementById(id); if(!el) return; el.addEventListener('change', ()=>{ updateSetting(key, parse?parse(el.value):el.value); flashSaved(); }); };
     bind('setWork','workMin',Number); bind('setShort','shortBreakMin',Number); bind('setLong','longBreakMin',Number); bind('setSessions','sessionsBeforeLong',Number);
     const ab=document.getElementById('setAutoBreak'); if(ab) ab.addEventListener('change', ()=>{ updateSetting('autoStartBreaks', ab.checked); flashSaved(); });
