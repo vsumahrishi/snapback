@@ -4122,7 +4122,7 @@ function viewCalendar(){
     <h3>Import from Google / Apple / Outlook</h3>
     <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">
       Export a calendar file (<b>.ics</b>) from Google Calendar, Apple Calendar, or Outlook, then choose it here. Weekly repeating events become semester classes; one-off events become appointments on this calendar.<br><br>
-      <b>Notion:</b> Notion doesn’t export .ics. Copy the timetable text and paste it under <b>Calendar → Paste your timetable</b>.
+      <b>Notion:</b> Notion doesn’t export .ics. Copy the text and paste it under <b>Plan → Calendar → Quick add</b>.
     </p>
     <input type="file" id="icsImportInput" accept=".ics,text/calendar" style="margin-top:8px">
     <p style="font-size:.78rem;color:var(--muted);margin-top:8px">How to get a .ics file:<br>
@@ -4138,36 +4138,6 @@ function viewCalendar(){
     <button class="btn ghost sm" id="exportWeekGridBtn" style="margin-left:8px">Week grid ↓</button>
   </div>
 
-  <div class="card">
-    <h3>Timetable</h3>
-    <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">Your class schedule — set it once for the whole semester, or add a one-off session.</p>
-    <div class="row">
-      <div class="field" style="flex:2"><label>Title</label><input id="classTitle" placeholder="e.g. Organic Chemistry"></div>
-      <div class="field"><label>Scope</label><select id="classScope"><option value="semester">Whole semester</option><option value="session">One-off session</option></select></div>
-      <div class="field"><label>Format</label><select id="classFormat"><option value="in-person">In-person</option><option value="online">Online</option></select></div>
-    </div>
-    <div class="row" id="classSemesterFields">
-      <div class="field"><label>Day</label><select id="classDay"><option value="0">Mon</option><option value="1">Tue</option><option value="2">Wed</option><option value="3">Thu</option><option value="4">Fri</option><option value="5">Sat</option><option value="6">Sun</option></select></div>
-      <div class="field"><label>Semester starts</label><input id="classSemStart" type="date" value="${todayStr()}"></div>
-      <div class="field"><label>Semester ends</label><input id="classSemEnd" type="date"></div>
-    </div>
-    <div class="row" id="classSessionFields" style="display:none">
-      <div class="field"><label>Date</label><input id="classSessionDate" type="date" value="${todayStr()}"></div>
-    </div>
-    <div class="row">
-      <div class="field"><label>Start</label><input id="classStart" type="time" value="09:00"></div>
-      <div class="field"><label>End</label><input id="classEnd" type="time" value="10:00"></div>
-      <div class="field"><label>Room (optional)</label><input id="classRoom" placeholder="e.g. Hall B"></div>
-      <div class="field"><label>Meeting link (if online)</label><input id="classMeetingUrl" type="url" placeholder="Zoom/Meet/Teams link"></div>
-    </div>
-    <button class="btn" id="addClassBtn">Add to timetable</button>
-    <div style="margin-top:12px">
-      ${state.classes.map(c=>{
-        const when = c.scope==='session' ? `${c.date}` : `${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][c.day]}s${c.semEnd?' until '+c.semEnd:''}`;
-        return `<div class="classrow"><span class="dotcolor" style="background:var(--blue)"></span>${when} · ${c.start}–${c.end} · ${escapeHtml(c.title)} <span class="badge low">${c.format==='online'?'online':'in-person'}</span>${c.room?(' · '+escapeHtml(c.room)):''}${c.meetingUrl?`<a href="${escapeHtml(c.meetingUrl)}" target="_blank" rel="noopener" style="margin-left:8px"><button class="btn ghost sm">Join &#8599;</button></a>`:''}<span style="margin-left:auto">${deleteControl('class', c.id, 'Remove')}</span></div>`;
-      }).join('') || '<div class="empty">Nothing on your timetable yet.</div>'}
-    </div>
-  </div>
   `;
 }
 
@@ -5349,13 +5319,15 @@ function addJournalEntry(){
   persistRender();
 }
 function fileJournalEntry(id, bucket){
+  if(!bucket || !['do','file','drop'].includes(bucket)) return;
   if(!state.journalFiled) state.journalFiled={file:[],do:[],drop:[]};
   const item=(state.journal||[]).find(j=>j.id===id);
   if(!item) return;
-  item.filed=true;
-  item.bucket=bucket;
+  const copy = {...item, filed:true, bucket, filedAt:todayStr()};
   state.journalFiled[bucket]=state.journalFiled[bucket]||[];
-  state.journalFiled[bucket].unshift({...item, filedAt:todayStr()});
+  state.journalFiled[bucket].unshift(copy);
+  // remove from open stickies
+  state.journal = (state.journal||[]).filter(j=>j.id!==id);
   persistRender();
 }
 function downloadJournalBucket(bucket){
@@ -6110,6 +6082,7 @@ function wireView(){
     else if(action==='back-to-tasks') el.addEventListener('click', ()=>setView('tasks'));
     else if(action==='back-to-today') el.addEventListener('click', ()=>setView('today'));
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
+    else if(action==='journal-file') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); fileJournalEntry(id, el.dataset.bucket); });
     else if(action==='open-bitesize-from-plate') el.addEventListener('click', ()=>{
       const undone = state.tasks.filter(t=>!t.done);
       state.biteGuide = {active:true, queue:undone.map(t=>t.id), index:0};

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'snapback-cache-v38';
+const CACHE_NAME = 'snapback-cache-v39';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (event) => {
