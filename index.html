@@ -2666,33 +2666,17 @@ function checkNotifications(){
    Navigation
    ============================================================ */
 const NAV=[
-  {section:'Plan', items:[
+  {section:'', items:[
     {id:'today', label:'Today', ico:'&#9737;'},
     {id:'tasks', label:'Tasks', ico:'&#9776;'},
-    {id:'calendar', label:'Your Schedule', ico:'&#128197;'},
-    {id:'semester', label:'Calendar', ico:'&#127891;'},
-    {id:'projects', label:'Projects', ico:'&#128218;'},
-    {id:'money', label:'Money', ico:'&#128176;'},
-    {id:'habits', label:'Healthy Habits', ico:'&#127807;'},
     {id:'journal', label:'Journal', ico:'&#128221;'},
-    {id:'stats', label:'Stats', ico:'&#128202;'}
-  ]},
-  {section:'Focus techniques', items:[
-    {id:'timer', label:'Focus Pod', ico:'&#9210;'},
-    {id:'eisenhower', label:'Eisenhower Matrix', ico:'&#9633;'},
-    {id:'bitesize', label:'Bite Size', ico:'&#127869;'},
-    {id:'timeblocking', label:'Time Blocking', ico:'&#128209;'},
-    {id:'rule135', label:'Focus Plate', ico:'&#127860;'},
-    {id:'bodydouble', label:'Body Doubling', ico:'&#128101;'}
-  ]},
-  {section:'Learn', items:[
-    {id:'studytools', label:'Study Tools', ico:'&#128218;'}
-  ]},
-  {section:'Account', items:[
-    {id:'settings', label:'Settings', ico:'&#9881;'},
-    {id:'help', label:'Help & FAQ', ico:'&#10067;'}
+    {id:'plan', label:'Plan', ico:'&#128197;'},
+    {id:'techniques', label:'Techniques', ico:'&#127919;'},
+    {id:'studytools', label:'Study Tools', ico:'&#128218;'},
+    {id:'settings', label:'Settings', ico:'&#9881;'}
   ]}
 ];
+
 function setView(v){ navigateTo(v); }
 
 /* ============================================================
@@ -2790,7 +2774,7 @@ function renderMobileDrawer(){
 }
 function renderMain(){
   const el=document.getElementById('main');
-  const views={today:viewToday,tasks:viewTasks,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
+  const views={today:viewToday,tasks:viewTasks,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
     eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,
     bodydouble:viewBodyDouble,settings:viewSettings,
     habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp};
@@ -3388,6 +3372,9 @@ function importBackupFile(file){
 
 function persistRender(){ saveState(); render(); try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} }
 function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
+  document.querySelectorAll('#main [data-nav]').forEach(b=>{
+    b.addEventListener('click', ()=> setView(b.dataset.nav));
+  });
   const main=document.getElementById('main');
   if(main && state.undoBanner){
     const bar=document.createElement('div');
@@ -3421,6 +3408,44 @@ function renderTimerOnly(){
 /* ============================================================
    VIEW: Today
    ============================================================ */
+
+function viewPlan(){
+  const cards=[
+    {id:'calendar', label:'Your Schedule', desc:'Week & month view', ico:'📅'},
+    {id:'semester', label:'Calendar', desc:'Classes, paste timetable, add to schedule', ico:'🎓'},
+    {id:'projects', label:'Projects', desc:'Classes as projects + tasks', ico:'📚'},
+    {id:'money', label:'Money', desc:'Simple money tracking', ico:'💰'},
+    {id:'habits', label:'Healthy Habits', desc:'Sleep, food, movement check-ins', ico:'🌿'},
+    {id:'stats', label:'Stats', desc:'Streaks and progress', ico:'📊'}
+  ];
+  return hubPage('Plan', 'Schedule, money, habits — pick one', cards);
+}
+function viewTechniques(){
+  const cards=[
+    {id:'timer', label:'Focus Pod', desc:'Timed focus sessions', ico:'⏱'},
+    {id:'eisenhower', label:'Eisenhower', desc:'Urgent vs important', ico:'▦'},
+    {id:'bitesize', label:'Bite Size', desc:'Break work into small bites', ico:'🍽'},
+    {id:'timeblocking', label:'Time Blocking', desc:'Block hours on the day', ico:'🗓'},
+    {id:'rule135', label:'Focus Plate', desc:'1 big, 3 medium, 5 small', ico:'🍽'},
+    {id:'bodydouble', label:'Body Doubling', desc:'Work-with-structure ritual', ico:'👥'}
+  ];
+  return hubPage('Techniques', 'Focus tools — use what helps today', cards);
+}
+function hubPage(title, sub, cards){
+  return `<div class="pagehead">
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+    <div class="eyebrow">${escapeHtml(sub)}</div>
+    <h1>${escapeHtml(title)}</h1>
+  </div>
+  <div style="display:grid;gap:10px">
+    ${cards.map(c=>`<button class="card" data-nav="${c.id}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line);background:var(--card)">
+      <div style="font-size:1.4rem">${c.ico}</div>
+      <div style="font-weight:700;margin-top:4px">${escapeHtml(c.label)}</div>
+      <div style="font-size:.85rem;color:var(--muted)">${escapeHtml(c.desc)}</div>
+    </button>`).join('')}
+  </div>`;
+}
+
 function viewToday(){
   const nn=state.nonNegotiable[todayStr()];
   const activeTasks=state.tasks.filter(t=>!t.done);
@@ -3798,8 +3823,7 @@ function exportWeekGrid(){
     .day{text-align:left;font-weight:700;white-space:nowrap}
     .legend{margin-top:16px;display:flex;gap:16px;font-size:13px}
     .swatch{display:inline-block;width:14px;height:14px;border-radius:3px;margin-right:4px;vertical-align:middle}
-  </style>  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+  </style>
 </head><body>
   <h1>Week at a glance</h1>
   <p>Week of ${weekDates[0]} — free time is green, busy is red. Print or save as PDF.</p>
@@ -5268,32 +5292,48 @@ function habitHistoryCell(h, day){
   return v ? '<span style="color:var(--pine);font-weight:700">&#10003;</span>' : '<span style="color:var(--line)">&middot;</span>';
 }
 
+
 function viewJournal(){
   if(!state.journal) state.journal=[];
-  const today=todayStr();
-  const entries=[...state.journal].sort((a,b)=>(b.date+b.time).localeCompare(a.date+a.time));
+  if(!state.journalFiled) state.journalFiled={file:[], do:[], drop:[]};
+  const open = state.journal.filter(e=>!e.filed);
+  const colors=['#FFF3B0','#C1F0C1','#B5D8FF','#FFD1DC','#E8D5FF'];
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Capture it before it vanishes</div>
     <h1>Journal</h1>
-    <p>Quick notes for sudden thoughts — no structure required.</p>
+    <p>Quick thoughts. Later: File it, Do it, or Drop it.</p>
   </div>
   <div class="card">
-    <h3>New note</h3>
     <textarea id="journalText" rows="3" placeholder="What's on your mind?" style="width:100%"></textarea>
-    <button class="btn" id="journalSave" style="margin-top:10px">Save note</button>
+    <button class="btn" id="journalSave" style="margin-top:10px">Add sticky note</button>
   </div>
-  <div class="card">
-    <h3>Recent</h3>
-    ${entries.length ? entries.map(e=>`
-      <div class="deadline-row" style="align-items:flex-start">
-        <div style="flex:1">
-          <div style="font-size:.75rem;color:var(--muted)">${e.date} ${e.time||''}</div>
-          <div style="white-space:pre-wrap">${escapeHtml(e.text)}</div>
+  <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">
+    ${open.length? open.map((e,i)=>`
+      <div style="background:${colors[i%colors.length]};color:#222;padding:12px;border-radius:12px;width:min(100%,200px);box-shadow:2px 2px 0 rgba(0,0,0,.08);transform:rotate(${(i%3-1)*1.5}deg)">
+        <div style="font-size:.7rem;opacity:.7">${e.date} ${e.time||''}</div>
+        <div style="white-space:pre-wrap;margin:8px 0;font-size:.9rem">${escapeHtml(e.text)}</div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <button class="btn sm" style="background:#fff;color:#222;border:1px solid #ccc" data-action="journal-file" data-id="${e.id}" data-bucket="do">Do it</button>
+          <button class="btn sm" style="background:#fff;color:#222;border:1px solid #ccc" data-action="journal-file" data-id="${e.id}" data-bucket="file">File it</button>
+          <button class="btn sm" style="background:#fff;color:#222;border:1px solid #ccc" data-action="journal-file" data-id="${e.id}" data-bucket="drop">Drop it</button>
         </div>
-        <button class="btn ghost sm" data-action="delete-journal" data-id="${e.id}">✕</button>
-      </div>`).join('') : '<div class="empty">No notes yet.</div>'}
+      </div>`).join('') : '<div class="empty">No open notes — add one above.</div>'}
+  </div>
+  <div class="card" style="margin-top:16px">
+    <h3>Saved sheets</h3>
+    <p style="font-size:.85rem;color:var(--muted)">Notes you sorted. Download anytime.</p>
+    <div class="row" style="flex-wrap:wrap;gap:8px">
+      <button class="btn ghost sm" id="dlJournalDo">Download “Do it”</button>
+      <button class="btn ghost sm" id="dlJournalFile">Download “File it”</button>
+      <button class="btn ghost sm" id="dlJournalDrop">Download “Drop it”</button>
+    </div>
+    <div style="margin-top:12px;font-size:.85rem">
+      <div><b>Do it:</b> ${(state.journalFiled.do||[]).length} notes</div>
+      <div><b>File it:</b> ${(state.journalFiled.file||[]).length} notes</div>
+      <div><b>Drop it:</b> ${(state.journalFiled.drop||[]).length} notes</div>
+    </div>
   </div>`;
 }
 function addJournalEntry(){
@@ -5302,17 +5342,30 @@ function addJournalEntry(){
   if(!state.journal) state.journal=[];
   const now=new Date();
   const time=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
-  state.journal.unshift({id:uid(), text, date:todayStr(), time});
+  state.journal.unshift({id:uid(), text, date:todayStr(), time, filed:false});
   state.journal=state.journal.slice(0,100);
-  pushUndo({type:'add-journal', id:state.journal[0].id, label:'Note saved — Undo'});
   persistRender();
 }
-function deleteJournalEntry(id){
+function fileJournalEntry(id, bucket){
+  if(!state.journalFiled) state.journalFiled={file:[],do:[],drop:[]};
   const item=(state.journal||[]).find(j=>j.id===id);
-  if(item) pushUndo({type:'delete-journal', item:JSON.parse(JSON.stringify(item)), label:'Note deleted — Undo'});
-  state.journal=(state.journal||[]).filter(j=>j.id!==id);
+  if(!item) return;
+  item.filed=true;
+  item.bucket=bucket;
+  state.journalFiled[bucket]=state.journalFiled[bucket]||[];
+  state.journalFiled[bucket].unshift({...item, filedAt:todayStr()});
   persistRender();
 }
+function downloadJournalBucket(bucket){
+  const list=(state.journalFiled&&state.journalFiled[bucket])||[];
+  const lines=list.map(e=>`${e.date} ${e.time||''}\n${e.text}\n---`).join('\n');
+  const blob=new Blob([lines||'(empty)'],{type:'text/plain'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='snapback-journal-'+bucket+'.txt';
+  a.click();
+}
+
 
 function viewHabits(){
   const today=todayStr();
@@ -5908,6 +5961,7 @@ function viewSettings(){
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Make it yours</div><h1>Settings</h1>
+    <p style="margin-top:4px"><button class="btn ghost sm" id="gotoHelpBtn">Help &amp; FAQ</button></p>
     <div class="card">
       <h3 style="margin:0 0 6px">Your profile</h3>
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">This app is personal — your name and schedule stay yours. Each student uses their own profile and their own sync code.</p>
@@ -6503,6 +6557,9 @@ function wireView(){
 
   if(state.view==='journal'){
     const js=document.getElementById('journalSave'); if(js) js.addEventListener('click', addJournalEntry);
+    const d1=document.getElementById('dlJournalDo'); if(d1) d1.addEventListener('click', ()=>downloadJournalBucket('do'));
+    const d2=document.getElementById('dlJournalFile'); if(d2) d2.addEventListener('click', ()=>downloadJournalBucket('file'));
+    const d3=document.getElementById('dlJournalDrop'); if(d3) d3.addEventListener('click', ()=>downloadJournalBucket('drop'));
   }
   if(state.view==='habits'){
     const addHabitBtn=document.getElementById('addHabitBtn'); if(addHabitBtn) addHabitBtn.addEventListener('click', addHabit);
@@ -6644,6 +6701,8 @@ function wireView(){
   }
 
   if(state.view==='settings'){
+    const gh=document.getElementById('gotoHelpBtn'); if(gh) gh.addEventListener('click', ()=>navigateTo('help'));
+
     const ex=document.getElementById('exportBackupBtn'); if(ex) ex.addEventListener('click', exportBackup);
     const imp=document.getElementById('importBackupInput'); if(imp) imp.addEventListener('change', e=>{ if(e.target.files[0]) importBackupFile(e.target.files[0]); });
     const sc=document.getElementById('syncCodeInput'); if(sc) sc.value=getSyncCode();
@@ -6772,6 +6831,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.navHistory===undefined) state.navHistory=[];
     if(state.taskMenuOpen===undefined) state.taskMenuOpen=false;
     if(state.journal===undefined) state.journal=[];
+    if(!state.journalFiled) state.journalFiled={file:[],do:[],drop:[]};
     if(!state.profile) state.profile={name:'', grade:'', school:'', notes:''};
     if(!state.wakeAlarm) state.wakeAlarm={enabled:false,time:'07:00',days:[0,1,2,3,4],snoozesMax:2,snoozesLeft:2};
     if(state.wakeMathOpen===undefined) state.wakeMathOpen=false;
