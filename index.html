@@ -3447,6 +3447,8 @@ function hubPage(title, sub, cards){
 }
 
 function viewToday(){
+  const needsName = !(state.profile && state.profile.name);
+
   const nn=state.nonNegotiable[todayStr()];
   const activeTasks=state.tasks.filter(t=>!t.done);
   const mustToday=activeTasks.filter(t=>t.tier==='must');
@@ -5964,7 +5966,7 @@ function viewSettings(){
     <p style="margin-top:4px"><button class="btn ghost sm" id="gotoHelpBtn">Help &amp; FAQ</button></p>
     <div class="card">
       <h3 style="margin:0 0 6px">Your profile</h3>
-      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">This app is personal — your name and schedule stay yours. Each student uses their own profile and their own sync code.</p>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Each student personalises their own copy: enter <b>their name</b> here. On the phone APK they do the same. Their schedule, journal, and sync code are private to them — not shared with other students.</p>
       <div class="field"><label>Your name</label><input id="profileName" placeholder="e.g. Gouri" value="${escapeHtml((state.profile&&state.profile.name)||'')}"></div>
       <div class="row" style="margin-top:8px">
         <div class="field"><label>Grade / year</label><input id="profileGrade" placeholder="e.g. 11" value="${escapeHtml((state.profile&&state.profile.grade)||'')}"></div>
@@ -5986,8 +5988,11 @@ function viewSettings(){
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
         ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label style="font-size:.8rem"><input type="checkbox" id="wakeDay${i}" ${(state.wakeAlarm&&state.wakeAlarm.days&&state.wakeAlarm.days.indexOf(i)>=0)?'checked':(i<5&&!(state.wakeAlarm&&state.wakeAlarm.days)?'checked':'')}> ${d}</label>`).join('')}
       </div>
-      <button class="btn sm" id="saveWakeBtn" style="margin-top:12px">Save wake-up alarm</button>
-      <button class="btn ghost sm" id="testWakeBtn" style="margin-top:12px;margin-left:8px">Test math screen</button>
+      <p style="font-size:.82rem;color:var(--muted);margin:10px 0 0">When the alarm fires, a simple math problem appears. Solve it to stop. You can snooze twice (5 minutes each).</p>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:280px">
+        <button class="btn" id="saveWakeBtn">Save wake-up alarm</button>
+        <button class="btn ghost sm" id="testWakeBtn" type="button">Preview: what the wake-up screen looks like</button>
+      </div>
     </div>
 
     <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
@@ -6104,6 +6109,7 @@ function wireView(){
     else if(action==='goto-cheese') el.addEventListener('click', ()=>goCheeseWithTask(id));
     else if(action==='back-to-tasks') el.addEventListener('click', ()=>setView('tasks'));
     else if(action==='back-to-today') el.addEventListener('click', ()=>setView('today'));
+    else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
     else if(action==='open-bitesize-from-plate') el.addEventListener('click', ()=>{
       const undone = state.tasks.filter(t=>!t.done);
       state.biteGuide = {active:true, queue:undone.map(t=>t.id), index:0};
