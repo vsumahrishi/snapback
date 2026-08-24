@@ -1985,6 +1985,69 @@ function deleteClass(id){
   persistRender();
 }
 
+function classSeriesKey(c){
+  return [c.title||'', c.start||'', c.end||'', c.room||'', c.kind||'', c.scope||'semester'].join('\t');
+}
+function groupClassSeries(){
+  const map = new Map();
+  const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  (state.classes||[]).forEach(c=>{
+    const k = classSeriesKey(c);
+    if(!map.has(k)){
+      map.set(k, {
+        key:k,
+        title:c.title||'Untitled',
+        start:c.start,
+        end:c.end,
+        room:c.room||'',
+        kind:c.kind||'class',
+        days:[],
+        ids:[],
+        items:[]
+      });
+    }
+    const g=map.get(k);
+    g.ids.push(c.id);
+    g.items.push(c);
+    if(typeof c.day==='number' && g.days.indexOf(c.day)<0) g.days.push(c.day);
+  });
+  return [...map.values()].map(g=>{
+    g.days.sort((a,b)=>a-b);
+    g.dayLabel = g.days.map(d=>dayNames[d]).join(', ') || '—';
+    return g;
+  }).sort((a,b)=> (a.start||'').localeCompare(b.start||'') || a.title.localeCompare(b.title));
+}
+function requestDeleteSeries(seriesKey, preferredId){
+  state.deleteSeriesPrompt = { key: seriesKey, preferredId: preferredId||null };
+  persistRender();
+}
+function confirmDeleteSeries(mode){
+  const p = state.deleteSeriesPrompt;
+  if(!p) return;
+  const all = (state.classes||[]).filter(c=>classSeriesKey(c)===p.key);
+  if(!all.length){ state.deleteSeriesPrompt=null; persistRender(); return; }
+  let toRemove = [];
+  if(mode==='series'){
+    toRemove = all;
+  } else {
+    // this occurrence only: prefer clicked id, else first
+    const one = all.find(c=>c.id===p.preferredId) || all[0];
+    toRemove = one ? [one] : [];
+  }
+  toRemove.forEach(item=>{
+    pushUndo({type:'delete-class', item:JSON.parse(JSON.stringify(item)), label:'Removed — Undo'});
+    state.classes = state.classes.filter(c=>c.id!==item.id);
+  });
+  state.deleteSeriesPrompt=null;
+  persistRender();
+}
+function cancelDeleteSeries(){
+  state.deleteSeriesPrompt=null;
+  persistRender();
+}
+
+
+
 /* ============================================================
    Time blocking
    ============================================================ */
@@ -2813,6 +2876,37 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+  // Outlook-style delete series
+  if(state.deleteSeriesPrompt && state.deleteSeriesPrompt.key){
+    const p = state.deleteSeriesPrompt;
+    const all = (state.classes||[]).filter(c=>classSeriesKey(c)===p.key);
+    const sample = all[0];
+    const multi = all.length > 1;
+    root.innerHTML = `<div class="overlay" id="delSeriesOverlay">
+      <div class="quotecard" style="max-width:400px;text-align:left">
+        <div class="qeyebrow">SnapBack</div>
+        <div style="font-weight:700;margin-bottom:8px">Delete ${escapeHtml(sample?sample.title:'item')}?</div>
+        <p style="font-size:.9rem;color:var(--muted);margin:0 0 12px">
+          ${multi
+            ? 'This repeats on more than one day. What do you want to remove?'
+            : 'Remove this from your calendar?'}
+        </p>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${multi ? `<button class="btn" id="delOneOnly">Only this day</button>
+          <button class="btn danger" id="delWholeSeries">Entire series (all days)</button>` 
+            : `<button class="btn danger" id="delWholeSeries">Delete</button>`}
+          <button class="btn ghost" id="delSeriesCancel">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+    const one=document.getElementById('delOneOnly');
+    if(one) one.onclick=()=>confirmDeleteSeries('one');
+    const allBtn=document.getElementById('delWholeSeries');
+    if(allBtn) allBtn.onclick=()=>confirmDeleteSeries('series');
+    document.getElementById('delSeriesCancel').onclick=()=>cancelDeleteSeries();
+    return;
+  }
+
   // Wake-up math
   if(state.wakeMathOpen && state.wakeMath){
     const m=state.wakeMath;
@@ -5016,22 +5110,27 @@ function viewSemester(){
   </div>
 
   <div class="card">
-    <h3>This semester’s timetable</h3>
-    ${classesByDay.map(day=>`
-      <div style="margin-bottom:14px">
-        <div style="font-weight:700;font-size:.9rem;margin-bottom:6px;color:var(--pine)">${day.name}</div>
-        ${day.items.length ? day.items.map(c=>`
-          <div class="deadline-row" style="padding:10px 0;border-bottom:1px solid var(--line)">
-            <div style="flex:1">
-              <b>${escapeHtml(c.title)}</b>
-              <div style="font-size:.8rem;color:var(--muted)">${c.start}–${c.end}${c.room?' · '+escapeHtml(c.room):''}</div>
-              ${c.textbook ? `<div style="font-size:.78rem;margin-top:2px">📖 ${escapeHtml(c.textbook)}</div>` : ''}
+    <h3>Saved on your calendar</h3>
+    <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">Each row is one appointment or class series (like Outlook) — not every single day repeated.</p>
+    ${(() => {
+      const series = groupClassSeries();
+      if(!series.length) return '<div class="empty">Nothing saved yet. Use Quick add or Add to schedule above.</div>';
+      return series.map((g, si) => {
+        const multi = g.ids.length > 1;
+        return `<div class="deadline-row" style="padding:12px 0;border-bottom:1px solid var(--line);align-items:flex-start">
+          <div style="flex:1">
+            <b>${escapeHtml(g.title)}</b>
+            <div style="font-size:.85rem;color:var(--muted);margin-top:2px">
+              ${g.start||''}${g.end?'–'+g.end:''}${g.room?' · '+escapeHtml(g.room):''}
             </div>
-            <button class="btn danger sm" data-action="delete-class" data-id="${c.id}">Remove</button>
+            <div style="font-size:.8rem;margin-top:2px">
+              ${multi ? ('Repeats: <b>'+escapeHtml(g.dayLabel)+'</b>') : ('Day: <b>'+escapeHtml(g.dayLabel)+'</b>')}
+            </div>
           </div>
-        `).join('') : `<div style="font-size:.8rem;color:var(--muted);padding:4px 0">No classes</div>`}
-      </div>
-    `).join('')}
+          <button class="btn danger sm" data-action="delete-series" data-series-idx="${si}" data-id="${g.ids[0]}">Delete</button>
+        </div>`;
+      }).join('');
+    })()}
   </div>`;
 }
 
@@ -6143,6 +6242,11 @@ function wireView(){
     else if(action==='toggle-hole') el.addEventListener('change', ()=>toggleHole(Number(el.dataset.task), Number(el.dataset.hole)));
     else if(action==='delete-hole') el.addEventListener('click', ()=>deleteHole(Number(el.dataset.task), Number(el.dataset.hole)));
     else if(action==='delete-class') el.addEventListener('click', ()=>deleteClass(id));
+    else if(action==='delete-series') el.addEventListener('click', ()=>{
+      const series = groupClassSeries();
+      const g = series[Number(el.dataset.seriesIdx)];
+      if(g) requestDeleteSeries(g.key, id);
+    });
     else if(action==='toggle-reminder') el.addEventListener('change', ()=>toggleReminderDone(id));
     else if(action==='remove-quote') el.addEventListener('click', ()=>removeCustomQuote(Number(el.dataset.idx)));
     else if(action==='set-noise') el.addEventListener('click', ()=>{ state.settings.noiseColor=el.dataset.color; if(ambientNode) startAmbient(); persistRender(); });
@@ -6815,6 +6919,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(!state.wakeAlarm) state.wakeAlarm={enabled:false,time:'07:00',days:[0,1,2,3,4],snoozesMax:2,snoozesLeft:2};
     if(state.wakeMathOpen===undefined) state.wakeMathOpen=false;
     if(state.wakeMath===undefined) state.wakeMath=null;
+    if(state.deleteSeriesPrompt===undefined) state.deleteSeriesPrompt=null;
     if(state.settings.celebrateOnComplete===undefined) state.settings.celebrateOnComplete=true;
     if(state.settings.celebrateSound===undefined) state.settings.celebrateSound=true;
     if(!Array.isArray(state.whenThen)) state.whenThen=[];
