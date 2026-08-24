@@ -3217,6 +3217,22 @@ let _unsubSync = null;
 let _syncApplying = false;
 let _syncTimer = null;
 
+
+function parseFirebaseConfigText(raw){
+  let s = String(raw||'').trim();
+  if(!s) throw new Error('empty');
+  // strip script tags / const firebaseConfig =
+  s = s.replace(/^[\s\S]*?(\{[\s\S]*\})[\s\S]*$/, '$1');
+  // JS object → JSON: quote unquoted keys
+  s = s.replace(/([,{]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
+  // remove trailing commas before } or ]
+  s = s.replace(/,\s*([}\]])/g, '$1');
+  // single quotes to double
+  s = s.replace(/'/g, '"');
+  const cfg = JSON.parse(s);
+  if(!cfg.apiKey || !cfg.projectId) throw new Error('need apiKey and projectId');
+  return cfg;
+}
 function getFirebaseConfig(){
   try {
     const raw = localStorage.getItem('snapback_fb_config');
@@ -6810,8 +6826,7 @@ function wireView(){
       const raw=(document.getElementById('fbConfigInput')?.value||'').trim();
       if(code.length<4){ alert('Choose a sync code of at least 4 characters.'); return; }
       try{
-        const cfg=JSON.parse(raw);
-        if(!cfg.apiKey||!cfg.projectId) throw new Error('need apiKey and projectId');
+        const cfg=parseFirebaseConfigText(raw);
         setFirebaseConfig(cfg);
         setSyncCode(code);
         initFirebase();
@@ -6821,7 +6836,7 @@ function wireView(){
         if(st) st.textContent='Live sync on. Use the same code + config on your other device.';
         alert('Live sync started for this student only.\n\nOn the PHONE app, enter the SAME private sync code and Firebase config, then Save.\n\nDo not give this code to other students.');
       }catch(e){
-        alert('Firebase config must be valid JSON from the Firebase console.');
+        alert('Could not read that config. Paste only the block that starts with { and ends with } (the firebaseConfig object from Firebase).');
       }
     });
 
