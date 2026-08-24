@@ -2798,7 +2798,10 @@ function renderSidebar(){
     el.className='sidebar mobile-topbar';
     el.innerHTML=`
       <button id="hamburgerBtn" class="hamburger">&#9776;</button>
-      <div class="mark" id="brandHomeBtnMobile" style="font-size:1.05rem;cursor:pointer">SnapBack</div>
+      <div class="brand-row" id="brandHomeBtnMobile" style="cursor:pointer">
+        <img src="icon-192.png" alt="">
+        <span class="brand-name">SnapBack</span>
+      </div>
       <div style="flex:1"></div>
       <div style="font-size:.8rem;color:#B9C2BC">${current?current.ico+' '+current.label:''}</div>
     `;
@@ -2807,7 +2810,7 @@ function renderSidebar(){
     renderMobileDrawer();
   }else{
     el.className='sidebar';
-    el.innerHTML=`<div class="brand" id="brandHomeBtn" style="cursor:pointer"><div class="mark">SnapBack</div><div class="sub">a calmer way through the list</div></div>` +
+    el.innerHTML=`<div class="brand" id="brandHomeBtn" style="cursor:pointer"><div class="brand-row"><img src="icon-192.png" alt=""><span class="brand-name">SnapBack</span></div><div class="sub">a calmer way through the list</div></div>` +
       NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('') +
@@ -2825,7 +2828,7 @@ function renderMobileDrawer(){
   root.innerHTML=`
     <div class="drawer-backdrop" id="drawerBackdrop"></div>
     <div class="drawer-panel">
-      <div class="brand" id="brandHomeBtnDrawer" style="cursor:pointer"><div class="mark">SnapBack</div><div class="sub">a calmer way through the list</div></div>
+      <div class="brand" id="brandHomeBtnDrawer" style="cursor:pointer"><div class="brand-row"><img src="icon-192.png" alt=""><span class="brand-name">SnapBack</span></div><div class="sub">a calmer way through the list</div></div>
       ${NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('')}
@@ -2913,8 +2916,8 @@ function renderModal(){
     const snoozes=(state.wakeAlarm&&state.wakeAlarm.snoozesLeft)||0;
     root.innerHTML=`<div class="overlay" style="background:rgba(0,0,0,.85)">
       <div class="quotecard" style="max-width:360px;text-align:center">
-        <div class="qeyebrow">SnapBack alarm</div>
-        <div style="font-size:1.4rem;font-weight:800;margin:8px 0">Time to wake up</div>
+        <div class="qeyebrow">Alarm</div>
+        <div style="font-size:1.4rem;font-weight:800;margin:8px 0">Alarm</div>
         <p style="color:var(--muted);font-size:.9rem">Solve to stop the alarm</p>
         <div style="font-size:2rem;font-weight:800;margin:16px 0">${m.a} + ${m.b} = ?</div>
         <input type="number" id="wakeAnswer" inputmode="numeric" style="font-size:1.4rem;text-align:center;width:120px;padding:12px;border-radius:12px;border:2px solid var(--pine)" />
@@ -3252,7 +3255,10 @@ function setSyncCode(code){
 function initFirebase(){
   const cfg = getFirebaseConfig();
   if(!cfg || !cfg.apiKey || !cfg.projectId) return null;
-  if(typeof firebase === 'undefined') return null;
+  if(typeof firebase === 'undefined'){
+    console.warn('Firebase SDK not loaded');
+    return null;
+  }
   try{
     if(!firebase.apps.length) firebase.initializeApp(cfg);
     _db = firebase.firestore();
@@ -3273,6 +3279,7 @@ function applyCloudPayload(payload){
   keys.forEach(k=>{ if(payload[k]!==undefined) state[k]=payload[k]; });
   try{ saveState(); }catch(e){}
   _syncApplying = false;
+  console.log('SnapBack cloud applied', (state.tasks||[]).length, 'tasks');
   render();
 }
 function startCloudSync(){
@@ -3280,16 +3287,28 @@ function startCloudSync(){
   const code = getSyncCode();
   if(!code || code.length < 4) return;
   const db = initFirebase();
-  if(!db) return;
+  if(!db){
+    console.warn('startCloudSync: no db');
+    return;
+  }
   const ref = db.collection('snapback').doc(code);
+  // One-time pull so phone gets data even if snapshot is slow
+  ref.get().then(snap=>{
+    if(snap.exists){
+      const data = snap.data();
+      if(data) applyCloudPayload(data);
+    }
+  }).catch(e=> console.warn('sync get', e));
   _unsubSync = ref.onSnapshot(snap=>{
     if(!snap.exists) return;
     const data = snap.data();
     if(!data) return;
-    // avoid echo loop: skip if we just wrote
     if(data.updatedAt && state._lastCloudWrite && data.updatedAt === state._lastCloudWrite) return;
     applyCloudPayload(data);
-  }, err=> console.warn('sync listen', err));
+  }, err=> {
+    console.warn('sync listen', err);
+    try{ alert('Sync listen error: '+(err.message||err)); }catch(e){}
+  });
 }
 function pushCloudSync(){
   if(_syncApplying) return;
@@ -3302,7 +3321,9 @@ function pushCloudSync(){
     try{
       const payload = syncPayloadFromState();
       state._lastCloudWrite = payload.updatedAt;
-      db.collection('snapback').doc(code).set(payload, { merge: true });
+      db.collection('snapback').doc(code).set(payload, { merge: true })
+        .then(()=>{ console.log('SnapBack cloud write OK', code); })
+        .catch(e=>{ console.warn('sync push fail', e); alert('Sync write failed: '+(e.message||e)); });
     }catch(e){ console.warn('sync push', e); }
   }, 800);
 }
@@ -3339,7 +3360,7 @@ function scheduleWakeAlarms(){
   if(typeof scheduleNativeNotification==='function'){
     scheduleNativeNotification({
       key:'wake-main',
-      title:'Wake up — SnapBack',
+      title:'SnapBack alarm',
       body:'Time to get up. Open SnapBack to stop the alarm.',
       when
     });
@@ -3436,7 +3457,7 @@ function saveWakeAlarmFromForm(){
   state.wakeAlarm.days=days.length?days:[0,1,2,3,4];
   scheduleWakeAlarms();
   persistRender();
-  alert(state.wakeAlarm.enabled?'Wake-up alarm saved and scheduled.':'Wake-up alarm off.');
+  alert(state.wakeAlarm.enabled?'Alarm saved.':'Alarm off.');
 }
 
 function exportBackup(){
@@ -6065,10 +6086,10 @@ function viewSettings(){
 
     
     <div class="card" style="border-color:var(--gold)">
-      <h3 style="margin:0 0 6px">Wake-up alarm</h3>
-      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Rings even if the app was closed (best on the phone APK). Stop it with simple math. Two 5-minute snoozes.</p>
+      <h3 style="margin:0 0 6px">Alarm</h3>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Like a normal clock alarm. Set the time and days. On the phone app it can ring when SnapBack is closed. Stop with a simple math problem (2 snoozes, 5 minutes each).</p>
       <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:10px">
-        <input type="checkbox" id="wakeEnabled" ${(state.wakeAlarm&&state.wakeAlarm.enabled)?'checked':''}> Enable wake-up alarm
+        <input type="checkbox" id="wakeEnabled" ${(state.wakeAlarm&&state.wakeAlarm.enabled)?'checked':''}> Turn alarm on
       </label>
       <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${(state.wakeAlarm&&state.wakeAlarm.time)||'07:00'}"></div>
       <div style="margin-top:8px;font-size:.8rem;color:var(--muted)">Days</div>
@@ -6077,8 +6098,8 @@ function viewSettings(){
       </div>
       <p style="font-size:.82rem;color:var(--muted);margin:10px 0 0">When the alarm fires, a simple math problem appears. Solve it to stop. You can snooze twice (5 minutes each).</p>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:280px">
-        <button class="btn" id="saveWakeBtn">Save wake-up alarm</button>
-        <button class="btn ghost sm" id="testWakeBtn" type="button">Preview: what the wake-up screen looks like</button>
+        <button class="btn" id="saveWakeBtn">Save alarm</button>
+        <button class="btn ghost sm" id="testWakeBtn" type="button">Preview alarm screen (math to stop)</button>
       </div>
     </div>
 
@@ -6095,6 +6116,7 @@ function viewSettings(){
       </div>
       <div class="row" style="margin-top:10px">
         <button class="btn sm" id="saveSyncBtn">Save &amp; start live sync</button>
+        <button class="btn ghost sm" id="pullSyncBtn">Pull from cloud now</button>
         <button class="btn ghost sm" id="exportBackupBtn">Export file backup</button>
         <label class="btn ghost sm" style="display:inline-block;cursor:pointer">
           Import file
@@ -6820,6 +6842,17 @@ function wireView(){
       persistRender();
       alert('Profile saved'+(state.profile.name?': '+state.profile.name:''));
     });
+    const pullSync=document.getElementById('pullSyncBtn');
+    if(pullSync) pullSync.addEventListener('click', ()=>{
+      const db=initFirebase();
+      const code=getSyncCode();
+      if(!db||!code){ alert('Save sync code and config first.'); return; }
+      db.collection('snapback').doc(code).get().then(snap=>{
+        if(!snap.exists){ alert('No cloud data for code '+code); return; }
+        applyCloudPayload(snap.data());
+        alert('Pulled from cloud. Tasks: '+((state.tasks||[]).length));
+      }).catch(e=> alert('Pull failed: '+(e.message||e)));
+    });
     const saveSync=document.getElementById('saveSyncBtn');
     if(saveSync) saveSync.addEventListener('click', ()=>{
       const code=(document.getElementById('syncCodeInput')?.value||'').trim();
@@ -6829,12 +6862,17 @@ function wireView(){
         const cfg=parseFirebaseConfigText(raw);
         setFirebaseConfig(cfg);
         setSyncCode(code);
-        initFirebase();
+        const db = initFirebase();
+        if(!db){
+          alert('Firebase did not start. Check that the config is correct and you are online.');
+          return;
+        }
         startCloudSync();
+        _syncApplying = false;
         pushCloudSync();
         const st=document.getElementById('syncStatus');
-        if(st) st.textContent='Live sync on. Use the same code + config on your other device.';
-        alert('Live sync started for this student only.\n\nOn the PHONE app, enter the SAME private sync code and Firebase config, then Save.\n\nDo not give this code to other students.');
+        if(st) st.textContent='Live sync on for code '+getSyncCode()+'. Both devices must use this exact code.';
+        alert('Live sync started.\n\nCode: '+getSyncCode()+'\n\nUse this SAME code on the other device.\n\nThen add a task and check Firestore → Data for collection "snapback".');
       }catch(e){
         alert('Could not read that config. Paste only the block that starts with { and ends with } (the firebaseConfig object from Firebase).');
       }

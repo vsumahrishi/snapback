@@ -1,0 +1,43 @@
+SnapBack — status board (24 Aug 2026)
+=====================================
+
+DONE
+----
+[x] PWA web app (GitHub Pages)
+[x] Capacitor Android APK path
+[x] Live sync laptop <-> phone (Firebase) — working after reopen
+[x] Per-student profile + private sync code
+[x] Short menu: Today, Tasks, Journal, Plan, Techniques, Study Tools, Settings
+[x] Calendar input vs Your Schedule view split
+[x] Outlook-style delete series (this day / entire series)
+[x] Journal sticky notes: Do it / File it / Drop it + download sheets
+[x] Back button history
+[x] Add to schedule, Quick add, parsers, free slots, ICS import/export
+[x] Task tap menu (done / reschedule / reminder)
+[x] Alarm (math dismiss + 2 snoozes) — wording simplified to "Alarm"
+[x] Pull from cloud now (in latest code; needs APK update on phone)
+[x] In-app logo next to name
+[x] Short loading animation when switching tabs
+[x] Android launcher icon pack (copy into mipmap folders)
+
+NOT DONE / LATER
+----------------
+[ ] Confirm squirrel icon on phone after mipmap replace + new APK
+[ ] Fancier butterfly/squirrel run animation (basic bob/spin is in)
+[ ] Auto cloud sync without any delay on cold start (improved with pull/get)
+[ ] Email login per student (optional; sync code works)
+[ ] Play Store release signing
+[ ] iOS / App Store
+[ ] Full ADHD visual redesign beyond calendar/journal/menu
+
+GIVING TO A STUDENT
+-------------------
+1. Send the APK (app-debug.apk) OR the website URL.
+2. Student installs / opens.
+3. Settings -> profile: THEIR name.
+4. Settings -> Live sync: THEIR private sync code + YOUR Firebase config
+   (same Firebase project is OK; each student MUST use a different sync code).
+5. They do NOT open Firebase console day to day.
+6. "Reset all data" clears local data only; cloud data for a code remains until overwritten.
+
+Sync code is like a password for that student's data. Do not share codes between students.
