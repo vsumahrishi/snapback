@@ -2897,6 +2897,67 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+  // Start Wizard (in-app, not browser prompt)
+  if(state.wizard && state.wizard.step){
+    const w = state.wizard;
+    if(w.step==='need-task'){
+      root.innerHTML=`<div class="overlay" id="wizOverlay">
+        <div class="quotecard" style="max-width:400px;text-align:left">
+          <div class="qeyebrow">Start Wizard</div>
+          <div style="font-weight:800;font-size:1.15rem;margin-bottom:8px">Add a task first</div>
+          <p style="color:var(--muted);font-size:.95rem;margin:0 0 16px">The wizard helps you start one open task. Add something to Tasks, then come back.</p>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <button class="btn" id="wizToTasks">Go to Tasks</button>
+            <button class="btn ghost" id="wizClose">Close</button>
+          </div>
+        </div>
+      </div>`;
+      document.getElementById('wizToTasks').onclick=()=>{ state.wizard=null; navigateTo('tasks'); };
+      document.getElementById('wizClose').onclick=()=>wizardClose();
+      return;
+    }
+    if(w.step==='why'){
+      const t = findTask(w.taskId);
+      root.innerHTML=`<div class="overlay" id="wizOverlay">
+        <div class="quotecard" style="max-width:420px;text-align:left">
+          <div class="qeyebrow">Start Wizard</div>
+          <div style="font-weight:800;font-size:1.15rem;margin-bottom:6px">Why is this hard to start?</div>
+          <p style="color:var(--muted);font-size:.9rem;margin:0 0 14px">Task: <b>${escapeHtml(t?t.title:'')}</b></p>
+          <p style="font-size:.85rem;margin:0 0 12px">Tap the one that fits best:</p>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <button class="btn ghost" id="wizBig" style="text-align:left;padding:12px 14px"><b>Too big</b><div style="font-size:.8rem;color:var(--muted);font-weight:500">I do not know where to begin</div></button>
+            <button class="btn ghost" id="wizBoring" style="text-align:left;padding:12px 14px"><b>Boring</b><div style="font-size:.8rem;color:var(--muted);font-weight:500">I avoid it because it is dull</div></button>
+            <button class="btn ghost" id="wizScary" style="text-align:left;padding:12px 14px"><b>Scary or unclear</b><div style="font-size:.8rem;color:var(--muted);font-weight:500">I am unsure what “good” looks like</div></button>
+            <button class="btn ghost" id="wizOther" style="text-align:left;padding:12px 14px"><b>Something else</b><div style="font-size:.8rem;color:var(--muted);font-weight:500">Energy, mood, or another block</div></button>
+            <button class="btn ghost sm" id="wizClose" style="margin-top:4px">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+      document.getElementById('wizBig').onclick=()=>wizardPickWhy('big');
+      document.getElementById('wizBoring').onclick=()=>wizardPickWhy('boring');
+      document.getElementById('wizScary').onclick=()=>wizardPickWhy('scary');
+      document.getElementById('wizOther').onclick=()=>wizardPickWhy('other');
+      document.getElementById('wizClose').onclick=()=>wizardClose();
+      return;
+    }
+    if(w.step==='next'){
+      root.innerHTML=`<div class="overlay" id="wizOverlay">
+        <div class="quotecard" style="max-width:420px;text-align:left">
+          <div class="qeyebrow">Your next move</div>
+          <div style="font-weight:800;font-size:1.15rem;margin-bottom:8px">${escapeHtml(w.tipTitle||'')}</div>
+          <p style="font-size:.95rem;line-height:1.45;margin:0 0 18px">${escapeHtml(w.tipBody||'')}</p>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <button class="btn" id="wizGo">Take me there</button>
+            <button class="btn ghost" id="wizClose">Not now</button>
+          </div>
+        </div>
+      </div>`;
+      document.getElementById('wizGo').onclick=()=>wizardGo();
+      document.getElementById('wizClose').onclick=()=>wizardClose();
+      return;
+    }
+  }
+
   // Outlook-style delete series
   if(state.deleteSeriesPrompt && state.deleteSeriesPrompt.key){
     const p = state.deleteSeriesPrompt;
@@ -3713,17 +3774,36 @@ function viewChallenges(){
 function openStartWizard(){
   const undone = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
   const t = undone[0];
-  if(!t){ alert('Add a task first, then open the Start Wizard again.'); navigateTo('tasks'); return; }
-  const why = prompt('Why is this hard to start?\\n1 Too big\\n2 Boring\\n3 Scary / unclear\\n4 Something else\\n\\nType 1, 2, 3, or 4');
-  if(!why) return;
-  let tip = 'Do the smallest possible first step for 5 minutes.';
-  if(why.trim()==='1'){ tip = 'Use Bite Size: split this into pieces under 15 minutes.'; state.cheeseTaskId=t.id; navigateTo('bitesize'); }
-  else if(why.trim()==='2'){ tip = 'Start Focus Pod for one short block, then stop.'; state.timer.activeTaskId=t.id; navigateTo('timer'); }
-  else if(why.trim()==='3'){ tip = 'Write one line in the task notes: “First step is…” then do only that.'; navigateTo('tasks'); }
-  else { tip = 'Turn on Bug Me for a time today so it comes back to you.'; navigateTo('settings'); }
-  alert('Next move:\\n\\n'+tip);
+  if(!t){
+    state.wizard = {step:'need-task'};
+    persistRender();
+    return;
+  }
+  state.wizard = {step:'why', taskId:t.id};
   persistRender();
 }
+function wizardPickWhy(code){
+  const t = findTask(state.wizard && state.wizard.taskId);
+  if(!t){ state.wizard=null; persistRender(); return; }
+  const tips = {
+    big: { title:'It feels too big', body:'Shrink it. Open Bite Size and cut this into pieces under 15 minutes. You only need the first piece.', nav:'bitesize', prep:()=>{ state.cheeseTaskId=t.id; } },
+    boring: { title:'It feels boring', body:'Do one short Focus Pod block on this task, then stop. A timer makes “just start” easier.', nav:'timer', prep:()=>{ state.timer.activeTaskId=t.id; } },
+    scary: { title:'It feels unclear or scary', body:'On the task, write one line: “First step is…” Then do only that step. Nothing else.', nav:'tasks', prep:null },
+    other: { title:'Something else is in the way', body:'Turn on Bug Me for a time today so SnapBack comes back to you — you do not have to hold it in your head.', nav:'settings', prep:null }
+  };
+  const tip = tips[code] || tips.other;
+  if(tip.prep) tip.prep();
+  state.wizard = {step:'next', taskId:t.id, tipTitle:tip.title, tipBody:tip.body, tipNav:tip.nav};
+  persistRender();
+}
+function wizardGo(){
+  const nav = state.wizard && state.wizard.tipNav;
+  state.wizard = null;
+  if(nav) navigateTo(nav);
+  else persistRender();
+}
+function wizardClose(){ state.wizard=null; persistRender(); }
+
 
 
 function viewToday(){
@@ -7335,6 +7415,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(!state.journalFiled) state.journalFiled={file:[],do:[],drop:[]};
     if(!state.profile) state.profile={name:'', grade:'', school:'', notes:''};
     if(state.challengeId===undefined) state.challengeId=null;
+    if(state.wizard===undefined) state.wizard=null;
     if(!state.listMode) state.listMode='all'; // all | spotlight | wall | one | jar
     if(!state.spotlightSize) state.spotlightSize=3;
     if(state.jarQueue===undefined) state.jarQueue=null;
