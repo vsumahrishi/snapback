@@ -1909,7 +1909,7 @@ function warnIfConflicts(opts){
   const msg='This time overlaps something already scheduled:\n\n'+
     hits.map(c=>'• '+c.title+' ('+c.start+(c.end?'–'+c.end:'')+')').join('\n')+
     '\n\nAdd anyway?';
-  return confirm(msg);
+  console.warn(msg); return true; // conflicts use modal elsewhere
 }
 function pushUndo(entry){
   if(!state.undoStack) state.undoStack=[];
@@ -2058,7 +2058,7 @@ function addScheduleItem(){
   let title = document.getElementById('schedTitle')?.value.trim() || '';
   if(type === 'other'){
     title = other || title;
-    if(!title){ alert('Type a name for Other.'); return; }
+    if(!title){ showAppMessage('Almost there', 'Type a name for Other.'); return; }
   } else {
     if(!title){
       const defaults = {class:'Class', study:'Study block', workout:'Workout', appointment:'Appointment'};
@@ -2897,6 +2897,45 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+  // Generic in-app message (replaces alert)
+  if(state.appMsg){
+    const m = state.appMsg;
+    root.innerHTML=`<div class="overlay">
+      <div class="quotecard" style="max-width:400px;text-align:left">
+        <div class="qeyebrow">SnapBack</div>
+        <div style="font-weight:800;font-size:1.1rem;margin-bottom:8px">${escapeHtml(m.title)}</div>
+        <p style="font-size:.95rem;line-height:1.45;margin:0 0 16px;white-space:pre-wrap">${escapeHtml(m.body)}</p>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button class="btn" id="appMsgOk">${escapeHtml(m.ok||'OK')}</button>
+          ${m.cancel?`<button class="btn ghost" id="appMsgCancel">${escapeHtml(m.cancel)}</button>`:''}
+        </div>
+      </div>
+    </div>`;
+    document.getElementById('appMsgOk').onclick=()=>closeAppMsg('ok');
+    const c=document.getElementById('appMsgCancel');
+    if(c) c.onclick=()=>closeAppMsg('cancel');
+    return;
+  }
+  if(state.appPrompt){
+    const p = state.appPrompt;
+    root.innerHTML=`<div class="overlay">
+      <div class="quotecard" style="max-width:420px;text-align:left">
+        <div class="qeyebrow">SnapBack</div>
+        <div style="font-weight:800;font-size:1.1rem;margin-bottom:8px">${escapeHtml(p.title)}</div>
+        <p style="font-size:.9rem;color:var(--muted);margin:0 0 12px">${escapeHtml(p.body)}</p>
+        <textarea id="appPromptInput" rows="6" placeholder="${escapeHtml(p.placeholder||'')}" style="width:100%;margin-bottom:12px"></textarea>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button class="btn" id="appPromptOk">Save</button>
+          <button class="btn ghost" id="appPromptCancel">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+    setTimeout(()=>{ const i=document.getElementById('appPromptInput'); if(i) i.focus(); }, 100);
+    document.getElementById('appPromptOk').onclick=()=>closeAppPrompt(true);
+    document.getElementById('appPromptCancel').onclick=()=>closeAppPrompt(false);
+    return;
+  }
+
   // Start Wizard (in-app, not browser prompt)
   if(state.wizard && state.wizard.step){
     const w = state.wizard;
@@ -3055,7 +3094,7 @@ function renderModal(){
         },200);
       };
       document.getElementById('tmDelete').onclick=()=>{
-        if(confirm('Delete this task?')){ deleteTask(t.id); closeTaskMenu(); }
+        showAppMessage('Delete this task?', 'You can Undo for a few seconds after.', { ok:'Delete', cancel:'Cancel', onOk:()=>{ deleteTask(t.id); closeTaskMenu(); } });
       };
       document.getElementById('tmResched').onclick=()=>{
         const box=document.getElementById('tmExtra');
@@ -3393,7 +3432,7 @@ function startCloudSync(){
     applyCloudPayload(data);
   }, err=> {
     console.warn('sync listen', err);
-    try{ alert('Sync listen error: '+(err.message||err)); }catch(e){}
+    try{ showAppMessage('Sync problem', String(err.message||err)); }catch(e){}
   });
 }
 function pushCloudSync(){
@@ -3409,7 +3448,7 @@ function pushCloudSync(){
       state._lastCloudWrite = payload.updatedAt;
       db.collection('snapback').doc(code).set(payload, { merge: true })
         .then(()=>{ console.log('SnapBack cloud write OK', code); })
-        .catch(e=>{ console.warn('sync push fail', e); alert('Sync write failed: '+(e.message||e)); });
+        .catch(e=>{ console.warn('sync push fail', e); showAppMessage('Sync write failed', String(e.message||e)); });
     }catch(e){ console.warn('sync push', e); }
   }, 800);
 }
@@ -3496,7 +3535,7 @@ function stopWakeBeep(){
 function wakeSnooze(){
   const wa=state.wakeAlarm||{};
   if((wa.snoozesLeft||0)<=0){
-    alert('No snoozes left — solve the math to stop.');
+    showAppMessage('No snoozes left', 'Solve the math problem to stop Bug Me.');
     return;
   }
   wa.snoozesLeft=(wa.snoozesLeft||1)-1;
@@ -3520,7 +3559,7 @@ function wakeDismissMath(answer){
   const m=state.wakeMath;
   if(!m) return;
   if(Number(answer)!==m.answer){
-    alert('Not quite — try again.');
+    showAppMessage('Not quite', 'Try the math again.');
     return;
   }
   stopWakeBeep();
@@ -3543,7 +3582,7 @@ function saveWakeAlarmFromForm(){
   state.wakeAlarm.days=days.length?days:[0,1,2,3,4];
   scheduleWakeAlarms();
   persistRender();
-  alert(state.wakeAlarm.enabled?'Bug Me saved.':'Bug Me off.');
+  showAppMessage('Bug Me', state.wakeAlarm.enabled?'Saved and scheduled.':'Turned off.');
 }
 
 function exportBackup(){
@@ -3562,7 +3601,7 @@ function exportBackup(){
   a.download = 'snapback-backup-'+todayStr()+'.json';
   a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
-  alert('Backup file downloaded.\\n\\nSend this file to your other device (WhatsApp/Drive/Email), then open SnapBack there → Settings → Import backup.');
+  showAppMessage('Backup downloaded', 'Send this file to your other device (WhatsApp, Drive, or email). On that device: Settings → Import backup.');
 }
 function importBackupFile(file){
   const reader = new FileReader();
@@ -3571,17 +3610,17 @@ function importBackupFile(file){
       const data = JSON.parse(reader.result);
       const incoming = data.state || data;
       if(!incoming || typeof incoming !== 'object') throw new Error('Invalid file');
-      if(!confirm('Replace ALL data on this device with the backup?\\n\\nThis cannot be undone (unless you exported first).')) return;
+      showAppMessage('Replace all data?', 'This cannot be undone unless you exported first.', { ok:'Replace', cancel:'Cancel', onOk:()=>{ const keys=['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','timer','bodyDouble','profile']; keys.forEach(k=>{ if(incoming[k]!==undefined) state[k]=incoming[k]; }); saveState(); persistRender(); showAppMessage('Backup imported','Your schedule should now match the other device.'); } }); return;
       // merge carefully - full replace of main data keys
       const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','timer','bodyDouble'];
       keys.forEach(k=>{ if(incoming[k] !== undefined) state[k]=incoming[k]; });
       if(incoming.settings) state.settings = incoming.settings;
       saveState();
       persistRender();
-      alert('Backup imported. Your schedule should match the other device.');
+      showAppMessage('Backup imported', 'Your schedule on this device should now match the other one.');
     }catch(e){
       console.error(e);
-      alert('Could not read that backup file.');
+      showAppMessage('Could not read backup', 'Try exporting again and choose the .json file.');
     }
   };
   reader.readAsText(file);
@@ -3769,6 +3808,44 @@ function viewChallenges(){
         <div style="font-size:.85rem;color:var(--muted)">${escapeHtml(c.blurb)}</div>
       </button>`).join('')}
   </div>`;
+}
+
+
+function showAppMessage(title, body, opts){
+  opts = opts || {};
+  state.appMsg = {
+    title: title || 'SnapBack',
+    body: body || '',
+    ok: opts.ok || 'OK',
+    cancel: opts.cancel || null,
+    onOk: opts.onOk || null,
+    onCancel: opts.onCancel || null
+  };
+  persistRender();
+}
+function showAppPrompt(title, body, placeholder, onSubmit){
+  state.appPrompt = {
+    title: title || 'SnapBack',
+    body: body || '',
+    placeholder: placeholder || '',
+    value: '',
+    onSubmit: onSubmit || null
+  };
+  persistRender();
+}
+function closeAppMsg(which){
+  const m = state.appMsg;
+  state.appMsg = null;
+  if(which==='ok' && m && typeof m.onOk==='function') m.onOk();
+  if(which==='cancel' && m && typeof m.onCancel==='function') m.onCancel();
+  persistRender();
+}
+function closeAppPrompt(submit){
+  const p = state.appPrompt;
+  const val = (document.getElementById('appPromptInput')&&document.getElementById('appPromptInput').value) || (p&&p.value) || '';
+  state.appPrompt = null;
+  if(submit && p && typeof p.onSubmit==='function') p.onSubmit(val);
+  persistRender();
 }
 
 function openStartWizard(){
@@ -4389,7 +4466,7 @@ function importICSFile(file){
   reader.onload=()=>{
     try{
       const events=parseICS(String(reader.result||''));
-      if(!events.length){ alert('No events found in that calendar file.'); return; }
+      if(!events.length){ showAppMessage('No events found', 'That calendar file had nothing we could import.'); return; }
       let added=0;
       events.forEach(ev=>{
         if(ev.weekly){
@@ -4408,10 +4485,10 @@ function importICSFile(file){
         added++;
       });
       persistRender();
-      alert('Imported '+added+' item(s) into SnapBack.');
+      showAppMessage('Imported', 'Added '+added+' item(s) into SnapBack.');
     }catch(e){
       console.error(e);
-      alert('Could not read that calendar file. Try exporting again as .ics');
+      showAppMessage('Could not read file', 'Try exporting again as a .ics calendar file.');
     }
   };
   reader.readAsText(file);
@@ -6580,7 +6657,7 @@ function wireView(){
     });
     else if(action==='spin-go') el.addEventListener('click', ()=>{
       const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner);
-      if(!open.length){ alert('No open tasks'); return; }
+      if(!open.length){ showAppMessage('No open tasks', 'Add a task first, then try again.'); return; }
       state.spinResult=open[Math.floor(Math.random()*open.length)].id;
       persistRender();
     });
@@ -6592,7 +6669,7 @@ function wireView(){
     });
     else if(action==='jar-draw') el.addEventListener('click', ()=>{
       const open=openTasksForModes();
-      if(!open.length){ alert('No open tasks.'); return; }
+      if(!open.length){ showAppMessage('No open tasks', 'Add a task first, then try again.'); return; }
       if(!state.jarQueue || !state.jarQueue.length){
         state.jarQueue = open.map(t=>t.id).sort(()=>Math.random()-0.5);
       }
@@ -6632,34 +6709,33 @@ function wireView(){
       else if(p.action==='mode-spin'){ state.listMode='spin'; state.spinResult=null; navigateTo('tasks'); }
       else if(p.action==='top-of-mind'){
         const open=(state.tasks||[]).filter(t=>!t.done);
-        if(!open.length){ alert('Add a task first.'); navigateTo('tasks'); return; }
+        if(!open.length){ showAppMessage('Add a task first', 'Create a task, then try this tool again.', {onOk:()=>navigateTo('tasks')}); return; }
         state.topOfMindId=open[0].id;
-        alert('Top of Mind is on: “'+open[0].title+'” stays pinned until you clear it or mark it done.');
+        showAppMessage('Top of Mind is on', '“'+open[0].title+'” stays pinned until you clear it or mark it done.');
         persistRender();
       }
       else if(p.action==='time-track'){
         const open=(state.tasks||[]).filter(t=>!t.done);
-        if(!open.length){ alert('Add a task first.'); navigateTo('tasks'); return; }
+        if(!open.length){ showAppMessage('Add a task first', 'Create a task, then try this tool again.', {onOk:()=>navigateTo('tasks')}); return; }
         const t=open[0];
         state.timeTrack={taskId:t.id, startedAt:Date.now(), accumulated:state.timeTrack&&state.timeTrack.accumulated||{}};
         state.topOfMindId=t.id;
-        alert('Timer started on “'+t.title+'”. It stays Top of Mind while you work.');
+        showAppMessage('Timer started', '“'+t.title+'” is timing and stays Top of Mind while you work.');
         persistRender();
       }
       else if(p.action==='brain-dump'){
-        const raw=prompt('Brain dump — type everything on your mind, one task per line:');
-        if(raw&&raw.trim()){
-          raw.split(/\n+/).map(s=>s.trim()).filter(Boolean).slice(0,30).forEach(title=>{
+        showAppPrompt('Brain Dump', 'Type everything on your mind — one task per line.', 'One task per line', (raw)=>{
+          if(!raw||!raw.trim()) return;
+          raw.split('\n').map(s=>s.trim()).filter(Boolean).slice(0,30).forEach(title=>{
             const id=uid();
             state.tasks.unshift({id,title,notes:'',date:'',time:'',priority:'medium',urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:[],reminderTime:'',startDate:'',startTime:'',startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{},strategic:{},flip:{}});
           });
-          persistRender();
-          alert('Captured into Tasks. Next: park some on the Backburner or use Spotlight.');
           navigateTo('tasks');
-        }
+          showAppMessage('Brain dump saved', 'Everything is in Tasks. Next: park some on the Backburner or use Spotlight.');
+        });
       }
       else if(p.action==='backburner-help'){
-        alert('Backburner: on any task, use the task menu and choose “Backburner” to hide it from the main list until you bring it back.\n\nOpening Tasks — open a task and use Backburner.');
+        showAppMessage('Backburner', 'Open a task → choose Backburner to hide it from the main list until you bring it back.'); navigateTo('tasks');
         navigateTo('tasks');
       }
       else if(p.nav) navigateTo(p.nav);
@@ -7285,31 +7361,31 @@ function wireView(){
       state.profile.school=(document.getElementById('profileSchool')?.value||'').trim();
       state.profile.notes=(document.getElementById('profileNotes')?.value||'').trim();
       persistRender();
-      alert('Profile saved'+(state.profile.name?': '+state.profile.name:''));
+      showAppMessage('Profile saved', state.profile.name ? state.profile.name : 'Your details are saved.');
     });
     const pullSync=document.getElementById('pullSyncBtn');
     if(pullSync) pullSync.addEventListener('click', ()=>{
       const db=initFirebase();
       const code=getSyncCode();
-      if(!db||!code){ alert('Save sync code and config first.'); return; }
+      if(!db||!code){ showAppMessage('Sync not set up', 'Save a sync code and Firebase config first.'); return; }
       db.collection('snapback').doc(code).get().then(snap=>{
-        if(!snap.exists){ alert('No cloud data for code '+code); return; }
+        if(!snap.exists){ showAppMessage('Nothing in the cloud yet', 'No data found for code '+code+'. Save on the other device first, or add something here.'); return; }
         applyCloudPayload(snap.data());
-        alert('Pulled from cloud. Tasks: '+((state.tasks||[]).length));
-      }).catch(e=> alert('Pull failed: '+(e.message||e)));
+        showAppMessage('Pulled from cloud', 'Tasks on this device: '+((state.tasks||[]).length));
+      }).catch(e=> showAppMessage('Pull failed', String(e.message||e)));
     });
     const saveSync=document.getElementById('saveSyncBtn');
     if(saveSync) saveSync.addEventListener('click', ()=>{
       const code=(document.getElementById('syncCodeInput')?.value||'').trim();
       const raw=(document.getElementById('fbConfigInput')?.value||'').trim();
-      if(code.length<4){ alert('Choose a sync code of at least 4 characters.'); return; }
+      if(code.length<4){ showAppMessage('Sync code too short', 'Use at least 4 characters.'); return; }
       try{
         const cfg=parseFirebaseConfigText(raw);
         setFirebaseConfig(cfg);
         setSyncCode(code);
         const db = initFirebase();
         if(!db){
-          alert('Firebase did not start. Check that the config is correct and you are online.');
+          showAppMessage('Firebase did not start', 'Check the config and that you are online.');
           return;
         }
         startCloudSync();
@@ -7317,9 +7393,9 @@ function wireView(){
         pushCloudSync();
         const st=document.getElementById('syncStatus');
         if(st) st.textContent='Live sync on for code '+getSyncCode()+'. Both devices must use this exact code.';
-        alert('Live sync started.\n\nCode: '+getSyncCode()+'\n\nUse this SAME code on the other device.\n\nThen add a task and check Firestore → Data for collection "snapback".');
+        showAppMessage('Live sync started', 'Code: '+getSyncCode()+'\n\nUse this same code on your other device. After that, changes stay in sync when you are online.');
       }catch(e){
-        alert('Could not read that config. Paste only the block that starts with { and ends with } (the firebaseConfig object from Firebase).');
+        showAppMessage('Could not read config', 'Paste only the block that starts with { and ends with } from Firebase.');
       }
     });
 
@@ -7416,6 +7492,8 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(!state.profile) state.profile={name:'', grade:'', school:'', notes:''};
     if(state.challengeId===undefined) state.challengeId=null;
     if(state.wizard===undefined) state.wizard=null;
+    if(state.appMsg===undefined) state.appMsg=null;
+    if(state.appPrompt===undefined) state.appPrompt=null;
     if(!state.listMode) state.listMode='all'; // all | spotlight | wall | one | jar
     if(!state.spotlightSize) state.spotlightSize=3;
     if(state.jarQueue===undefined) state.jarQueue=null;
