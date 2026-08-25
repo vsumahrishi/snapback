@@ -2843,20 +2843,21 @@ function topOfMindBanner(){
   if(!state.topOfMindId) return '';
   const t=(state.tasks||[]).find(x=>x.id===state.topOfMindId);
   if(!t || t.done){ state.topOfMindId=null; return ''; }
-  let timer='';
+  let timerHtml='';
   if(state.timeTrack && state.timeTrack.taskId===t.id && state.timeTrack.startedAt){
-    const mins=Math.floor((Date.now()-state.timeTrack.startedAt)/60000);
-    timer=' · '+mins+' min on task';
+    const sec=Math.floor((Date.now()-state.timeTrack.startedAt)/1000);
+    const m=Math.floor(sec/60), s=sec%60;
+    timerHtml=`<div style="font-size:.85rem;margin-top:4px">⏱ Timing: <b>${m}:${String(s).padStart(2,'0')}</b> — stay with this task</div>`;
   }
   return `<div class="card" style="background:var(--gold-soft);border-color:var(--gold);display:flex;align-items:center;gap:10px;margin-bottom:10px">
     <span style="font-size:1.2rem">📌</span>
-    <div style="flex:1"><b>Top of Mind</b><div style="font-size:.9rem">${escapeHtml(t.title)}${timer}</div></div>
+    <div style="flex:1"><b>Top of Mind</b><div style="font-size:.95rem;font-weight:600">${escapeHtml(t.title)}</div>${timerHtml}</div>
     <button class="btn ghost sm" data-action="clear-tom">Clear</button>
   </div>`;
 }
 function renderMain(){
   const el=document.getElementById('main');
-  const views={today:viewToday,tasks:viewTasks,challenges:viewChallenges,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
+  const views={today:viewToday,tasks:viewTasks,challenges:viewChallenges,planAhead:viewPlanAhead,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
     eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,
     bodydouble:viewBodyDouble,settings:viewSettings,
     habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp};
@@ -2897,6 +2898,73 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+  // Pick Top of Mind / Timer task
+  if(state.pickTom || state.pickTimer){
+    const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner);
+    const kind = state.pickTom ? 'tom' : 'timer';
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:420px;text-align:left">
+      <div class="qeyebrow">${kind==='tom'?'Top of Mind':'Time on task'}</div>
+      <div style="font-weight:800;font-size:1.1rem;margin-bottom:8px">Which task?</div>
+      <p style="font-size:.9rem;color:var(--muted);margin:0 0 12px">${kind==='tom'?'This stays pinned at the top while you use SnapBack.':'We will time this task and keep it pinned so you can see the minutes.'}</p>
+      <div style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow:auto">
+        ${open.map(t=>`<button class="btn ghost" style="text-align:left" data-pick-id="${t.id}">${escapeHtml(t.title)}</button>`).join('')}
+      </div>
+      <button class="btn ghost sm" id="pickCancel" style="margin-top:12px">Cancel</button>
+    </div></div>`;
+    root.querySelectorAll('[data-pick-id]').forEach(btn=>{
+      btn.onclick=()=>{
+        const id=btn.getAttribute('data-pick-id');
+        if(kind==='tom'){
+          state.topOfMindId=id;
+          state.pickTom=false;
+          showAppMessage('Pinned', 'That task stays at the top until you clear it or mark it done.');
+        } else {
+          state.timeTrack={taskId:id, startedAt:Date.now(), accumulated:(state.timeTrack&&state.timeTrack.accumulated)||{}};
+          state.topOfMindId=id;
+          state.pickTimer=false;
+          state.listMode='one';
+          const t=findTask(id);
+          showAppMessage('Timing started', 'Timing “'+(t?t.title:'task')+'”. Watch the yellow Top of Mind bar for minutes. Open Focus Pod if you want a structured block.');
+          navigateTo('tasks');
+        }
+        persistRender();
+      };
+    });
+    document.getElementById('pickCancel').onclick=()=>{ state.pickTom=false; state.pickTimer=false; persistRender(); };
+    return;
+  }
+  // After Grab Bag / Spin — work session, not just "done"
+  if(state.workSession && state.workSession.taskId){
+    const t=findTask(state.workSession.taskId);
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:420px;text-align:left">
+      <div class="qeyebrow">Work session</div>
+      <div style="font-weight:800;font-size:1.15rem;margin-bottom:8px">${escapeHtml(t?t.title:'Task')}</div>
+      <p style="font-size:.95rem;color:var(--muted);margin:0 0 14px">You pulled this task. What do you want to do with it?</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn" id="wsFocus">Start Focus Pod (timed block)</button>
+        <button class="btn ghost" id="wsTom">Keep as Top of Mind and work</button>
+        <button class="btn ghost" id="wsDone">Mark done</button>
+        <button class="btn ghost" id="wsSkip">Not this one — put back</button>
+      </div>
+    </div></div>`;
+    document.getElementById('wsFocus').onclick=()=>{
+      if(t){ state.timer.activeTaskId=t.id; state.topOfMindId=t.id; }
+      state.workSession=null; navigateTo('timer');
+    };
+    document.getElementById('wsTom').onclick=()=>{
+      if(t) state.topOfMindId=t.id;
+      state.workSession=null; persistRender();
+    };
+    document.getElementById('wsDone').onclick=()=>{
+      if(t) toggleDone(t.id);
+      state.workSession=null; persistRender();
+    };
+    document.getElementById('wsSkip').onclick=()=>{
+      state.workSession=null; state.jarCurrent=null; state.spinResult=null; persistRender();
+    };
+    return;
+  }
+
   // Generic in-app message (replaces alert)
   if(state.appMsg){
     const m = state.appMsg;
@@ -3651,6 +3719,14 @@ function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal()
 if(typeof window!=='undefined'){ setTimeout(()=>{ try{ ensureNotifyPermission(); syncNativeClassReminders(); scheduleWakeAlarms(); startCloudSync(); }catch(e){} }, 2000); }
 if(typeof window!=='undefined' && !window._snapbackNotifyTimer){
   window._snapbackNotifyTimer = setInterval(()=>{ try{ checkNotifications(); }catch(e){} }, 30000);
+  window._tomTimer = setInterval(()=>{
+    try{
+      if(state.timeTrack && state.timeTrack.startedAt && state.topOfMindId){
+        const bar=document.querySelector('#main .card');
+        if(state.view) renderMain();
+      }
+    }catch(e){}
+  }, 1000);
 }
 function renderTimerOnly(){
   if(state.view!=='timer') return;
@@ -3713,8 +3789,8 @@ const SB_TOOLS = {
   biteSize: {title:'Bite Size', desc:'Cut one scary task into tiny steps you can finish in a few minutes.', ico:'🍽', nav:'bitesize'},
   bugMe: {title:'Bug Me', desc:'A nudge that keeps coming until that task is done.', ico:'🐛', nav:'settings'},
   startWizard: {title:'Start Wizard', desc:'Three quick questions to unstick “I do not know how to begin.”', ico:'🪄', action:'start-wizard'},
-  spotlight: {title:'Spotlight', desc:'Show only a few tasks. The rest stay off-screen.', ico:'🔦', action:'mode-spotlight'},
-  smallBatch: {title:'Small Batch', desc:'Work three at a time. Finish the batch before more appear.', ico:'📦', action:'mode-batch'},
+  spotlight: {title:'Spotlight', desc:'Opens Tasks and hides everything except 3 open tasks until you finish them.', ico:'🔦', action:'mode-spotlight'},
+  smallBatch: {title:'Small Batch', desc:'Opens Tasks with only a set of 3. Finish them, then take the next set.', ico:'📦', action:'mode-batch'},
   oneAtATime: {title:'One at a time', desc:'One task on the whole screen. Nothing else to click.', ico:'1️⃣', action:'mode-one'},
   grabBag: {title:'Grab Bag', desc:'Hide the list. Pull one task when you are ready — no deciding.', ico:'🫙', action:'mode-jar'},
   popPool: {title:'Pop Pool', desc:'Tasks as bubbles. Tap to pop them done. Not a checklist.', ico:'🫧', action:'mode-pool'},
@@ -3726,7 +3802,7 @@ const SB_TOOLS = {
   backburner: {title:'Backburner', desc:'Park “not now” tasks so they stop crowding today.', ico:'🔥', action:'backburner-help'},
   focusPod: {title:'Focus Pod', desc:'Short focus sprints with breaks — one block at a time.', ico:'🍅', nav:'timer'},
   bodyDouble: {title:'Body Doubling', desc:'A simple “work with structure” ritual when alone is hard.', ico:'👥', nav:'bodydouble'},
-  eisenhower: {title:'This or That grid', desc:'Sort: urgent or not, important or not — then pick from the top.', ico:'▦', nav:'eisenhower'},
+  eisenhower: {title:'This or That grid', desc:'Tap Urgent / Important on each task so it jumps to the right box (Do first / Schedule / Later).', ico:'▦', nav:'eisenhower'},
   mustFrog: {title:'Must-do & Frog', desc:'Tag what must happen and what you are avoiding.', ico:'🐸', nav:'tasks'},
   journal: {title:'Journal stickies', desc:'Catch thoughts as notes. File, do, or drop them later.', ico:'📒', nav:'journal'},
   schedule: {title:'Your Schedule', desc:'See the week as time blocks, not an endless list.', ico:'📅', nav:'calendar'},
@@ -3737,7 +3813,8 @@ const SB_TOOLS = {
   today: {title:'Today', desc:'One screen: the next right things for this day.', ico:'☀', nav:'today'},
   stats: {title:'Stats', desc:'See what actually got done — not only what you planned.', ico:'📊', nav:'stats'},
   money: {title:'Money', desc:'Keep money tracking off the study list.', ico:'💰', nav:'money'},
-  tasks: {title:'Tasks', desc:'Open your task list (use Spotlight or Grab Bag if it feels long).', ico:'✅', nav:'tasks'}
+  tasks: {title:'Tasks', desc:'Open your task list (use Spotlight or Grab Bag if it feels long).', ico:'✅', nav:'tasks'},
+  planAhead: {title:'Plan this week', desc:'Pick a few tasks for this week only. Everything else can wait.', ico:'📆', action:'plan-ahead'}
 };
 
 const CHALLENGES = [
@@ -3754,7 +3831,7 @@ const CHALLENGES = [
 
 const CHALLENGE_PATHS = {
   cant_start: ['startWizard','biteSize','bugMe','focusPlate','oneAtATime','grabBag'],
-  too_much: ['brainDump','backburner','focusPlate','spotlight','smallBatch','oneAtATime','journal','eisenhower'],
+  too_much: ['brainDump','backburner','planAhead','spotlight','smallBatch','oneAtATime','focusPlate','eisenhower'],
   list_freeze: ['popPool','spinPick','tileWall','grabBag','oneAtATime','schedule'],
   bounce: ['topOfMind','timeOnTask','oneAtATime','focusPod','bodyDouble','today'],
   what_next: ['spinPick','grabBag','eisenhower','mustFrog','today','spotlight','startWizard'],
@@ -3770,6 +3847,38 @@ function challengePathsFor(id){
     if(k==='challenges_home') return {title:'Pick another challenge', desc:'Stay in Challenges and choose a different struggle.', ico:'🎯', action:'challenge-home'};
     return SB_TOOLS[k];
   }).filter(Boolean);
+}
+
+
+function viewPlanAhead(){
+  const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner);
+  const week = open.filter(t=>t.planWeek===true);
+  const rest = open.filter(t=>!t.planWeek);
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+    <div class="eyebrow">ADHD-friendly planning</div>
+    <h1>Plan this week</h1>
+    <p>Do not plan everything. Move only a few tasks into <b>This week</b>. The rest wait.</p>
+  </div>
+  <div class="card" style="background:var(--pine-soft)">
+    <h3 style="margin:0 0 8px">This week (${week.length})</h3>
+    <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Work from this short list only.</p>
+    ${week.length? week.map(t=>`<div class="deadline-row" style="padding:8px 0;border-bottom:1px solid var(--line)">
+      <span style="flex:1">${escapeHtml(t.title)}</span>
+      <button class="btn ghost sm" data-action="unplan-week" data-id="${t.id}">Remove</button>
+      <button class="btn sm" data-action="pin-tom" data-id="${t.id}">Top of Mind</button>
+    </div>`).join('') : '<div class="empty">Nothing planned for this week yet.</div>'}
+    ${week.length?`<button class="btn" data-action="list-mode" data-mode="spotlight" style="margin-top:12px">Spotlight only these (work mode)</button>`:''}
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 8px">Not this week (${rest.length})</h3>
+    <p style="font-size:.85rem;color:var(--muted)">Tap <b>This week</b> to promote a task into your short list.</p>
+    ${rest.slice(0,40).map(t=>`<div class="deadline-row" style="padding:8px 0;border-bottom:1px solid var(--line)">
+      <span style="flex:1">${escapeHtml(t.title)}</span>
+      <button class="btn sm" data-action="plan-week" data-id="${t.id}">This week</button>
+    </div>`).join('') || '<div class="empty">No other open tasks.</div>'}
+  </div>`;
 }
 
 function viewChallenges(){
@@ -3866,7 +3975,7 @@ function wizardPickWhy(code){
     big: { title:'It feels too big', body:'Shrink it. Open Bite Size and cut this into pieces under 15 minutes. You only need the first piece.', nav:'bitesize', prep:()=>{ state.cheeseTaskId=t.id; } },
     boring: { title:'It feels boring', body:'Do one short Focus Pod block on this task, then stop. A timer makes “just start” easier.', nav:'timer', prep:()=>{ state.timer.activeTaskId=t.id; } },
     scary: { title:'It feels unclear or scary', body:'On the task, write one line: “First step is…” Then do only that step. Nothing else.', nav:'tasks', prep:null },
-    other: { title:'Something else is in the way', body:'Turn on Bug Me for a time today so SnapBack comes back to you — you do not have to hold it in your head.', nav:'settings', prep:null }
+    other: { title:'Something else is in the way', body:'Energy and mood count. Do one tiny step only: open Focus Pod for 10 minutes on this task, or write one line in Journal about what is blocking you. Bug Me is optional if you want a later nudge.', nav:'timer', prep:()=>{ state.timer.activeTaskId=t.id; } }
   };
   const tip = tips[code] || tips.other;
   if(tip.prep) tip.prep();
@@ -4114,8 +4223,7 @@ function viewTasks(){
   // hide backburner from main list unless filter says so
   if(f!=='backburner') list=list.filter(t=>!t.backburner);
   else list=(state.tasks||[]).filter(t=>t.backburner && !t.done);
-  const items = list.length ? list.map(taskCard).join('') : `<div class="empty">Nothing here. Add a task above, or pick a different filter.</div>`;
-  // List overwhelm modes
+  // List overwhelm modes — must run BEFORE building items
   const mode = state.listMode || 'all';
   let modeBanner = tasksViewToolbar();
   let modeBody = '';
@@ -4123,10 +4231,15 @@ function viewTasks(){
     const open = list.filter(t=>!t.done);
     const n = state.spotlightSize || 3;
     const shown = open.slice(0, n);
-    const rest = open.length - shown.length;
-    modeBody = `<div class="card" style="background:var(--pine-soft)"><b>${mode==='batch'?'Small Batch':'Spotlight'}</b> — showing ${shown.length} of ${open.length} open tasks.${rest>0?' '+rest+' hidden.':''}</div>`;
-    list = shown.concat(list.filter(t=>t.done));
+    const rest = Math.max(0, open.length - shown.length);
+    modeBody = `<div class="card" style="background:var(--pine-soft);margin-bottom:10px">
+      <b>${mode==='batch'?'Small Batch':'Spotlight'}</b> — only <b>${shown.length}</b> task(s) shown.
+      ${rest>0?` <span style="color:var(--muted)">${rest} more hidden until you finish these.</span>`:' All open tasks are visible.'}
+      ${mode==='batch'?'<div style="font-size:.82rem;margin-top:6px">Finish this batch, then open Small Batch again for the next set.</div>':''}
+    </div>`;
+    list = shown; // do NOT show the rest
   }
+  const items = list.length ? list.map(taskCard).join('') : `<div class="empty">Nothing here. Add a task above, or pick a different filter.</div>`;
   if(mode === 'one'){
     const open = list.filter(t=>!t.done);
     const idx = Math.min(state.oneAtATimeIndex||0, Math.max(0, open.length-1));
@@ -4162,7 +4275,7 @@ function viewTasks(){
       <div style="font-size:3rem">🫙</div>
       <p style="color:var(--muted)">${open.length} open task(s) in the bag</p>
       ${cur ? `<div style="font-size:1.2rem;font-weight:700;margin:12px 0">${escapeHtml(cur.title)}</div>
-        <button class="btn" data-action="jar-done">Done — pull was good</button>` : ''}
+        <p style="font-size:.85rem;color:var(--muted)">Work session should have opened. If not, pull again.</p>` : ''}
       <button class="btn ${cur?'ghost':''}" data-action="jar-draw" style="margin-top:10px">${cur?'Pull another':'Pull a task'}</button>
     </div>`;
   }
@@ -4893,9 +5006,15 @@ function viewEisenhower(){
   const active=state.tasks.filter(t=>!t.done);
   const q1=active.filter(t=>t.urgent&&t.important), q2=active.filter(t=>!t.urgent&&t.important);
   const q3=active.filter(t=>t.urgent&&!t.important), q4=active.filter(t=>!t.urgent&&!t.important);
-  const card=(t)=>`<div class="qcard"><div class="qtitle">${escapeHtml(t.title)}</div><div class="qchips">
-      <span class="chip ${t.urgent?'urgent-on':'off'}" data-action="toggle-urgent" data-id="${t.id}">Urgent</span>
-      <span class="chip ${t.important?'important-on':'off'}" data-action="toggle-important" data-id="${t.id}">Important</span></div></div>`;
+  const card=(t)=>`<div class="qcard" style="padding:12px">
+      <div class="qtitle" style="font-weight:700;margin-bottom:8px">${escapeHtml(t.title)}</div>
+      <div style="font-size:.78rem;color:var(--muted);margin-bottom:8px">Tap to move:</div>
+      <div class="qchips" style="display:flex;flex-wrap:wrap;gap:6px">
+        <button type="button" class="btn sm ${t.urgent?'':'ghost'}" data-action="toggle-urgent" data-id="${t.id}">${t.urgent?'✓ ':''}Urgent</button>
+        <button type="button" class="btn sm ${t.important?'':'ghost'}" data-action="toggle-important" data-id="${t.id}">${t.important?'✓ ':''}Important</button>
+      </div>
+      <div style="font-size:.75rem;color:var(--muted);margin-top:8px">${t.urgent&&t.important?'Do first':(!t.urgent&&t.important)?'Schedule':(t.urgent&&!t.important)?'Delegate / quick':('Later / drop')}</div>
+    </div>`;
   const listOrEmpty=(arr)=>arr.length?arr.map(card).join(''):`<div style="font-size:.77rem;color:var(--muted)">Nothing here</div>`;
   return `
   <div class="pagehead">
@@ -6645,7 +6764,9 @@ function wireView(){
     else if(action==='back-to-tasks') el.addEventListener('click', ()=>setView('tasks'));
     else if(action==='back-to-today') el.addEventListener('click', ()=>setView('today'));
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
-    else if(action==='clear-tom') el.addEventListener('click', ()=>{ state.topOfMindId=null; if(state.timeTrack) state.timeTrack.startedAt=null; persistRender(); });
+    else if(action==='plan-week') el.addEventListener('click', ()=>{ const t=findTask(id); if(t){ t.planWeek=true; persistRender(); } });
+    else if(action==='unplan-week') el.addEventListener('click', ()=>{ const t=findTask(id); if(t){ t.planWeek=false; persistRender(); } });
+    else if(action==='clear-tom') el.addEventListener('click', ()=>{ state.topOfMindId=null; if(state.timeTrack){ state.timeTrack.startedAt=null; state.timeTrack.taskId=null; } persistRender(); });
     else if(action==='pin-tom') el.addEventListener('click', ()=>{ state.topOfMindId=id; persistRender(); });
     else if(action==='to-backburner') el.addEventListener('click', ()=>{
       const t=findTask(id); if(!t) return;
@@ -6659,6 +6780,7 @@ function wireView(){
       const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner);
       if(!open.length){ showAppMessage('No open tasks', 'Add a task first, then try again.'); return; }
       state.spinResult=open[Math.floor(Math.random()*open.length)].id;
+      state.workSession={taskId:state.spinResult, source:'spin'};
       persistRender();
     });
     else if(action==='list-mode') el.addEventListener('click', ()=>{
@@ -6675,6 +6797,7 @@ function wireView(){
       }
       const next=state.jarQueue.shift();
       state.jarCurrent = next;
+      state.workSession = {taskId: next, source:'jar'};
       persistRender();
     });
     else if(action==='jar-done') el.addEventListener('click', ()=>{
@@ -6700,27 +6823,24 @@ function wireView(){
       if(!p) return;
       if(p.action==='challenge-home'){ state.challengeId=null; persistRender(); return; }
       if(p.action==='start-wizard') openStartWizard();
-      else if(p.action==='mode-spotlight'){ state.listMode='spotlight'; state.spotlightSize=3; navigateTo('tasks'); }
-      else if(p.action==='mode-batch'){ state.listMode='batch'; state.spotlightSize=3; navigateTo('tasks'); }
+      else if(p.action==='plan-ahead'){ state.view='planAhead'; persistRender(); }
+      else if(p.action==='mode-spotlight'){ state.listMode='spotlight'; state.spotlightSize=3; state.filter='all'; navigateTo('tasks'); }
+      else if(p.action==='mode-batch'){ state.listMode='batch'; state.spotlightSize=3; state.filter='all'; navigateTo('tasks'); }
       else if(p.action==='mode-wall'){ state.listMode='wall'; navigateTo('tasks'); }
       else if(p.action==='mode-one'){ state.listMode='one'; state.oneAtATimeIndex=0; navigateTo('tasks'); }
       else if(p.action==='mode-jar'){ state.listMode='jar'; state.jarQueue=null; navigateTo('tasks'); }
       else if(p.action==='mode-pool'){ state.listMode='pool'; navigateTo('tasks'); }
       else if(p.action==='mode-spin'){ state.listMode='spin'; state.spinResult=null; navigateTo('tasks'); }
       else if(p.action==='top-of-mind'){
-        const open=(state.tasks||[]).filter(t=>!t.done);
+        const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner);
         if(!open.length){ showAppMessage('Add a task first', 'Create a task, then try this tool again.', {onOk:()=>navigateTo('tasks')}); return; }
-        state.topOfMindId=open[0].id;
-        showAppMessage('Top of Mind is on', '“'+open[0].title+'” stays pinned until you clear it or mark it done.');
+        state.pickTom = true;
         persistRender();
       }
       else if(p.action==='time-track'){
-        const open=(state.tasks||[]).filter(t=>!t.done);
+        const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner);
         if(!open.length){ showAppMessage('Add a task first', 'Create a task, then try this tool again.', {onOk:()=>navigateTo('tasks')}); return; }
-        const t=open[0];
-        state.timeTrack={taskId:t.id, startedAt:Date.now(), accumulated:state.timeTrack&&state.timeTrack.accumulated||{}};
-        state.topOfMindId=t.id;
-        showAppMessage('Timer started', '“'+t.title+'” is timing and stays Top of Mind while you work.');
+        state.pickTimer = true;
         persistRender();
       }
       else if(p.action==='brain-dump'){
@@ -7494,6 +7614,9 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.wizard===undefined) state.wizard=null;
     if(state.appMsg===undefined) state.appMsg=null;
     if(state.appPrompt===undefined) state.appPrompt=null;
+    if(state.pickTom===undefined) state.pickTom=false;
+    if(state.pickTimer===undefined) state.pickTimer=false;
+    if(state.workSession===undefined) state.workSession=null;
     if(!state.listMode) state.listMode='all'; // all | spotlight | wall | one | jar
     if(!state.spotlightSize) state.spotlightSize=3;
     if(state.jarQueue===undefined) state.jarQueue=null;
