@@ -3136,6 +3136,7 @@ function renderModal(){
             <button class="btn" id="tmDone">${t.done?'Mark as not done':'Mark as done'}</button>
             <button class="btn ghost" id="tmResched">Reschedule…</button>
             <button class="btn ghost" id="tmRemind">Bug Me / reminder…</button>
+            <button class="btn ghost" id="tmAskAi">✨ Ask AI — I am stuck</button>
             <button class="btn ghost" id="tmPin">📌 Top of Mind</button>
             <button class="btn ghost" id="tmBurn">🔥 Backburner</button>
             <button class="btn ghost" id="tmFocus">Start Focus Pod</button>
@@ -3177,6 +3178,8 @@ function renderModal(){
       };
       const tmPin=document.getElementById('tmPin');
       if(tmPin) tmPin.onclick=()=>{ state.topOfMindId=t.id; state.taskMenuOpen=false; persistRender(); };
+      const tmAsk=document.getElementById('tmAskAi');
+      if(tmAsk) tmAsk.onclick=()=>{ state.taskMenuOpen=false; openAIWithPrompt(promptStuckTask(t), preferredAI()); };
       const tmBurn=document.getElementById('tmBurn');
       if(tmBurn) tmBurn.onclick=()=>{ t.backburner=true; state.taskMenuOpen=false; persistRender(); };
       document.getElementById('tmRemind').onclick=()=>{
@@ -3860,6 +3863,7 @@ function viewPlanAhead(){
     <div class="eyebrow">ADHD-friendly planning</div>
     <h1>Plan this week</h1>
     <p>Do not plan everything. Move only a few tasks into <b>This week</b>. The rest wait.</p>
+    <button class="btn ghost sm" id="planAiBtn" style="margin-top:8px">✨ Ask AI for a week plan</button>
   </div>
   <div class="card" style="background:var(--pine-soft)">
     <h3 style="margin:0 0 8px">This week (${week.length})</h3>
@@ -3919,6 +3923,126 @@ function viewChallenges(){
   </div>`;
 }
 
+
+
+/* ============================================================
+   Ask AI — open student's chosen AI with a ready-made prompt
+   ============================================================ */
+function preferredAI(){
+  return (state.settings && state.settings.preferredAI) || localStorage.getItem('snapback_ai') || 'grok';
+}
+function setPreferredAI(v){
+  if(!state.settings) state.settings={};
+  state.settings.preferredAI=v;
+  try{ localStorage.setItem('snapback_ai', v); }catch(e){}
+}
+function openAIWithPrompt(prompt, ai){
+  const q = String(prompt||'').trim();
+  if(!q) return;
+  const which = ai || preferredAI();
+  try{ navigator.clipboard.writeText(q); }catch(e){}
+  const urls = {
+    grok: 'https://grok.com/?q='+encodeURIComponent(q),
+    chatgpt: 'https://chatgpt.com/?q='+encodeURIComponent(q),
+    claude: 'https://claude.ai/new?q='+encodeURIComponent(q),
+    gemini: 'https://gemini.google.com/app?q='+encodeURIComponent(q),
+    perplexity: 'https://www.perplexity.ai/search?q='+encodeURIComponent(q)
+  };
+  window.open(urls[which]||urls.grok, '_blank', 'noopener');
+  showAppMessage('AI opened', 'Your prompt was copied to the clipboard too. If the AI page is empty, paste (Ctrl+V) and send.');
+}
+function aiPickerHtml(idPrefix){
+  const cur=preferredAI();
+  return `<select id="${idPrefix}AiSelect" style="max-width:130px">
+    <option value="grok" ${cur==='grok'?'selected':''}>Grok</option>
+    <option value="chatgpt" ${cur==='chatgpt'?'selected':''}>ChatGPT</option>
+    <option value="claude" ${cur==='claude'?'selected':''}>Claude</option>
+    <option value="gemini" ${cur==='gemini'?'selected':''}>Gemini</option>
+    <option value="perplexity" ${cur==='perplexity'?'selected':''}>Perplexity</option>
+  </select>`;
+}
+function promptStudyBreakdown(book, chapterNum, chapterName, taskTitle){
+  return `I am a student (often grades 8–12 or early college) who needs ADHD-friendly help.
+
+Task: ${taskTitle||'Study this chapter'}
+Book / subject: ${book||'(not specified)'}
+Chapter number: ${chapterNum||'(not specified)'}
+Chapter name: ${chapterName||'(not specified)'}
+
+Please break this into a realistic Bite Size plan:
+1) 6–12 small steps I can finish in 10–20 minutes each
+2) Order them so the first step is the easiest start
+3) Mark which steps need deep focus vs light review
+4) Suggest when I might need a break
+5) Keep language simple and encouraging — no long lecture
+
+Return a numbered list I can copy into my study app.`;
+}
+function promptQuizAfterStudy(book, chapterNum, chapterName, taskTitle){
+  return `I just finished studying this (student, ADHD-friendly please):
+
+Book: ${book||''}
+Chapter ${chapterNum||''}: ${chapterName||''}
+Task: ${taskTitle||''}
+
+Give me a short quiz:
+- 5 questions (mix of recall and understanding)
+- After each question, wait — or provide answers at the end clearly labeled
+- One stretch question that connects ideas
+Keep it fair for grades 8–12 / early college. Encouraging tone.`;
+}
+function promptPrioritize(tasks){
+  const lines=(tasks||[]).slice(0,15).map((t,i)=>`${i+1}. ${t.title}${t.date?' (due '+t.date+')':''}`).join('\\n');
+  return `I am a student with a long task list and ADHD. Help me prioritize for TODAY only.
+
+My open tasks:
+${lines||'(none listed)'}
+
+Please:
+1) Pick at most 5 things for today
+2) Say which is the one non-negotiable
+3) Which can wait until tomorrow
+4) Why, in one short sentence each
+Simple language.`;
+}
+function promptStuckTask(t){
+  return `I am stuck starting this school task (ADHD-friendly help):
+
+Title: ${(t&&t.title)||''}
+Notes: ${(t&&t.notes)||'(none)'}
+Due: ${(t&&t.date)||'not set'}
+
+Please:
+1) Guess why it might feel hard (too big / unclear / boring / scary)
+2) Give the smallest first step (under 5 minutes)
+3) Give 3 more small steps after that
+4) One encouraging line — no lecture`;
+}
+function promptWeekPlan(tasks){
+  const lines=(tasks||[]).slice(0,20).map(t=>`- ${t.title}${t.date?' due '+t.date:''}`).join('\\n');
+  return `Help me plan THIS WEEK only as a student with ADHD.
+
+Open tasks:
+${lines}
+
+Suggest a realistic plan:
+- Mon–Fri: at most 2 focus blocks per day
+- What can wait until next week
+- One recovery / rest suggestion
+Short and practical.`;
+}
+function promptJournalReflect(note){
+  return `I wrote this in my student journal. Help me gently sort it (ADHD-friendly, not clinical):
+
+"""
+${note||''}
+"""
+
+1) What might this be about in one sentence?
+2) Is there one small action for today?
+3) What can I drop or park for later?
+Kind tone. Short.`;
+}
 
 function showAppMessage(title, body, opts){
   opts = opts || {};
@@ -4015,6 +4139,9 @@ function viewToday(){
   <div class="pagehead">
     <div class="eyebrow">${new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</div>
     <h1>${state.profile&&state.profile.name ? escapeHtml(state.profile.name)+"\u2019s day" : "Today"}</h1>
+    <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px">
+      <button class="btn ghost sm" id="todayAiPrioritize">✨ Ask AI what matters today</button>
+    </div>
     <p>Just today. Not the whole semester.</p>
   </div>
 
@@ -5042,6 +5169,7 @@ function viewBiteSize(){
   const t=findTask(state.cheeseTaskId)||undone[0];
   if(t) state.cheeseTaskId=t.id;
   const chunks=t?(t.chunks||[]):[];
+  const allBitesDone = chunks.length>0 && chunks.every(c=>c.done);
   const guideBanner = (guide && guide.active) ? `
   <div class="card" style="background:var(--amber-soft);border-color:var(--amber);margin-bottom:12px">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -5058,41 +5186,61 @@ function viewBiteSize(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Small bites, big progress</div><h1>Bite Size</h1><p>Big tasks feel scary. Break them into tiny bites you can finish in 5–15 minutes. Order doesn't matter — just keep taking bites.</p>
+    <div class="eyebrow">Small bites, big progress</div><h1>Bite Size</h1><p>Big tasks feel scary. Break them into tiny bites you can finish in 5–15 minutes.</p>
   </div>
   ${guideBanner}
   <div class="card">
     <label>Task</label>
     <select id="cheeseTaskSelect">${undone.length?undone.map(x=>`<option value="${x.id}" ${t&&t.id===x.id?'selected':''}>${escapeHtml(x.title)}</option>`).join(''):'<option>No tasks yet — add one on the Tasks page</option>'}</select>
-    ${t?`
-    <div class="card" style="background:var(--pine-soft);border:none;margin:12px 0">
-      <label style="color:var(--pine)">&#9889; Smart breakdown — instant, free, works offline, no account needed</label>
-      <div class="row">
-        <input id="magicInput" placeholder="${escapeHtml(t.title)}">
-        <button class="btn sm" id="magicBtn" style="flex:0 0 auto">&#9889; Break it down</button>
-      </div>
-      <div id="magicStatus" style="font-size:.78rem;color:var(--muted);margin-top:6px"></div>
+  </div>
+  ${t?`
+  <div class="card" style="background:var(--gold-soft);border-color:var(--gold)">
+    <div style="font-weight:800;margin-bottom:6px">✨ Ask AI to break up a chapter</div>
+    <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Book + chapter → AI suggests realistic 10–20 min bites. Paste ideas back as bites below.</p>
+    <div class="field"><label>Book / subject</label><input id="biteBook" placeholder="e.g. NCERT Physics Class 11" value="${escapeHtml((t.studyMeta&&t.studyMeta.book)||'')}"></div>
+    <div class="row" style="margin-top:8px">
+      <div class="field"><label>Chapter #</label><input id="biteChNum" placeholder="e.g. 4" value="${escapeHtml((t.studyMeta&&t.studyMeta.chNum)||'')}"></div>
+      <div class="field" style="flex:2"><label>Chapter name</label><input id="biteChName" placeholder="e.g. Motion in a plane" value="${escapeHtml((t.studyMeta&&t.studyMeta.chName)||'')}"></div>
     </div>
-    <div class="templaterow">
-      <span style="font-size:.75rem;color:var(--muted);align-self:center">Or a fixed template:</span>
-      <button data-tpl="essay">Essay</button><button data-tpl="project">Project</button><button data-tpl="exam">Exam prep</button><button data-tpl="lab">Lab report</button><button data-tpl="learn">Learning a chapter</button>
-      ${chunks.length ? `<button id="clearChunksBtn" style="border-color:var(--brick);color:var(--brick)">Clear all steps</button>` : ''}
+    <div class="row" style="margin-top:10px;align-items:center;flex-wrap:wrap;gap:8px">
+      ${aiPickerHtml('bite')}
+      <button class="btn sm" id="biteAiBreakBtn">Ask AI for bites ↗</button>
     </div>
-    <div class="cheesewrap" style="margin-top:10px">
-      <div>${cheeseSvg(chunks)}</div>
-      <div class="holelist">
-        <div class="row"><input id="holeInput" placeholder="Add a tiny bite (e.g. 'read page 1')" onkeydown="if(event.key==='Enter'){addHole()}"><button class="btn sm" id="addHoleBtn" style="flex:0 0 auto">Add bite</button></div>
-        <ul class="holelist" style="margin-top:6px">
-          ${chunks.length?chunks.map(c=>`<li class="hole ${c.done?'eaten':''}"><input type="checkbox" class="check" style="width:16px;height:16px" ${c.done?'checked':''} data-action="toggle-hole" data-task="${t.id}" data-hole="${c.id}"><span class="htext">${escapeHtml(c.text)}</span><button class="btn ghost sm" data-action="delete-hole" data-task="${t.id}" data-hole="${c.id}">✕</button></li>`).join(''):'<li class="empty">Plate is empty — add the smallest possible first bite, or use a template above.</li>'}
-        </ul>
-      </div>
-    </div>` : ''}
-  </div>`;
+  </div>
+  <div class="card">
+    <label style="color:var(--pine)">⚡ Quick offline breakdown</label>
+    <div class="row">
+      <input id="magicInput" placeholder="${escapeHtml(t.title)}">
+      <button class="btn sm" id="magicBtn" style="flex:0 0 auto">Break it down</button>
+    </div>
+    <div id="magicStatus" style="font-size:.8rem;color:var(--muted);margin-top:6px"></div>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 8px">Bites for this task</h3>
+    <div class="row">
+      <input id="chunkInput" placeholder="Add a small bite…">
+      <button class="btn sm" id="addChunkBtn" style="flex:0 0 auto">Add</button>
+    </div>
+    <ul style="list-style:none;padding:0;margin:12px 0 0">
+      ${chunks.length?chunks.map((c,i)=>`<li style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)">
+        <input type="checkbox" ${c.done?'checked':''} data-action="toggle-chunk" data-id="${t.id}" data-idx="${i}">
+        <span style="flex:1;${c.done?'text-decoration:line-through;opacity:.6':''}">${escapeHtml(c.text||c.title||'')}</span>
+      </li>`).join(''):'<li class="empty">No bites yet — add some or ask AI.</li>'}
+    </ul>
+  </div>
+  ${allBitesDone?`
+  <div class="card" style="border-color:var(--pine)">
+    <div style="font-weight:800">All bites done 🎉</div>
+    <p style="font-size:.85rem;color:var(--muted)">Check that it stuck with a short quiz.</p>
+    <div class="row" style="align-items:center;flex-wrap:wrap;gap:8px">
+      ${aiPickerHtml('quiz')}
+      <button class="btn sm" id="biteAiQuizBtn">Ask AI for a short quiz ↗</button>
+    </div>
+  </div>`:''}
+  `:`<div class="empty">Add a task on the Tasks page first.</div>`}
+`;
 }
 
-/* ============================================================
-   VIEW: Time Blocking
-   ============================================================ */
 function viewTimeBlocking(){
   const date=state.selectedDay||todayStr();
   const blocks=state.studyBlocks.filter(b=>b.date===date).sort((a,b)=>a.start.localeCompare(b.start));
@@ -5960,6 +6108,7 @@ function viewJournal(){
   <div class="card">
     <textarea id="journalText" rows="3" placeholder="What's on your mind?" style="width:100%"></textarea>
     <button class="btn" id="journalSave" style="margin-top:10px">Add sticky note</button>
+    <button class="btn ghost sm" id="journalAiBtn" style="margin-top:10px;margin-left:8px">✨ Ask AI to sort this thought</button>
   </div>
   <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px">
     ${open.length? open.map((e,i)=>`
@@ -6956,6 +7105,12 @@ function wireView(){
   });
 
   if(state.view==='today'){
+    const tap=document.getElementById('todayAiPrioritize');
+    if(tap) tap.addEventListener('click', ()=>{
+      const open=(state.tasks||[]).filter(x=>!x.done&&!x.backburner);
+      openAIWithPrompt(promptPrioritize(open), preferredAI());
+    });
+
     const nnSet=document.getElementById('nnSet'); if(nnSet) nnSet.addEventListener('click', setNonNegotiable);
     const nnInput=document.getElementById('nnInput'); if(nnInput) nnInput.addEventListener('keydown', e=>{ if(e.key==='Enter') setNonNegotiable(); });
     const nnToggle=document.getElementById('nnToggle'); if(nnToggle) nnToggle.addEventListener('click', toggleNonNegotiable);
@@ -6988,16 +7143,10 @@ function wireView(){
     const quickBtn=document.getElementById('quickAddBtn'); if(quickBtn) quickBtn.addEventListener('click', quickAddTask);
     const askAiBtn=document.getElementById('askAiBtn');
     if(askAiBtn) askAiBtn.addEventListener('click', ()=>{
-      const q = (document.getElementById('newTitle')?.value || '').trim() || 'Help me break down and plan this task';
-      const ai = document.getElementById('aiHelperSelect')?.value || 'grok';
-      const urls = {
-        grok: `https://grok.com/?q=${encodeURIComponent(q)}`,
-        chatgpt: `https://chatgpt.com/?q=${encodeURIComponent(q)}`,
-        claude: `https://claude.ai/new?q=${encodeURIComponent(q)}`,
-        gemini: `https://gemini.google.com/app?q=${encodeURIComponent(q)}`,
-        perplexity: `https://www.perplexity.ai/search?q=${encodeURIComponent(q)}`
-      };
-      window.open(urls[ai] || urls.grok, '_blank', 'noopener');
+      const title = (document.getElementById('newTitle')?.value || '').trim();
+      const ai = document.getElementById('aiHelperSelect')?.value || preferredAI();
+      setPreferredAI(ai);
+      openAIWithPrompt(title ? promptStuckTask({title, notes:'', date:document.getElementById('newDate')?.value||''}) : 'Help me plan a realistic study task for today. I am a student with ADHD. Keep steps small.', ai);
     });
     main.querySelectorAll('[data-filter]').forEach(b=>b.addEventListener('click',()=>{state.filter=b.dataset.filter; persistRender();}));
   }
@@ -7319,6 +7468,12 @@ function wireView(){
 
   if(state.view==='journal'){
     const js=document.getElementById('journalSave'); if(js) js.addEventListener('click', addJournalEntry);
+    const ja=document.getElementById('journalAiBtn');
+    if(ja) ja.addEventListener('click', ()=>{
+      const v=(document.getElementById('journalText')?.value||'').trim();
+      if(!v){ showAppMessage('Type a thought first', 'Write something in the box, then ask AI.'); return; }
+      openAIWithPrompt(promptJournalReflect(v), preferredAI());
+    });
     const d1=document.getElementById('dlJournalDo'); if(d1) d1.addEventListener('click', ()=>downloadJournalBucket('do'));
     const d2=document.getElementById('dlJournalFile'); if(d2) d2.addEventListener('click', ()=>downloadJournalBucket('file'));
     const d3=document.getElementById('dlJournalDrop'); if(d3) d3.addEventListener('click', ()=>downloadJournalBucket('drop'));
@@ -7371,14 +7526,45 @@ function wireView(){
     });
   }
 
+  if(state.view==='planAhead'){
+    const pb=document.getElementById('planAiBtn');
+    if(pb) pb.addEventListener('click', ()=>{
+      openAIWithPrompt(promptWeekPlan((state.tasks||[]).filter(t=>!t.done)), preferredAI());
+    });
+  }
   if(state.view==='bitesize'){
-    const cs=document.getElementById('cheeseTaskSelect'); if(cs) cs.addEventListener('change', ()=>{ state.cheeseTaskId=Number(cs.value); persistRender(); });
-    const addHoleBtn=document.getElementById('addHoleBtn'); if(addHoleBtn) addHoleBtn.addEventListener('click', addHole);
-    const magicBtn=document.getElementById('magicBtn'); if(magicBtn) magicBtn.addEventListener('click', smartBreakdown);
-    const clearBtn=document.getElementById('clearChunksBtn'); if(clearBtn) clearBtn.addEventListener('click', clearAllChunks);
-    main.querySelectorAll('[data-tpl]').forEach(b=>b.addEventListener('click', ()=>applyTemplate(b.dataset.tpl)));
+    const sel=document.getElementById('cheeseTaskSelect');
+    if(sel) sel.addEventListener('change', ()=>{ state.cheeseTaskId=sel.value; persistRender(); });
+    const magicBtn=document.getElementById('magicBtn');
+    if(magicBtn) magicBtn.addEventListener('click', ()=>{ try{ runMagicBreakdown(); }catch(e){ console.warn(e); } });
+    const addChunk=document.getElementById('addChunkBtn');
+    if(addChunk) addChunk.addEventListener('click', ()=>{
+      const t=findTask(state.cheeseTaskId); if(!t) return;
+      const v=(document.getElementById('chunkInput')?.value||'').trim(); if(!v) return;
+      t.chunks=t.chunks||[]; t.chunks.push({text:v, done:false}); persistRender();
+    });
+    const breakBtn=document.getElementById('biteAiBreakBtn');
+    if(breakBtn) breakBtn.addEventListener('click', ()=>{
+      const t=findTask(state.cheeseTaskId);
+      const book=document.getElementById('biteBook')?.value||'';
+      const chNum=document.getElementById('biteChNum')?.value||'';
+      const chName=document.getElementById('biteChName')?.value||'';
+      if(t){ t.studyMeta={book, chNum, chName}; }
+      const ai=document.getElementById('biteAiSelect')?.value||preferredAI();
+      setPreferredAI(ai);
+      openAIWithPrompt(promptStudyBreakdown(book, chNum, chName, t&&t.title), ai);
+    });
+    const quizBtn=document.getElementById('biteAiQuizBtn');
+    if(quizBtn) quizBtn.addEventListener('click', ()=>{
+      const t=findTask(state.cheeseTaskId);
+      const meta=(t&&t.studyMeta)||{};
+      const ai=document.getElementById('quizAiSelect')?.value||preferredAI();
+      setPreferredAI(ai);
+      openAIWithPrompt(promptQuizAfterStudy(meta.book, meta.chNum, meta.chName, t&&t.title), ai);
+    });
   }
 
+  
   if(state.view==='timeblocking'){
     const tbDate=document.getElementById('tbDate'); if(tbDate) tbDate.addEventListener('change', ()=>{ state.selectedDay=tbDate.value; persistRender(); });
     const addBlockBtn=document.getElementById('addBlockBtn'); if(addBlockBtn) addBlockBtn.addEventListener('click', addStudyBlock);
