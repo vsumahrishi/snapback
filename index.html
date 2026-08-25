@@ -2916,8 +2916,9 @@ function renderModal(){
     const snoozes=(state.wakeAlarm&&state.wakeAlarm.snoozesLeft)||0;
     root.innerHTML=`<div class="overlay" style="background:rgba(0,0,0,.85)">
       <div class="quotecard" style="max-width:360px;text-align:center">
-        <div class="qeyebrow">Alarm</div>
-        <div style="font-size:1.4rem;font-weight:800;margin:8px 0">Alarm</div>
+        <div class="qeyebrow">Bug Me</div>
+        <div style="font-size:2.5rem;line-height:1;margin:8px 0">🐛</div>
+        <div style="font-size:1.4rem;font-weight:800;margin:4px 0">Bug Me</div>
         <p style="color:var(--muted);font-size:.9rem">Solve to stop the alarm</p>
         <div style="font-size:2rem;font-weight:800;margin:16px 0">${m.a} + ${m.b} = ?</div>
         <input type="number" id="wakeAnswer" inputmode="numeric" style="font-size:1.4rem;text-align:center;width:120px;padding:12px;border-radius:12px;border:2px solid var(--pine)" />
@@ -3360,7 +3361,7 @@ function scheduleWakeAlarms(){
   if(typeof scheduleNativeNotification==='function'){
     scheduleNativeNotification({
       key:'wake-main',
-      title:'SnapBack alarm',
+      title:'Bug Me — SnapBack',
       body:'Time to get up. Open SnapBack to stop the alarm.',
       when
     });
@@ -3421,7 +3422,7 @@ function wakeSnooze(){
   if(typeof scheduleNativeNotification==='function'){
     scheduleNativeNotification({
       key:'wake-snooze-'+Date.now(),
-      title:'Snooze over — SnapBack',
+      title:'Bug Me — snooze over',
       body:'Wake-up again. Open the app.',
       when
     });
@@ -3457,7 +3458,7 @@ function saveWakeAlarmFromForm(){
   state.wakeAlarm.days=days.length?days:[0,1,2,3,4];
   scheduleWakeAlarms();
   persistRender();
-  alert(state.wakeAlarm.enabled?'Alarm saved.':'Alarm off.');
+  alert(state.wakeAlarm.enabled?'Bug Me saved.':'Bug Me off.');
 }
 
 function exportBackup(){
@@ -6086,10 +6087,10 @@ function viewSettings(){
 
     
     <div class="card" style="border-color:var(--gold)">
-      <h3 style="margin:0 0 6px">Alarm</h3>
-      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Like a normal clock alarm. Set the time and days. On the phone app it can ring when SnapBack is closed. Stop with a simple math problem (2 snoozes, 5 minutes each).</p>
+      <h3 style="margin:0 0 6px;display:flex;align-items:center;gap:8px"><span style="font-size:1.5rem">🐛</span> Bug Me</h3>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">A simple alarm that bugs you at the time you set. On the phone app it can ring when SnapBack is closed. Stop it with a small math problem (2 snoozes, 5 minutes each).</p>
       <label style="display:flex;align-items:center;gap:8px;font-weight:600;margin-bottom:10px">
-        <input type="checkbox" id="wakeEnabled" ${(state.wakeAlarm&&state.wakeAlarm.enabled)?'checked':''}> Turn alarm on
+        <input type="checkbox" id="wakeEnabled" ${(state.wakeAlarm&&state.wakeAlarm.enabled)?'checked':''}> Turn Bug Me on
       </label>
       <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${(state.wakeAlarm&&state.wakeAlarm.time)||'07:00'}"></div>
       <div style="margin-top:8px;font-size:.8rem;color:var(--muted)">Days</div>
@@ -6098,8 +6099,8 @@ function viewSettings(){
       </div>
       <p style="font-size:.82rem;color:var(--muted);margin:10px 0 0">When the alarm fires, a simple math problem appears. Solve it to stop. You can snooze twice (5 minutes each).</p>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:280px">
-        <button class="btn" id="saveWakeBtn">Save alarm</button>
-        <button class="btn ghost sm" id="testWakeBtn" type="button">Preview alarm screen (math to stop)</button>
+        <button class="btn" id="saveWakeBtn">Save Bug Me</button>
+        <button class="btn ghost sm" id="testWakeBtn" type="button">Preview Bug Me screen</button>
       </div>
     </div>
 
