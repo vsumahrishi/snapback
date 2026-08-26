@@ -1524,19 +1524,12 @@ function quickAddTask(){
 function addTask(){
   const title=document.getElementById('newTitle').value.trim();
   if(!title) return;
-  let date='', time='';
-  if(document.getElementById('newYear')){
-    const rd=readDateSelects('new');
-    if(rd.error){ showAppMessage('Check the date', rd.error); return; }
-    date=rd.date||''; time=rd.time||'';
-  } else {
-    date=(document.getElementById('newDate')&&document.getElementById('newDate').value)||'';
-    time=(document.getElementById('newTime')&&document.getElementById('newTime').value)||'';
-  }
+  let date=(document.getElementById('newDate')&&document.getElementById('newDate').value)||'';
+  let time=(document.getElementById('newTime')&&document.getElementById('newTime').value)||'';
   const startDate=document.getElementById('newStartDate')?.value || '';
   const startTime=document.getElementById('newStartTime')?.value || '';
   const priority=document.getElementById('newPriority')?.value || 'medium';
-  if(date){ const _y=parseInt(String(date).slice(0,4),10); if(!_y||_y<2000||_y>2100){ showAppMessage('Check the date','Year must be between 2000 and 2100.'); return; } }
+  if(date){ const _y=parseInt(String(date).slice(0,4),10); if(!_y||_y<2020||_y>2035){ showAppMessage('Check the date','Year must be between 2020 and 2035.'); return; } }
   const reminderTime=document.getElementById('newReminderTime')?.value || time || '09:00';
   const leads=[];
   const dueDate = date;
@@ -3007,8 +3000,8 @@ function renderModal(){
     return;
   }
 
-  // Date edit is inline on the task card (no big overlay)
-  if(false && state.dateEditOpen && state.dateEditId){
+  // (removed big date overlay)
+  if(false){
     const t=findTask(state.dateEditId);
     if(!t){ state.dateEditOpen=false; state.dateEditId=null; }
     else {
@@ -3345,10 +3338,8 @@ function renderModal(){
         box.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:12px">
           <div style="font-weight:700;margin-bottom:8px">Editing — change what you need, then Save</div>
           <div class="field"><label>Title</label><input id="tmEditTitle" value="${escapeHtml(t.title)}"></div>
-          <div style="margin-top:8px;padding:10px;background:var(--pine-soft);border-radius:10px;font-size:.9rem">
-            Due: <b>${t.date||'none'}</b> ${t.time||''}
-            <button type="button" class="btn ghost sm" id="tmEditOpenDate" style="margin-left:8px">Change date / time</button>
-          </div>
+          <div class="field" style="margin-top:8px"><label>Date</label><input type="date" id="tmEditDate" value="${t.date||''}" min="2020-01-01" max="2035-12-31"></div>
+          <div class="field" style="margin-top:8px"><label>Time</label><input type="time" id="tmEditTime" value="${t.time||''}"></div>
           <div class="field" style="margin-top:8px"><label>Notes</label><textarea id="tmEditNotes" rows="3">${escapeHtml(t.notes||'')}</textarea></div>
           <div style="display:flex;gap:8px;margin-top:12px">
             <button class="btn" id="tmEditSave">Save changes</button>
@@ -3357,23 +3348,33 @@ function renderModal(){
         </div>`;
         document.getElementById('tmEditSave').onclick=()=>{
           t.title=(document.getElementById('tmEditTitle').value||'').trim()||t.title;
+          let v=document.getElementById('tmEditDate')?.value||'';
+          if(v){ const y=parseInt(v.slice(0,4),10); if(!y||y<2020||y>2035){ showAppMessage('Check the year','Use 2020–2035.'); return; } }
+          t.date=v;
+          t.time=document.getElementById('tmEditTime')?.value||'';
           t.notes=document.getElementById('tmEditNotes').value||'';
           closeTaskMenu();
-          showAppMessage('Saved', 'Your changes to “'+t.title+'” are saved.');
+          showAppMessage('Saved', 'Saved “'+t.title+'”'+(t.date?' · '+t.date:''));
         };
-        const od=document.getElementById('tmEditOpenDate');
-        if(od) od.onclick=()=>{ closeTaskMenu(); state.dateEditId=t.id; state.dateEditOpen=false; navigateTo('tasks'); persistRender(); };
         document.getElementById('tmEditCancel').onclick=()=>{ box.innerHTML=''; };
       };
       document.getElementById('tmDelete').onclick=()=>{
         showAppMessage('Delete this task?', 'You can Undo for a few seconds after.', { ok:'Delete', cancel:'Cancel', onOk:()=>{ deleteTask(t.id); closeTaskMenu(); } });
       };
       document.getElementById('tmResched').onclick=()=>{
-        closeTaskMenu();
-        state.dateEditId=t.id;
-        state.dateEditOpen=false;
-        navigateTo('tasks');
-        persistRender();
+        const box=document.getElementById('tmExtra');
+        box.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:12px">
+          <div class="field"><label>Date</label><input type="date" id="tmNewDate" value="${t.date||''}" min="2020-01-01" max="2035-12-31"></div>
+          <div class="field" style="margin-top:8px"><label>Time</label><input type="time" id="tmNewTime" value="${t.time||''}"></div>
+          <button type="button" class="btn sm" id="tmSaveDate" style="margin-top:10px">Save</button>
+        </div>`;
+        document.getElementById('tmSaveDate').onclick=()=>{
+          let v=document.getElementById('tmNewDate').value||'';
+          if(v){ const y=parseInt(v.slice(0,4),10); if(!y||y<2020||y>2035){ showAppMessage('Check the year','Use 2020–2035.'); return; } }
+          t.date=v; t.time=document.getElementById('tmNewTime').value||'';
+          closeTaskMenu();
+          showAppMessage('Saved', t.date?('Due '+t.date):'No date');
+        };
       };
       const tmPin=document.getElementById('tmPin');
       if(tmPin) tmPin.onclick=()=>{ state.topOfMindId=t.id; state.taskMenuOpen=false; persistRender(); };
@@ -4070,20 +4071,7 @@ function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal()
   }
 }
 if(typeof window!=='undefined'){
-  if(!window.snapDateEditDelegate){
-    window.snapDateEditDelegate=true;
-    document.addEventListener('click', (e)=>{
-      const btn=e.target&&e.target.closest&&e.target.closest('[data-action="open-date-edit"]');
-      if(!btn) return;
-      e.preventDefault(); e.stopPropagation();
-      const tid=btn.getAttribute('data-id');
-      if(!tid) return;
-      state.dateEditId=tid;
-      state.dateEditOpen=false;
-      state.taskMenuOpen=false;
-      try{ persistRender(); }catch(err){}
-    }, true);
-  }
+  
   try{ document.title='SnapBack'; }catch(e){}
   window.addEventListener('popstate', (ev)=>{ if(ev.state&&ev.state.view){ state.view=ev.state.view; persistRender(); } });
   setTimeout(()=>{ try{ ensureNotifyPermission(); syncNativeClassReminders(); scheduleWakeAlarms(); startCloudSync(); }catch(e){} }, 2000); }
@@ -4676,7 +4664,8 @@ function taskCard(t){
         <!-- Dates & Priority -->
         <div class="tmeta">
           <span style="font-size:.75rem;color:var(--muted);font-weight:600">Due</span>
-          ${compactDateHtml(t)}
+          <input type="date" value="${t.date||''}" data-action="set-date" data-id="${t.id}" min="2020-01-01" max="2035-12-31" style="max-width:150px" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
+          <input type="time" value="${t.time||''}" data-action="set-time" data-id="${t.id}" style="max-width:110px" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
           <select data-action="set-priority" data-id="${t.id}">
             <option value="low" ${t.priority==='low'?'selected':''}>Low</option>
             <option value="medium" ${t.priority==='medium'?'selected':''}>Medium</option>
@@ -4862,10 +4851,10 @@ function viewTasks(){
   <div class="card">
     <h3>Add a task</h3>
     <div class="field"><label>Title</label><input id="newTitle" placeholder="e.g. Finish problem set 4"></div>
-    <div style="margin-top:10px">
-      <div style="font-size:.8rem;font-weight:700;color:var(--muted);margin-bottom:6px">Due date (pick from lists, then Add task)</div>
-      ${dateSelectsHtml('new','')}
-      <div class="field" style="margin-top:10px"><label>Priority</label><select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
+    <div class="row" style="margin-top:10px">
+      <div class="field"><label>Due date</label><input id="newDate" type="date" value="${todayStr()}" min="2020-01-01" max="2035-12-31"></div>
+      <div class="field"><label>Due time</label><input id="newTime" type="time"></div>
+      <div class="field"><label>Priority</label><select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
     </div>
     <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
       <div style="font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px">BUG ME</div>
@@ -7311,48 +7300,7 @@ function wireView(){
     const action=el.dataset.action;
     const id = el.dataset.id!==undefined ? Number(el.dataset.id) : null;
     if(action==='toggle-done') el.addEventListener('change', ()=>toggleDone(id));
-    else if(action==='open-date-edit') el.addEventListener('click', (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      const tid=id||el.getAttribute('data-id');
-      if(!tid) return;
-      state.dateEditId=tid;
-      state.dateEditOpen=false; // inline only, no overlay
-      state.taskMenuOpen=false;
-      persistRender();
-    });
-    else if(action==='save-inline-date') el.addEventListener('click', (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      const wrap=el.closest('.inline-date');
-      if(!wrap) return;
-      const t=findTask(id); if(!t) return;
-      const y=wrap.querySelector('[data-de="y"]')?.value;
-      const m=wrap.querySelector('[data-de="m"]')?.value;
-      const d=wrap.querySelector('[data-de="d"]')?.value;
-      const tm=wrap.querySelector('[data-de="t"]')?.value||'';
-      const yi=+y;
-      const cy=new Date().getFullYear();
-      if(!yi || yi<cy-1 || yi>cy+4){ showAppMessage('Check year', 'Pick a year from the list.'); return; }
-      const maxD=new Date(yi,+m,0).getDate();
-      const day=Math.min(+d||1, maxD);
-      t.date=y+'-'+m+'-'+String(day).padStart(2,'0');
-      t.time=tm;
-      state.dateEditId=null;
-      showAppMessage('Saved', t.date+(t.time?' '+t.time:''));
-      persistRender();
-    });
-    else if(action==='clear-inline-date') el.addEventListener('click', (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      const t=findTask(id); if(!t) return;
-      t.date=''; t.time='';
-      state.dateEditId=null;
-      showAppMessage('Saved', 'No due date');
-      persistRender();
-    });
-    else if(action==='cancel-inline-date') el.addEventListener('click', (e)=>{
-      e.preventDefault(); e.stopPropagation();
-      state.dateEditId=null;
-      persistRender();
-    });
+    
     else if(action==='task-menu') el.addEventListener('click', (e)=>{
       const tag=(e.target&&e.target.tagName||'').toLowerCase();
       if(['input','textarea','select','button','a','label'].includes(tag)) return;
@@ -7370,8 +7318,24 @@ function wireView(){
       state.askDateOpen=true;
       persistRender();
     });
-    else if(action==='set-date') el.addEventListener('change', ()=>{ updateTaskField(id,'date',el.value,{feedback:true}); });
-    else if(action==='set-time') el.addEventListener('change', ()=>{ updateTaskField(id,'time',el.value,{feedback:true}); });
+    else if(action==='set-date') el.addEventListener('change', ()=>{
+      const v=el.value||'';
+      if(v){
+        const y=parseInt(v.slice(0,4),10);
+        if(!y||y<2020||y>2035){ el.value=findTask(id)?.date||''; showAppMessage('Check the year','Use a year between 2020 and 2035.'); return; }
+      }
+      const t=findTask(id); if(!t) return;
+      t.date=v;
+      saveState();
+      try{ pushCloudSync(); }catch(e){}
+      // no persistRender() here — avoids killing the date field while editing
+    });
+    else if(action==='set-time') el.addEventListener('change', ()=>{
+      const t=findTask(id); if(!t) return;
+      t.time=el.value||'';
+      saveState();
+      try{ pushCloudSync(); }catch(e){}
+    });
     else if(action==='set-start-date') el.addEventListener('change', ()=>updateTaskField(id,'startDate',el.value));
     else if(action==='set-start-time') el.addEventListener('change', ()=>updateTaskField(id,'startTime',el.value));
     else if(action==='set-priority') el.addEventListener('change', ()=>updateTaskField(id,'priority',el.value));
