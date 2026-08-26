@@ -406,6 +406,23 @@ function debouncedSave(){
    ============================================================ */
 function toDateStr(d){ const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
 function todayStr(){ return toDateStr(new Date()); }
+function tomorrowStr(){
+  const d=new Date(); d.setDate(d.getDate()+1);
+  return toDateStr(d);
+}
+function endOfWeekStr(){
+  // Monday-start week: today through Sunday of this week
+  const d=new Date();
+  const day=(d.getDay()+6)%7; // Mon=0
+  const end=new Date(d);
+  end.setDate(d.getDate()+(6-day));
+  return toDateStr(end);
+}
+function isThisWeek(dateStr){
+  if(!dateStr) return false;
+  const t=todayStr(), e=endOfWeekStr();
+  return dateStr>=t && dateStr<=e;
+}
 function mondayIndex(d){ return (d.getDay()+6)%7; } // Monday=0 ... Sunday=6
 
 const QUOTE_BANK=[
@@ -1445,6 +1462,8 @@ function addTask(){
   const startDate=document.getElementById('newStartDate')?.value || '';
   const startTime=document.getElementById('newStartTime')?.value || '';
   const priority=document.getElementById('newPriority').value;
+  let _nd=document.getElementById('newDate')?.value||'';
+  if(_nd){ const _y=parseInt(_nd.slice(0,4),10); if(!_y||_y<2000||_y>2100){ showAppMessage('Check the date','Year must be between 2000 and 2100.'); return; } }
   const reminderTime=document.getElementById('newReminderTime')?.value || time || '09:00';
   const leads=[];
   const dueDate = document.getElementById('newDate')?.value || date;
@@ -1616,7 +1635,23 @@ function deleteTask(id){
   if(state.timer.activeTaskId===id) state.timer.activeTaskId=null;
   persistRender();
 }
-function updateTaskField(id,field,value){ const t=findTask(id); if(!t)return; t[field]=value; persistRender(); }
+function updateTaskField(id,field,value,opts){
+  const t=findTask(id); if(!t)return;
+  opts=opts||{};
+  if(field==='date' && value){
+    // reject nonsense years (e.g. 0002)
+    const y=parseInt(String(value).slice(0,4),10);
+    if(!y || y<2000 || y>2100){
+      showAppMessage('Check the date', 'Please use a year between 2000 and 2100. Example: 2026-03-15.');
+      persistRender();
+      return;
+    }
+  }
+  t[field]=value;
+  if(opts.silent){ saveState(); return; }
+  persistRender();
+  if(opts.feedback) showAppMessage('Saved', 'Task updated.');
+}
 function toggleFlag(id,flag){ const t=findTask(id); if(!t)return; t[flag]=!t[flag]; persistRender(); }
 function rescheduleTask(id, days){
   const t=findTask(id); if(!t) return;
@@ -2578,7 +2613,7 @@ async function scheduleNativeNotification({key, title, body, when}){
     try {
       await LocalNotifications.createChannel({
         id: 'snapback',
-        name: 'SnapBack reminders',
+        name: 'SnapBack Bug Me',
         importance: 5,
         visibility: 1,
         sound: 'default',
@@ -2898,6 +2933,45 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+  // After Eisenhower add — optional date/time
+  if(state.askDateOpen && state.pendingEis){
+    const p=state.pendingEis;
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:400px;text-align:left">
+      <div class="qeyebrow">New task</div>
+      <div style="font-weight:800;font-size:1.1rem;margin-bottom:8px">${escapeHtml(p.title)}</div>
+      <p style="font-size:.9rem;color:var(--muted);margin:0 0 12px">Do you want to enter a date / time for this task?</p>
+      <div class="row">
+        <div class="field"><label>Date</label><input type="date" id="eisDate"></div>
+        <div class="field"><label>Time</label><input type="time" id="eisTime"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+        <button class="btn" id="eisDateYes">Save with date / time</button>
+        <button class="btn ghost" id="eisDateNo">Save without date</button>
+        <button class="btn ghost" id="eisDateCancel">Cancel</button>
+      </div>
+    </div></div>`;
+    const finish=(withDate)=>{
+      const id=uid();
+      let date='', time='';
+      if(withDate){
+        date=document.getElementById('eisDate')?.value||'';
+        time=document.getElementById('eisTime')?.value||'';
+        if(date){
+          const y=parseInt(date.slice(0,4),10);
+          if(!y||y<2000||y>2100){ showAppMessage('Check the date', 'Year must be between 2000 and 2100.'); return; }
+        }
+      }
+      state.tasks.unshift({id,title:p.title,notes:'',date,time,priority:'medium',urgent:!!p.urgent,important:!!p.important,tier:p.important?'must':'could',frog:false,meetingUrl:'',reminderLeads:[],reminderTime:'',startDate:'',startTime:'',startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{},strategic:{},flip:{},context:'school'});
+      state.askDateOpen=false; state.pendingEis=null;
+      showAppMessage('Task added', p.title+(date?' — '+date:''));
+      persistRender();
+    };
+    document.getElementById('eisDateYes').onclick=()=>finish(true);
+    document.getElementById('eisDateNo').onclick=()=>finish(false);
+    document.getElementById('eisDateCancel').onclick=()=>{ state.askDateOpen=false; state.pendingEis=null; persistRender(); };
+    return;
+  }
+
   // Pick Top of Mind / Timer task
   if(state.pickTom || state.pickTimer){
     const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner);
@@ -3135,7 +3209,7 @@ function renderModal(){
           <div style="display:flex;flex-direction:column;gap:8px">
             <button class="btn" id="tmDone">${t.done?'Mark as not done':'Mark as done'}</button>
             <button class="btn ghost" id="tmResched">Reschedule…</button>
-            <button class="btn ghost" id="tmRemind">Bug Me / reminder…</button>
+            <button class="btn ghost" id="tmRemind">Bug Me…</button>
             <button class="btn ghost" id="tmAskAi">✨ Ask AI — I am stuck</button>
             <button class="btn ghost" id="tmPin">📌 Top of Mind</button>
             <button class="btn ghost" id="tmBurn">${t.backburner?'↩️ Bring back from Backburner':'🔥 Send to Backburner'}</button>
@@ -3695,6 +3769,136 @@ function saveWakeAlarmFromForm(){
   showAppMessage('Bug Me', state.wakeAlarm.enabled?'Saved and scheduled.':'Turned off.');
 }
 
+
+/* ============================================================
+   Import tasks from Todoist / TickTick / MS To Do / etc (CSV)
+   ============================================================ */
+function parseCSVLine(line){
+  const out=[]; let cur=''; let q=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(ch==='"'){
+      if(q && line[i+1]==='"'){ cur+='"'; i++; }
+      else q=!q;
+    } else if(ch===',' && !q){ out.push(cur); cur=''; }
+    else cur+=ch;
+  }
+  out.push(cur);
+  return out.map(s=>s.trim());
+}
+function parseTaskCSV(text){
+  const raw=String(text||'').replace(/^\uFEFF/,'').trim();
+  if(!raw) return [];
+  const lines=raw.split(/\r?\n/).filter(l=>l.trim());
+  if(lines.length<2) return [];
+  const headers=parseCSVLine(lines[0]).map(h=>h.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim());
+  const idx=(names)=>{
+    for(const n of names){
+      const i=headers.findIndex(h=>h===n || h.includes(n));
+      if(i>=0) return i;
+    }
+    return -1;
+  };
+  const iTitle=idx(['content','task name','task','title','name','item','subject','text']);
+  const iDate=idx(['due date','due','deadline','date','due_date','completed on']);
+  const iTime=idx(['due time','time','due_time']);
+  const iNotes=idx(['description','notes','note','body','comment']);
+  const iPri=idx(['priority','prio','importance']);
+  const iDone=idx(['status','completed','done','checked']);
+  const iProject=idx(['project','list','folder','category']);
+  if(iTitle<0) return {error:'No task title column found. Need a column like Content, Title, Task, or Name.'};
+  const tasks=[];
+  for(let r=1;r<lines.length;r++){
+    const cols=parseCSVLine(lines[r]);
+    if(!cols.length) continue;
+    let title=(cols[iTitle]||'').trim();
+    if(!title) continue;
+    let date='';
+    if(iDate>=0 && cols[iDate]){
+      date=normalizeImportDate(cols[iDate]);
+    }
+    let time='';
+    if(iTime>=0 && cols[iTime]) time=normalizeImportTime(cols[iTime]);
+    // Sometimes due has date+time together
+    if(iDate>=0 && cols[iDate] && !time){
+      const parts=String(cols[iDate]).split(/[ T]/);
+      if(parts[1]) time=normalizeImportTime(parts[1]);
+    }
+    let notes=iNotes>=0?(cols[iNotes]||''):'';
+    if(iProject>=0 && cols[iProject]) notes = (notes?notes+' · ':'')+'List: '+cols[iProject];
+    let priority='medium';
+    if(iPri>=0 && cols[iPri]){
+      const p=String(cols[iPri]).toLowerCase();
+      if(/p1|1|high|urgent|!!/.test(p)) priority='high';
+      else if(/p3|p4|3|4|low/.test(p)) priority='low';
+    }
+    let done=false;
+    if(iDone>=0 && cols[iDone]){
+      const d=String(cols[iDone]).toLowerCase();
+      done=/^(done|completed|true|yes|1|checked)$/.test(d);
+    }
+    tasks.push({title, date, time, notes, priority, done});
+  }
+  return tasks;
+}
+function normalizeImportDate(s){
+  s=String(s||'').trim();
+  if(!s) return '';
+  // YYYY-MM-DD
+  let m=s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if(m){
+    const y=+m[1]; if(y>=2000&&y<=2100) return m[1]+'-'+m[2]+'-'+m[3];
+    return '';
+  }
+  // DD/MM/YYYY or MM/DD/YYYY — prefer ISO if clear
+  m=s.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+  if(m){
+    let a=+m[1], b=+m[2], y=+m[3];
+    if(y<2000||y>2100) return '';
+    // if a>12 treat as DD/MM
+    let day, month;
+    if(a>12){ day=a; month=b; }
+    else if(b>12){ day=b; month=a; }
+    else { month=a; day=b; } // default MM/DD (US); students can fix
+    return y+'-'+String(month).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+  }
+  // YYYY/MM/DD
+  m=s.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
+  if(m){
+    const y=+m[1]; if(y<2000||y>2100) return '';
+    return m[1]+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[3]).padStart(2,'0');
+  }
+  return '';
+}
+function normalizeImportTime(s){
+  s=String(s||'').trim();
+  if(!s) return '';
+  let m=s.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+  if(!m) return '';
+  let h=+m[1], min=m[2];
+  const ap=(m[3]||'').toLowerCase();
+  if(ap==='pm' && h<12) h+=12;
+  if(ap==='am' && h===12) h=0;
+  if(h>23) return '';
+  return String(h).padStart(2,'0')+':'+min;
+}
+function importTasksFromRows(rows){
+  if(!rows||!rows.length) return 0;
+  let n=0;
+  rows.forEach(r=>{
+    const id=uid();
+    state.tasks.unshift({
+      id, title:r.title, notes:r.notes||'', date:r.date||'', time:r.time||'',
+      priority:r.priority||'medium', urgent:false, important:r.priority==='high',
+      tier:'could', frog:false, meetingUrl:'', reminderLeads:[], reminderTime:'',
+      startDate:'', startTime:'', startReminderMinutes:[], chunks:[], pomodoros:0,
+      done:!!r.done, whenThen:{}, rewarding:{}, strategic:{}, flip:{}, context:'school'
+    });
+    n++;
+  });
+  return n;
+}
+
 function exportBackup(){
   const data = {
     version: 1,
@@ -3798,14 +4002,16 @@ function viewPlan(){
 }
 function viewTechniques(){
   const cards=[
+    {id:'eisenhower', label:'This or That (Eisenhower)', desc:'Add tasks into Do First / Schedule / Quick / Later', ico:'▦'},
+    {id:'bitesize', label:'Bite Size', desc:'Break a task into small bites (+ Ask AI for chapters)', ico:'🍽'},
     {id:'timer', label:'Focus Pod', desc:'Timed focus sessions', ico:'⏱'},
-    {id:'eisenhower', label:'Eisenhower', desc:'Urgent vs important', ico:'▦'},
-    {id:'bitesize', label:'Bite Size', desc:'Break work into small bites', ico:'🍽'},
-    {id:'timeblocking', label:'Time Blocking', desc:'Block hours on the day', ico:'🗓'},
-    {id:'rule135', label:'Focus Plate', desc:'1 big, 3 medium, 5 small', ico:'🍽'},
-    {id:'bodydouble', label:'Body Doubling', desc:'Work-with-structure ritual', ico:'👥'}
+    {id:'rule135', label:'Focus Plate', desc:'1 big, 3 medium, 5 small for today', ico:'🍽'},
+    {id:'timeblocking', label:'Time Blocking', desc:'Block hours on a day', ico:'🗓'},
+    {id:'bodydouble', label:'Body Doubling', desc:'Work-with-structure ritual', ico:'👥'},
+    {id:'planAhead', label:'Plan this week', desc:'Short list for this week only', ico:'📆'},
+    {id:'tasks', label:'Open Tasks', desc:'Assign techniques from any task (Edit menu)', ico:'✅'}
   ];
-  return hubPage('Techniques', 'Focus tools — use what helps today', cards);
+  return hubPage('Techniques', 'Use a technique, or open Tasks and attach one to a task — both ways work.', cards);
 }
 function hubPage(title, sub, cards){
   return `<div class="pagehead">
@@ -4243,6 +4449,34 @@ function viewToday(){
     </div>
   </div>
 
+
+  ${(()=>{
+    const tom=tomorrowStr();
+    const tomTasks=state.tasks.filter(t=>!t.done && t.date===tom);
+    const tomClasses=(state.classes||[]).filter(c=>{
+      try{ return c.day===mondayIndex(new Date(tom+'T12:00:00')); }catch(e){ return false; }
+    }).sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+    const open = state.sneakTomorrow;
+    return `
+  <div class="card" style="border:1px dashed var(--line)">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1">
+        <div style="font-weight:800">Sneak peek into tomorrow</div>
+        <div style="font-size:.85rem;color:var(--muted)">${new Date(tom+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})} · optional look-ahead</div>
+      </div>
+      <button class="btn ghost sm" id="sneakTomBtn">${open?'Hide peek':'Show tomorrow'}</button>
+    </div>
+    ${open?`
+      <div style="margin-top:12px">
+        <div style="font-size:.8rem;font-weight:700;color:var(--muted);margin-bottom:6px">Tasks</div>
+        ${tomTasks.length?tomTasks.map(t=>`<div class="deadline-row"><span class="badge dueToday">${t.time||'all day'}</span><span style="flex:1">${escapeHtml(t.title)}</span></div>`).join(''):'<div class="empty">No tasks dated tomorrow.</div>'}
+        <div style="font-size:.8rem;font-weight:700;color:var(--muted);margin:12px 0 6px">Classes</div>
+        ${tomClasses.length?tomClasses.map(c=>`<div class="classrow"><b>${c.start||''}${c.end?'–'+c.end:''}</b>&nbsp;${escapeHtml(c.title||'')}</div>`).join(''):'<div class="empty">No classes on the timetable for that weekday.</div>'}
+      </div>
+    `:''}
+  </div>`;
+  })()}
+
   <div class="card">
     <h3>Your grove</h3>
     <p style="color:var(--muted);font-size:.85rem;margin-top:-2px">A tree grows every time a Focus Pod session runs all the way through — resetting early doesn't count, same as Forest.</p>
@@ -4320,8 +4554,8 @@ function taskCard(t){
         <!-- Dates & Priority -->
         <div class="tmeta">
           <span style="font-size:.75rem;color:var(--muted);font-weight:600">Due</span>
-          <input type="date" value="${t.date||''}" data-action="set-date" data-id="${t.id}">
-          <input type="time" value="${t.time||''}" data-action="set-time" data-id="${t.id}">
+          <input type="date" value="${t.date||''}" data-action="set-date" data-id="${t.id}" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
+          <input type="time" value="${t.time||''}" data-action="set-time" data-id="${t.id}" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
           <select data-action="set-priority" data-id="${t.id}">
             <option value="low" ${t.priority==='low'?'selected':''}>Low</option>
             <option value="medium" ${t.priority==='medium'?'selected':''}>Medium</option>
@@ -4383,7 +4617,9 @@ function tasksViewToolbar(){
 function viewTasks(){
   let list=state.tasks;
   const f=state.filter;
-  if(f==='today') list=list.filter(t=>t.date===todayStr());
+  if(f==='today') list=list.filter(t=>t.date===todayStr() && !t.done);
+  else if(f==='tomorrow') list=list.filter(t=>t.date===tomorrowStr() && !t.done);
+  else if(f==='week') list=list.filter(t=>isThisWeek(t.date) && !t.done);
   else if(f==='overdue') list=list.filter(isOverdue);
   else if(f==='done') list=list.filter(t=>t.done);
   else if(f==='undated') list=list.filter(t=>!t.date && !t.done);
@@ -4511,9 +4747,9 @@ function viewTasks(){
       <div class="field"><label>Priority</label><select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
     </div>
     <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
-      <div style="font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px">ALARM / REMINDER</div>
+      <div style="font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px">BUG ME</div>
       <div class="row">
-        <div class="field"><label>Bug Me / remind at</label><input id="newReminderTime" type="time" value="" placeholder="Same as due time"></div>
+        <div class="field"><label>Bug Me at</label><input id="newReminderTime" type="time" value="" placeholder="Same as due time"></div>
         <div class="field"><label>Also alert</label>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
             <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead7"> 7 days before</label>
@@ -4543,6 +4779,8 @@ function viewTasks(){
   <div class="filters">
     <button data-filter="all" class="${f==='all'?'active':''}">All (${state.tasks.length})</button>
     <button data-filter="today" class="${f==='today'?'active':''}">Today</button>
+    <button data-filter="tomorrow" class="${f==='tomorrow'?'active':''}">Tomorrow</button>
+    <button data-filter="week" class="${f==='week'?'active':''}">This week</button>
     <button data-filter="overdue" class="${f==='overdue'?'active':''}">Overdue</button>
     <button data-filter="undated" class="${f==='undated'?'active':''}">No date</button>
     <button data-filter="must" class="${f==='must'?'active':''}">Must-do</button>
@@ -5183,35 +5421,38 @@ function viewTimer(){
    VIEW: Eisenhower
    ============================================================ */
 function viewEisenhower(){
-  const active=state.tasks.filter(t=>!t.done);
+  const active=state.tasks.filter(t=>!t.done && !t.backburner);
   const q1=active.filter(t=>t.urgent&&t.important), q2=active.filter(t=>!t.urgent&&t.important);
   const q3=active.filter(t=>t.urgent&&!t.important), q4=active.filter(t=>!t.urgent&&!t.important);
   const card=(t)=>`<div class="qcard" style="padding:12px">
       <div class="qtitle" style="font-weight:700;margin-bottom:8px">${escapeHtml(t.title)}</div>
+      <div style="font-size:.8rem;color:var(--muted);margin-bottom:6px">${t.date?(t.date+(t.time?' '+t.time:'')):'No date yet'}</div>
       <div style="font-size:.78rem;color:var(--muted);margin-bottom:8px">Tap to move:</div>
       <div class="qchips" style="display:flex;flex-wrap:wrap;gap:6px">
         <button type="button" class="btn sm ${t.urgent?'':'ghost'}" data-action="toggle-urgent" data-id="${t.id}">${t.urgent?'✓ ':''}Urgent</button>
         <button type="button" class="btn sm ${t.important?'':'ghost'}" data-action="toggle-important" data-id="${t.id}">${t.important?'✓ ':''}Important</button>
       </div>
-      <div style="font-size:.75rem;color:var(--muted);margin-top:8px">${t.urgent&&t.important?'Do first':(!t.urgent&&t.important)?'Schedule':(t.urgent&&!t.important)?'Delegate / quick':('Later / drop')}</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-top:8px">${t.urgent&&t.important?'Do first':(!t.urgent&&t.important)?'Schedule':(t.urgent&&!t.important)?'Quick / interrupt':('Later')}</div>
     </div>`;
-  const listOrEmpty=(arr)=>arr.length?arr.map(card).join(''):`<div style="font-size:.77rem;color:var(--muted)">Nothing here</div>`;
+  const listOrEmpty=(arr)=>arr.length?arr.map(card).join(''):`<div style="font-size:.77rem;color:var(--muted)">Nothing here yet</div>`;
+  const addBox=(uq,iq,label)=>`<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)">
+      <input class="eis-add" data-uq="${uq}" data-iq="${iq}" placeholder="Add task to ${label}…" style="width:100%;margin-bottom:6px">
+      <button type="button" class="btn sm" data-action="eis-add" data-uq="${uq}" data-iq="${iq}">Add here</button>
+    </div>`;
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Whole-list view</div><h1>Eisenhower Matrix</h1><p>Tap Urgent / Important on any task to move it between quadrants.</p>
+    <div class="eyebrow">Sort, then do</div><h1>This or That (Eisenhower)</h1>
+    <p>Add a task into a box, or tap Urgent / Important to move it. Tasks you add here also appear under Tasks.</p>
   </div>
   <div class="matrix">
-    <div class="quad q1"><h4>Do First</h4><div class="qsub">Urgent &amp; important</div><div class="qlist">${listOrEmpty(q1)}</div></div>
-    <div class="quad q2"><h4>Schedule</h4><div class="qsub">Important, not urgent</div><div class="qlist">${listOrEmpty(q2)}</div></div>
-    <div class="quad q3"><h4>Delegate or quick-win</h4><div class="qsub">Urgent, not important</div><div class="qlist">${listOrEmpty(q3)}</div></div>
-    <div class="quad q4"><h4>Eliminate or later</h4><div class="qsub">Neither</div><div class="qlist">${listOrEmpty(q4)}</div></div>
-  </div>`;
+    <div class="quad q1"><h4>Do First</h4><div class="qsub">Urgent &amp; important</div><div class="qlist">${listOrEmpty(q1)}</div>${addBox(1,1,'Do First')}</div>
+    <div class="quad q2"><h4>Schedule</h4><div class="qsub">Important, not urgent</div><div class="qlist">${listOrEmpty(q2)}</div>${addBox(0,1,'Schedule')}</div>
+    <div class="quad q3"><h4>Quick</h4><div class="qsub">Urgent, less important</div><div class="qlist">${listOrEmpty(q3)}</div>${addBox(1,0,'Quick')}</div>
+    <div class="quad q4"><h4>Later</h4><div class="qsub">Neither</div><div class="qlist">${listOrEmpty(q4)}</div>${addBox(0,0,'Later')}</div>
+  </div>
+`;
 }
-
-/* ============================================================
-   VIEW: Bite Size (formerly Swiss Cheese)
-   ============================================================ */
 function viewBiteSize(){
   const undone=state.tasks.filter(t=>!t.done);
   const guide = state.biteGuide;
@@ -6864,7 +7105,20 @@ function viewSettings(){
       <div class="row" style="margin-top:10px">
         <button class="btn sm" id="saveSyncBtn">Save &amp; start live sync</button>
         <button class="btn ghost sm" id="pullSyncBtn">Pull from cloud now</button>
-        <button class="btn ghost sm" id="exportBackupBtn">Export file backup</button>
+        
+      <div style="margin:16px 0;padding:12px;border:1px solid var(--line);border-radius:12px">
+        <div style="font-weight:800;margin-bottom:6px">Import tasks from other apps</div>
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">
+          Works with <b>CSV export</b> from Todoist, TickTick, Microsoft To Do, Things (via CSV), OmniFocus (CSV), Google Tasks (via takeout/CSV tools), and similar.
+          Export a CSV in that app, then upload it here.
+        </p>
+        <input type="file" id="taskCsvInput" accept=".csv,text/csv,text/plain" style="font-size:.85rem">
+        <p style="font-size:.8rem;color:var(--muted);margin:8px 0 0">Or paste CSV below (including the header row):</p>
+        <textarea id="taskCsvPaste" rows="4" placeholder="Content,Due Date,Priority,Description&#10;Finish lab report,2026-09-01,2,Chapter 4" style="width:100%;margin-top:6px"></textarea>
+        <button class="btn sm" id="taskCsvImportBtn" style="margin-top:8px">Preview &amp; import</button>
+        <div id="taskCsvStatus" style="font-size:.85rem;margin-top:8px;color:var(--muted)"></div>
+      </div>
+      <button class="btn ghost sm" id="exportBackupBtn">Export file backup</button>
         <label class="btn ghost sm" style="display:inline-block;cursor:pointer">
           Import file
           <input type="file" id="importBackupInput" accept="application/json,.json" style="display:none">
@@ -6936,8 +7190,25 @@ function wireView(){
     const action=el.dataset.action;
     const id = el.dataset.id!==undefined ? Number(el.dataset.id) : null;
     if(action==='toggle-done') el.addEventListener('change', ()=>toggleDone(id));
-    else if(action==='set-date') el.addEventListener('change', ()=>updateTaskField(id,'date',el.value));
-    else if(action==='set-time') el.addEventListener('change', ()=>updateTaskField(id,'time',el.value));
+    else if(action==='task-menu') el.addEventListener('click', (e)=>{
+      const tag=(e.target&&e.target.tagName||'').toLowerCase();
+      if(['input','textarea','select','button','a','label'].includes(tag)) return;
+      if(e.target.closest && e.target.closest('button,input,textarea,select,a,label')) return;
+      e.preventDefault(); e.stopPropagation();
+      openTaskMenu(id);
+    });
+    else if(action==='toggle-done-btn') el.addEventListener('click', (e)=>{ e.stopPropagation(); toggleDone(id); });
+    else if(action==='eis-add') el.addEventListener('click', ()=>{
+      const uq=el.dataset.uq==='1', iq=el.dataset.iq==='1';
+      const input=document.querySelector('.eis-add[data-uq="'+el.dataset.uq+'"][data-iq="'+el.dataset.iq+'"]');
+      const title=(input&&input.value||'').trim();
+      if(!title){ showAppMessage('Type a task first', 'Write the task name in the box, then tap Add here.'); return; }
+      state.pendingEis={title, urgent:uq, important:iq};
+      state.askDateOpen=true;
+      persistRender();
+    });
+    else if(action==='set-date') el.addEventListener('change', ()=>{ updateTaskField(id,'date',el.value,{feedback:true}); });
+    else if(action==='set-time') el.addEventListener('change', ()=>{ updateTaskField(id,'time',el.value,{feedback:true}); });
     else if(action==='set-start-date') el.addEventListener('change', ()=>updateTaskField(id,'startDate',el.value));
     else if(action==='set-start-time') el.addEventListener('change', ()=>updateTaskField(id,'startTime',el.value));
     else if(action==='set-priority') el.addEventListener('change', ()=>updateTaskField(id,'priority',el.value));
@@ -7167,6 +7438,8 @@ function wireView(){
       const open=(state.tasks||[]).filter(x=>!x.done&&!x.backburner);
       openAIWithPrompt(promptPrioritize(open), preferredAI());
     });
+    const sn=document.getElementById('sneakTomBtn');
+    if(sn) sn.addEventListener('click', ()=>{ state.sneakTomorrow=!state.sneakTomorrow; persistRender(); });
 
     const nnSet=document.getElementById('nnSet'); if(nnSet) nnSet.addEventListener('click', setNonNegotiable);
     const nnInput=document.getElementById('nnInput'); if(nnInput) nnInput.addEventListener('keydown', e=>{ if(e.key==='Enter') setNonNegotiable(); });
@@ -7708,6 +7981,33 @@ function wireView(){
   if(state.view==='settings'){
     const gh=document.getElementById('gotoHelpBtn'); if(gh) gh.addEventListener('click', ()=>navigateTo('help'));
 
+    
+    const csvIn=document.getElementById('taskCsvInput');
+    const csvBtn=document.getElementById('taskCsvImportBtn');
+    const runCsvImport=(text)=>{
+      const parsed=parseTaskCSV(text);
+      if(parsed&&parsed.error){ showAppMessage('Could not read CSV', parsed.error); return; }
+      if(!parsed||!parsed.length){ showAppMessage('No tasks found', 'Check that the file has a header row and a title/content column.'); return; }
+      const preview=parsed.slice(0,5).map(t=>'• '+t.title+(t.date?' ('+t.date+')':'')).join('\n');
+      showAppMessage('Import '+parsed.length+' task(s)?', 'Preview:\n'+preview+(parsed.length>5?'\n…':''), {
+        ok:'Import all', cancel:'Cancel',
+        onOk:()=>{
+          const n=importTasksFromRows(parsed);
+          showAppMessage('Imported', n+' task(s) added. Open Tasks to review.');
+          navigateTo('tasks');
+        }
+      });
+    };
+    if(csvBtn) csvBtn.addEventListener('click', ()=>{
+      const paste=document.getElementById('taskCsvPaste')?.value||'';
+      if(paste.trim()){ runCsvImport(paste); return; }
+      const f=csvIn&&csvIn.files&&csvIn.files[0];
+      if(!f){ showAppMessage('Choose a file or paste CSV', 'Upload a .csv export or paste the text first.'); return; }
+      const reader=new FileReader();
+      reader.onload=()=>runCsvImport(String(reader.result||''));
+      reader.readAsText(f);
+    });
+
     const ex=document.getElementById('exportBackupBtn'); if(ex) ex.addEventListener('click', exportBackup);
     const imp=document.getElementById('importBackupInput'); if(imp) imp.addEventListener('change', e=>{ if(e.target.files[0]) importBackupFile(e.target.files[0]); });
     const sc=document.getElementById('syncCodeInput'); if(sc) sc.value=getSyncCode();
@@ -7861,6 +8161,8 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.pickTimer===undefined) state.pickTimer=false;
     if(state.workSession===undefined) state.workSession=null;
     if(!state.contextFilter) state.contextFilter='all';
+    if(state.askDateOpen===undefined) state.askDateOpen=false;
+    if(state.sneakTomorrow===undefined) state.sneakTomorrow=false;
     if(!state.listMode) state.listMode='all'; // all | spotlight | wall | one | jar
     if(!state.spotlightSize) state.spotlightSize=3;
     if(state.jarQueue===undefined) state.jarQueue=null;
