@@ -406,10 +406,38 @@ function debouncedSave(){
    ============================================================ */
 function toDateStr(d){ const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
 
+
+function compactDateHtml(t){
+  const editing = state.dateEditId===t.id;
+  const label = t.date ? (t.date + (t.time ? ' · '+t.time : '')) : 'No date';
+  if(!editing){
+    return `<button type="button" class="btn ghost sm" data-action="open-date-edit" data-id="${t.id}" style="font-size:.8rem;margin:4px 0">📅 ${escapeHtml(label)}</button>`;
+  }
+  const base = (t.date && /^\d{4}-\d{2}-\d{2}$/.test(t.date)) ? t.date : todayStr();
+  let y0=+base.slice(0,4), m0=base.slice(5,7), d0=base.slice(8,10);
+  const cy=new Date().getFullYear();
+  if(y0<cy-1 || y0>cy+5) y0=cy;
+  const years=[]; for(let y=cy-1; y<=cy+4; y++) years.push(y);
+  const months=[['01','Jan'],['02','Feb'],['03','Mar'],['04','Apr'],['05','May'],['06','Jun'],['07','Jul'],['08','Aug'],['09','Sep'],['10','Oct'],['11','Nov'],['12','Dec']];
+  const dim=new Date(y0,+m0,0).getDate();
+  const days=[]; for(let d=1;d<=dim;d++) days.push(String(d).padStart(2,'0'));
+  if(+d0>dim) d0=String(dim).padStart(2,'0');
+  return `<div class="inline-date" data-id="${t.id}" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0;padding:8px;background:var(--pine-soft);border-radius:10px" onclick="event.stopPropagation()">
+    <select data-de="y" style="width:auto;min-width:72px;padding:6px 8px;font-size:.85rem">${years.map(y=>`<option value="${y}" ${y===y0?'selected':''}>${y}</option>`).join('')}</select>
+    <select data-de="m" style="width:auto;min-width:64px;padding:6px 8px;font-size:.85rem">${months.map(([v,l])=>`<option value="${v}" ${v===m0?'selected':''}>${l}</option>`).join('')}</select>
+    <select data-de="d" style="width:auto;min-width:52px;padding:6px 8px;font-size:.85rem">${days.map(d=>`<option value="${d}" ${d===d0?'selected':''}>${+d}</option>`).join('')}</select>
+    <input type="time" data-de="t" value="${t.time||''}" style="width:auto;min-width:90px;padding:6px 8px;font-size:.85rem">
+    <button type="button" class="btn sm" data-action="save-inline-date" data-id="${t.id}">Save</button>
+    <button type="button" class="btn ghost sm" data-action="clear-inline-date" data-id="${t.id}">Clear</button>
+    <button type="button" class="btn ghost sm" data-action="cancel-inline-date" data-id="${t.id}">✕</button>
+  </div>`;
+}
 function dateSelectsHtml(prefix, dateStr, timeStr){
   const base = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : todayStr();
-  const y0 = base.slice(0,4), m0 = base.slice(5,7), d0 = base.slice(8,10);
-  const years=[]; for(let y=2020;y<=2035;y++) years.push(y);
+  let y0 = base.slice(0,4), m0 = base.slice(5,7), d0 = base.slice(8,10);
+  const cy=new Date().getFullYear();
+  if(+y0<cy-1||+y0>cy+4) y0=String(cy);
+  const years=[]; for(let y=cy-1;y<=cy+4;y++) years.push(y);
   const months=[['01','Jan'],['02','Feb'],['03','Mar'],['04','Apr'],['05','May'],['06','Jun'],['07','Jul'],['08','Aug'],['09','Sep'],['10','Oct'],['11','Nov'],['12','Dec']];
   const days=[]; for(let d=1;d<=31;d++) days.push(String(d).padStart(2,'0'));
   return `<div class="row" style="gap:8px;flex-wrap:wrap">
@@ -2979,8 +3007,8 @@ function renderModal(){
     return;
   }
 
-  // Dedicated date/time editor — dropdowns + Save only
-  if(state.dateEditOpen && state.dateEditId){
+  // Date edit is inline on the task card (no big overlay)
+  if(false && state.dateEditOpen && state.dateEditId){
     const t=findTask(state.dateEditId);
     if(!t){ state.dateEditOpen=false; state.dateEditId=null; }
     else {
@@ -3334,7 +3362,7 @@ function renderModal(){
           showAppMessage('Saved', 'Your changes to “'+t.title+'” are saved.');
         };
         const od=document.getElementById('tmEditOpenDate');
-        if(od) od.onclick=()=>{ closeTaskMenu(); state.dateEditId=t.id; state.dateEditOpen=true; persistRender(); };
+        if(od) od.onclick=()=>{ closeTaskMenu(); state.dateEditId=t.id; state.dateEditOpen=false; navigateTo('tasks'); persistRender(); };
         document.getElementById('tmEditCancel').onclick=()=>{ box.innerHTML=''; };
       };
       document.getElementById('tmDelete').onclick=()=>{
@@ -3343,7 +3371,8 @@ function renderModal(){
       document.getElementById('tmResched').onclick=()=>{
         closeTaskMenu();
         state.dateEditId=t.id;
-        state.dateEditOpen=true;
+        state.dateEditOpen=false;
+        navigateTo('tasks');
         persistRender();
       };
       const tmPin=document.getElementById('tmPin');
@@ -4050,7 +4079,7 @@ if(typeof window!=='undefined'){
       const tid=btn.getAttribute('data-id');
       if(!tid) return;
       state.dateEditId=tid;
-      state.dateEditOpen=true;
+      state.dateEditOpen=false;
       state.taskMenuOpen=false;
       try{ persistRender(); }catch(err){}
     }, true);
@@ -4647,12 +4676,7 @@ function taskCard(t){
         <!-- Dates & Priority -->
         <div class="tmeta">
           <span style="font-size:.75rem;color:var(--muted);font-weight:600">Due</span>
-          <button type="button" class="btn ghost sm" data-action="open-date-edit" data-id="${t.id}" onclick="event.stopPropagation()" style="font-size:.8rem">
-            📅 ${t.date ? escapeHtml(t.date) : 'Set date'}
-          </button>
-          <button type="button" class="btn ghost sm" data-action="open-date-edit" data-id="${t.id}" data-focus="time" onclick="event.stopPropagation()" style="font-size:.8rem">
-            🕒 ${t.time ? escapeHtml(t.time) : 'Set time'}
-          </button>
+          ${compactDateHtml(t)}
           <select data-action="set-priority" data-id="${t.id}">
             <option value="low" ${t.priority==='low'?'selected':''}>Low</option>
             <option value="medium" ${t.priority==='medium'?'selected':''}>Medium</option>
@@ -7290,10 +7314,43 @@ function wireView(){
     else if(action==='open-date-edit') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
       const tid=id||el.getAttribute('data-id');
-      if(!tid){ showAppMessage('No task', 'Could not find this task.'); return; }
+      if(!tid) return;
       state.dateEditId=tid;
-      state.dateEditOpen=true;
+      state.dateEditOpen=false; // inline only, no overlay
       state.taskMenuOpen=false;
+      persistRender();
+    });
+    else if(action==='save-inline-date') el.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const wrap=el.closest('.inline-date');
+      if(!wrap) return;
+      const t=findTask(id); if(!t) return;
+      const y=wrap.querySelector('[data-de="y"]')?.value;
+      const m=wrap.querySelector('[data-de="m"]')?.value;
+      const d=wrap.querySelector('[data-de="d"]')?.value;
+      const tm=wrap.querySelector('[data-de="t"]')?.value||'';
+      const yi=+y;
+      const cy=new Date().getFullYear();
+      if(!yi || yi<cy-1 || yi>cy+4){ showAppMessage('Check year', 'Pick a year from the list.'); return; }
+      const maxD=new Date(yi,+m,0).getDate();
+      const day=Math.min(+d||1, maxD);
+      t.date=y+'-'+m+'-'+String(day).padStart(2,'0');
+      t.time=tm;
+      state.dateEditId=null;
+      showAppMessage('Saved', t.date+(t.time?' '+t.time:''));
+      persistRender();
+    });
+    else if(action==='clear-inline-date') el.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const t=findTask(id); if(!t) return;
+      t.date=''; t.time='';
+      state.dateEditId=null;
+      showAppMessage('Saved', 'No due date');
+      persistRender();
+    });
+    else if(action==='cancel-inline-date') el.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      state.dateEditId=null;
       persistRender();
     });
     else if(action==='task-menu') el.addEventListener('click', (e)=>{
