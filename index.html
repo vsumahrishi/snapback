@@ -3307,9 +3307,9 @@ function renderModal(){
     else {
       root.innerHTML=`<div class="overlay" id="taskMenuOverlay">
         <div class="quotecard" style="max-width:400px;text-align:left">
-          <div class="qeyebrow">SnapBack</div>
+          <div class="qeyebrow">More actions</div>
           <div style="font-weight:700;margin-bottom:4px">${escapeHtml(t.title)}</div>
-          <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">What do you want to do?</p>
+          <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">Extra tools (not for basic edit). To change title or date, close this and use <b>Edit</b>.</p>
           <div style="display:flex;flex-direction:column;gap:8px">
             <button class="btn" id="tmDone">${t.done?'Mark as not done':'Mark as done'}</button>
             <button class="btn ghost" id="tmResched">Reschedule…</button>
@@ -3319,7 +3319,7 @@ function renderModal(){
             <button class="btn ghost" id="tmBurn">${t.backburner?'↩️ Bring back from Backburner':'🔥 Send to Backburner'}</button>
             <button class="btn ghost" id="tmContext">${t.context==='personal'?'🎓 Mark as School / College':'🏠 Mark as Personal'}</button>
             <button class="btn ghost" id="tmFocus">Start Focus Pod</button>
-            <button class="btn" id="tmEdit">✏️ Edit title, date, notes</button>
+            <button class="btn" id="tmEdit">✏️ Edit (title, date, notes)</button>
             <button class="btn danger ghost" id="tmDelete">Delete task</button>
             <button class="btn ghost" id="tmClose">Close</button>
           </div>
@@ -3570,6 +3570,7 @@ function renderModal(){
 }
 
 function openTaskMenu(id){
+  if(state.editingTaskId) return; // never interrupt edit form
   state.taskMenuId = id;
   state.taskMenuOpen = true;
   persistRender();
@@ -4634,64 +4635,52 @@ function strategyPanel(t){
 }
 
 function taskCard(t){
-  const sugg=suggestTechnique(t);
-  const chunkInfo = t.chunks && t.chunks.length ? `<span class="badge low">${t.chunks.filter(c=>c.done).length}/${t.chunks.length} bites</span>` : '';
   const frogStyle = t.frog ? 'border-left:5px solid var(--gold)' : '';
   const editing = state.editingTaskId === t.id;
 
+  // EDIT MODE — only fields + Save / Cancel
   if(editing){
-    return `<li class="taskcard ${t.done?'done':''}" style="${frogStyle}" data-id="${t.id}">
-      <div style="font-size:.75rem;font-weight:700;color:var(--pine);margin-bottom:8px">Editing — change what you need, then Save or Cancel</div>
+    return `<li class="taskcard" style="${frogStyle};padding:14px" data-id="${t.id}">
+      <div style="font-size:.8rem;font-weight:700;color:var(--pine);margin-bottom:10px">Edit task</div>
       <div class="field"><label>Title</label>
-        <input type="text" id="editTitle-${t.id}" value="${escapeHtml(t.title)}" style="font-weight:600">
+        <input type="text" id="editTitle-${t.id}" value="${escapeHtml(t.title)}">
       </div>
-      <div class="row" style="margin-top:8px">
-        <div class="field"><label>Date (type YYYY-MM-DD or use picker)</label>
-          <input type="text" id="editDateText-${t.id}" value="${escapeHtml(t.date||'')}" placeholder="2026-08-26" inputmode="numeric" style="margin-bottom:6px">
-          <input type="date" id="editDatePick-${t.id}" value="${t.date||''}" min="2020-01-01" max="2035-12-31" title="Or pick from calendar">
-        </div>
-        <div class="field"><label>Time</label>
-          <input type="time" id="editTime-${t.id}" value="${t.time||''}">
-        </div>
-        <div class="field"><label>Priority</label>
-          <select id="editPri-${t.id}">
-            <option value="low" ${t.priority==='low'?'selected':''}>Low</option>
-            <option value="medium" ${t.priority==='medium'?'selected':''}>Medium</option>
-            <option value="high" ${t.priority==='high'?'selected':''}>High</option>
-          </select>
-        </div>
+      <div class="field" style="margin-top:8px"><label>Date — type e.g. 2026-08-26</label>
+        <input type="text" id="editDateText-${t.id}" value="${escapeHtml(t.date||'')}" placeholder="2026-08-26" autocomplete="off">
+      </div>
+      <div class="field" style="margin-top:8px"><label>Or pick date</label>
+        <input type="date" id="editDatePick-${t.id}" value="${t.date||''}" min="2020-01-01" max="2035-12-31">
+      </div>
+      <div class="field" style="margin-top:8px"><label>Time</label>
+        <input type="time" id="editTime-${t.id}" value="${t.time||''}">
       </div>
       <div class="field" style="margin-top:8px"><label>Notes</label>
         <textarea id="editNotes-${t.id}" rows="2">${escapeHtml(t.notes||'')}</textarea>
       </div>
-      <div class="row" style="margin-top:12px;gap:8px">
+      <div style="display:flex;gap:8px;margin-top:14px">
         <button type="button" class="btn" data-action="save-task-edit" data-id="${t.id}">Save</button>
         <button type="button" class="btn ghost" data-action="cancel-task-edit" data-id="${t.id}">Cancel</button>
       </div>
     </li>`;
   }
 
-  return `<li class="taskcard ${t.done?'done':''}" style="${frogStyle}" data-id="${t.id}">
-    <div class="trow-top">
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${escapeHtml(t.title)}${t.done?' <span class="badge low">done</span>':''}</div>
-        <div style="font-size:.85rem;color:var(--muted);margin-bottom:8px">
-          ${t.date ? '📅 '+escapeHtml(t.date)+(t.time?' · '+escapeHtml(t.time):'') : 'No date'}
-          ${t.priority? ' · '+escapeHtml(t.priority):''}
-          ${t.backburner?' · 🔥 backburner':''}
-          ${chunkInfo}
-          ${isOverdue(t)?' <span class="badge overdue">overdue</span>':''}
-        </div>
-        ${t.notes?`<div style="font-size:.82rem;color:var(--muted);margin-bottom:8px">${escapeHtml(t.notes).slice(0,120)}</div>`:''}
-        <div class="row" style="flex-wrap:wrap;gap:6px">
-          <button type="button" class="btn sm" data-action="start-task-edit" data-id="${t.id}">Edit</button>
-          <button type="button" class="btn ghost sm" data-action="task-menu" data-id="${t.id}">More…</button>
-        </div>
-      </div>
+  // VIEW MODE — read-only text only; Edit is the only way to change fields
+  return `<li class="taskcard ${t.done?'done':''}" style="${frogStyle};padding:14px" data-id="${t.id}">
+    <div style="font-weight:700;font-size:1.05rem;margin-bottom:6px">${escapeHtml(t.title)}</div>
+    <div style="font-size:.88rem;color:var(--muted);margin-bottom:10px">
+      ${t.date ? '📅 '+escapeHtml(t.date)+(t.time?' · '+escapeHtml(t.time):'') : 'No date set'}
+      ${t.done?' · done':''}
+      ${t.backburner?' · backburner':''}
+      ${typeof isOverdue==='function' && isOverdue(t)?' · overdue':''}
+    </div>
+    ${t.notes?`<div style="font-size:.85rem;color:var(--muted);margin-bottom:10px">${escapeHtml((t.notes||'').slice(0,160))}</div>`:''}
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <button type="button" class="btn sm" data-action="start-task-edit" data-id="${t.id}">Edit</button>
+      <button type="button" class="btn ghost sm" data-action="quick-done" data-id="${t.id}">${t.done?'Undo done':'Done'}</button>
+      <button type="button" class="btn ghost sm" data-action="task-menu" data-id="${t.id}">More</button>
     </div>
   </li>`;
 }
-
 function openTasksForModes(){
   return (state.tasks||[]).filter(t=>!t.done);
 }
@@ -7290,6 +7279,10 @@ function wireView(){
     const id = el.dataset.id!==undefined ? Number(el.dataset.id) : null;
     if(action==='toggle-done') el.addEventListener('change', ()=>toggleDone(id));
     
+    else if(action==='quick-done') el.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      toggleDone(id);
+    });
     else if(action==='start-task-edit') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
       state.editingTaskId=id; state.taskMenuOpen=false; persistRender();
