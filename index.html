@@ -3321,6 +3321,7 @@ function renderModal(){
               <button class="btn ghost" id="tmPin">📌 Top of Mind</button>
               <button class="btn ghost" id="tmBurn">${t.backburner?'↩️ Bring back from Backburner':'🔥 Send to Backburner'}</button>
               <button class="btn ghost" id="tmContext">${t.context==='personal'?'🎓 Mark as School / College':'🏠 Mark as Personal'}</button>
+              <button class="btn ghost" id="tmFrog">${t.frog?'🐸 Unmark frog':'🐸 Mark as Frog (do this first)'}</button>
               <button class="btn ghost" id="tmFocus">Start Focus Pod</button>
               <button class="btn ghost" id="tmEdit">✏️ Edit title / date / notes</button>
               <button class="btn danger ghost" id="tmDelete">Delete task</button>
@@ -3342,6 +3343,8 @@ function renderModal(){
         closeTaskMenu();
       };
       document.getElementById('tmFocus').onclick=()=>{ closeTaskMenu(); goFocusWithTask(t.id); };
+      const tmFrog=document.getElementById('tmFrog');
+      if(tmFrog) tmFrog.onclick=()=>{ t.frog=!t.frog; closeTaskMenu(); showAppMessage(t.frog?'Frog set':'Frog cleared', t.frog?'This task shows first on Today as “eat the frog”.':'Removed frog mark.'); };
       document.getElementById('tmEdit').onclick=()=>{
         closeTaskMenu();
         state.editingTaskId=t.id;
@@ -4109,10 +4112,9 @@ function viewTechniques(){
     {id:'rule135', label:'Focus Plate', desc:'1 big, 3 medium, 5 small for today', ico:'🍽'},
     {id:'timeblocking', label:'Time Blocking', desc:'Block hours on a day', ico:'🗓'},
     {id:'bodydouble', label:'Body Doubling', desc:'Work-with-structure ritual', ico:'👥'},
-    {id:'planAhead', label:'Plan this week', desc:'Short list for this week only', ico:'📆'},
-    {id:'tasks', label:'Open Tasks', desc:'Assign techniques from any task (Edit menu)', ico:'✅'}
+    {id:'planAhead', label:'Plan this week', desc:'Short list for this week only', ico:'📆'}
   ];
-  return hubPage('Techniques', 'Use a technique, or open Tasks and attach one to a task — both ways work.', cards);
+  return hubPage('Techniques', 'Pick a tool when work feels stuck or too big.', cards);
 }
 function hubPage(title, sub, cards){
   return `<div class="pagehead">
@@ -4670,6 +4672,10 @@ function taskCard(t){
       <div class="field" style="margin-top:8px"><label>Notes</label>
         <textarea id="editNotes-${t.id}" rows="2">${escapeHtml(t.notes||'')}</textarea>
       </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:.9rem">
+        <input type="checkbox" id="editFrog-${t.id}" ${t.frog?'checked':''}>
+        🐸 Frog — the one task I’m avoiding (shows on Today first)
+      </label>
       <div style="display:flex;gap:8px;margin-top:14px">
         <button type="button" class="btn" data-action="save-task-edit" data-id="${t.id}">Save</button>
         <button type="button" class="btn ghost" data-action="cancel-task-edit" data-id="${t.id}">Cancel</button>
@@ -4683,7 +4689,7 @@ function taskCard(t){
     <div style="font-size:.88rem;color:var(--muted);margin-bottom:10px">
       ${t.date ? '📅 '+escapeHtml(t.date)+(t.time?' · '+escapeHtml(t.time):'') : 'No date set'}
       ${t.done?' · done':''}
-      ${t.backburner?' · backburner':''}
+      ${t.frog?' · 🐸 frog':''}${t.backburner?' · backburner':''}
       ${typeof isOverdue==='function' && isOverdue(t)?' · overdue':''}
     </div>
     ${t.notes?`<div style="font-size:.85rem;color:var(--muted);margin-bottom:10px">${escapeHtml((t.notes||'').slice(0,160))}</div>`:''}
@@ -7203,10 +7209,10 @@ function viewSettings(){
       <div class="field" style="margin-top:8px"><label>Firebase config (paste once from Firebase console)</label>
         <textarea id="fbConfigInput" rows="5" placeholder='{ "apiKey": "...", "projectId": "...", ... }' style="width:100%;font-size:.75rem"></textarea>
       </div>
-      <div class="row" style="margin-top:10px">
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;max-width:320px">
         <button class="btn sm" id="saveSyncBtn">Save &amp; start live sync</button>
         <button class="btn ghost sm" id="pullSyncBtn">Pull from cloud now</button>
-        
+      </div>
       <div style="margin:16px 0;padding:12px;border:1px solid var(--line);border-radius:12px">
         <div style="font-weight:800;margin-bottom:6px">Import tasks from other apps</div>
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">
@@ -7275,8 +7281,30 @@ function viewSettings(){
         : `<p style="color:var(--muted);font-size:.85rem">Not available yet in this browser — this only appears once the app is loaded from a proper hosted address (not a local file).</p>`}
     </div>
     <div class="setgroup"><h4>Data</h4>
-      <p style="color:var(--muted);font-size:.82rem;margin-top:-4px">Clears every task, class, study block, money entry, playlist track, and custom reminder — including the two example tasks/classes the app ships with. Settings return to their defaults too. This can't be undone.</p>
-      ${deleteControl('reset', null, 'Reset all data')}
+      <p style="color:var(--muted);font-size:.82rem;margin-top:-4px">Delete everything, or only the kinds of data you choose.</p>
+      ${deleteControl('reset', null, 'Delete ALL data')}
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+        <div style="font-weight:700;margin-bottom:8px">Delete only some types</div>
+        <label style="display:flex;gap:8px;font-size:.88rem;margin:4px 0"><input type="checkbox" id="delTypeTasks"> Tasks (${(state.tasks||[]).length})</label>
+        <label style="display:flex;gap:8px;font-size:.88rem;margin:4px 0"><input type="checkbox" id="delTypeClasses"> Classes / schedule (${(state.classes||[]).length})</label>
+        <label style="display:flex;gap:8px;font-size:.88rem;margin:4px 0"><input type="checkbox" id="delTypeBlocks"> Study blocks (${(state.studyBlocks||[]).length})</label>
+        <label style="display:flex;gap:8px;font-size:.88rem;margin:4px 0"><input type="checkbox" id="delTypeMoney"> Money (${(state.money||[]).length})</label>
+        <label style="display:flex;gap:8px;font-size:.88rem;margin:4px 0"><input type="checkbox" id="delTypeReminders"> Custom reminders (${(state.customReminders||[]).length})</label>
+        <label style="display:flex;gap:8px;font-size:.88rem;margin:4px 0"><input type="checkbox" id="delTypeJournal"> Journal notes (${(state.journal||[]).length})</label>
+        <button class="btn ghost sm" id="delTypesBtn" style="margin-top:8px">Delete selected types</button>
+      </div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+        <div style="font-weight:700;margin-bottom:6px">Delete specific tasks</div>
+        <p style="font-size:.8rem;color:var(--muted)">Tick tasks, then delete only those.</p>
+        <div style="max-height:160px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px">
+          ${(state.tasks||[]).slice(0,40).map(t=>`<label style="display:flex;gap:8px;font-size:.82rem;margin:4px 0"><input type="checkbox" class="delTaskPick" value="${t.id}"> ${escapeHtml(t.title)}</label>`).join('')||'<span class="empty">No tasks</span>'}
+        </div>
+        <button class="btn ghost sm" id="delPickedTasksBtn" style="margin-top:8px">Delete selected tasks</button>
+      </div>
+    </div>
+    <div class="setgroup"><h4>Send update to your teacher</h4>
+      <p style="color:var(--muted);font-size:.85rem">Creates a short text summary of open/done tasks you can copy or download and send (WhatsApp, email).</p>
+      <button class="btn sm" id="teacherUpdateBtn">Prepare status update</button>
     </div>
     <div class="savedmsg" id="savedMsg"></div>
   </div>`;
@@ -7289,7 +7317,9 @@ function wireView(){
   const main=document.getElementById('main');
   main.querySelectorAll('[data-action]').forEach(el=>{
     const action=el.dataset.action;
-    const id = el.dataset.id!==undefined ? Number(el.dataset.id) : null;
+    let id = el.dataset.id;
+    if(id!==undefined && id!==null && id!==''){ const n=Number(id); id = (String(n)===String(id) && !Number.isNaN(n)) ? n : id; }
+    else id=null;
     if(action==='toggle-done') el.addEventListener('change', ()=>toggleDone(id));
     
     else if(action==='quick-done') el.addEventListener('click', (e)=>{
@@ -7324,6 +7354,7 @@ function wireView(){
       t.time=document.getElementById('editTime-'+id)?.value||'';
       t.priority=document.getElementById('editPri-'+id)?.value||t.priority;
       t.notes=document.getElementById('editNotes-'+id)?.value||'';
+      t.frog=!!document.getElementById('editFrog-'+id)?.checked;
       state.editingTaskId=null;
       showAppMessage('Saved', t.title+(t.date?' · '+t.date:''));
       persistRender();
@@ -8166,6 +8197,48 @@ function wireView(){
       const reader=new FileReader();
       reader.onload=()=>runCsvImport(String(reader.result||''));
       reader.readAsText(f);
+    });
+
+    
+    const delTypesBtn=document.getElementById('delTypesBtn');
+    if(delTypesBtn) delTypesBtn.addEventListener('click', ()=>{
+      const kill=[];
+      if(document.getElementById('delTypeTasks')?.checked) kill.push('tasks');
+      if(document.getElementById('delTypeClasses')?.checked) kill.push('classes');
+      if(document.getElementById('delTypeBlocks')?.checked) kill.push('studyBlocks');
+      if(document.getElementById('delTypeMoney')?.checked) kill.push('money');
+      if(document.getElementById('delTypeReminders')?.checked) kill.push('customReminders');
+      if(document.getElementById('delTypeJournal')?.checked) kill.push('journal');
+      if(!kill.length){ showAppMessage('Pick something', 'Tick at least one data type.'); return; }
+      showAppMessage('Delete selected types?', kill.join(', '), { ok:'Delete', cancel:'Cancel', onOk:()=>{
+        kill.forEach(k=>{ if(k==='tasks') state.tasks=[]; else if(k==='classes') state.classes=[]; else if(k==='studyBlocks') state.studyBlocks=[]; else if(k==='money') state.money=[]; else if(k==='customReminders') state.customReminders=[]; else if(k==='journal') state.journal=[]; });
+        persistRender();
+        showAppMessage('Done', 'Selected data removed.');
+      }});
+    });
+    const delPicked=document.getElementById('delPickedTasksBtn');
+    if(delPicked) delPicked.addEventListener('click', ()=>{
+      const ids=[...document.querySelectorAll('.delTaskPick:checked')].map(c=>c.value);
+      if(!ids.length){ showAppMessage('Pick tasks', 'Tick one or more tasks first.'); return; }
+      showAppMessage('Delete '+ids.length+' task(s)?', 'This cannot be undone easily.', { ok:'Delete', cancel:'Cancel', onOk:()=>{
+        state.tasks=(state.tasks||[]).filter(t=>!ids.map(String).includes(String(t.id)));
+        persistRender();
+        showAppMessage('Done', ids.length+' task(s) deleted.');
+      }});
+    });
+    const teacherBtn=document.getElementById('teacherUpdateBtn');
+    if(teacherBtn) teacherBtn.addEventListener('click', ()=>{
+      const name=(state.profile&&state.profile.name)||'Student';
+      const open=(state.tasks||[]).filter(t=>!t.done);
+      const done=(state.tasks||[]).filter(t=>t.done).slice(0,15);
+      let msg='SnapBack update from '+name+'\nDate: '+todayStr()+'\n\nDone recently:\n';
+      msg += done.length ? done.map(t=>'✓ '+t.title).join('\n') : '(none marked done)';
+      msg += '\n\nStill open:\n';
+      msg += open.length ? open.slice(0,20).map(t=>'• '+t.title+(t.date?' ('+t.date+')':'')).join('\n') : '(none)';
+      try{ navigator.clipboard.writeText(msg); }catch(e){}
+      const blob=new Blob([msg],{type:'text/plain'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='snapback-update-'+todayStr()+'.txt'; a.click();
+      showAppMessage('Update ready', 'Copied to clipboard (if allowed) and downloaded a .txt file you can send to your teacher.');
     });
 
     const ex=document.getElementById('exportBackupBtn'); if(ex) ex.addEventListener('click', exportBackup);
