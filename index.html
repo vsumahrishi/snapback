@@ -2933,6 +2933,68 @@ function renderModal(){
     document.getElementById('fgDismiss').addEventListener('click', dismissFocusGuardNudge);
     return;
   }
+
+  // Dedicated date/time editor — no flaky inline year typing
+  if(state.dateEditOpen && state.dateEditId){
+    const t=findTask(state.dateEditId);
+    if(!t){ state.dateEditOpen=false; }
+    else {
+      const y0 = (t.date&&t.date.slice(0,4)) || String(new Date().getFullYear());
+      const m0 = (t.date&&t.date.slice(5,7)) || String(new Date().getMonth()+1).padStart(2,'0');
+      const d0 = (t.date&&t.date.slice(8,10)) || String(new Date().getDate()).padStart(2,'0');
+      const years=[]; for(let y=2020;y<=2035;y++) years.push(y);
+      const months=[{v:'01',l:'Jan'},{v:'02',l:'Feb'},{v:'03',l:'Mar'},{v:'04',l:'Apr'},{v:'05',l:'May'},{v:'06',l:'Jun'},{v:'07',l:'Jul'},{v:'08',l:'Aug'},{v:'09',l:'Sep'},{v:'10',l:'Oct'},{v:'11',l:'Nov'},{v:'12',l:'Dec'}];
+      const days=[]; for(let d=1;d<=31;d++) days.push(String(d).padStart(2,'0'));
+      root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:400px;text-align:left">
+        <div class="qeyebrow">Date &amp; time</div>
+        <div style="font-weight:800;font-size:1.05rem;margin-bottom:10px">${escapeHtml(t.title)}</div>
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">Pick year, month, and day from the lists — then press <b>Save</b>.</p>
+        <div class="row" style="gap:8px">
+          <div class="field" style="flex:1.2"><label>Year</label>
+            <select id="deYear">${years.map(y=>`<option value="${y}" ${String(y)===String(+y0)?'selected':''}>${y}</option>`).join('')}</select>
+          </div>
+          <div class="field" style="flex:1"><label>Month</label>
+            <select id="deMonth">${months.map(m=>`<option value="${m.v}" ${m.v===m0?'selected':''}>${m.l}</option>`).join('')}</select>
+          </div>
+          <div class="field" style="flex:1"><label>Day</label>
+            <select id="deDay">${days.map(d=>`<option value="${d}" ${d===d0?'selected':''}>${d}</option>`).join('')}</select>
+          </div>
+        </div>
+        <div class="field" style="margin-top:10px"><label>Time (optional)</label>
+          <input type="time" id="deTime" value="${t.time||''}">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px">
+          <button class="btn" id="deSave">Save date &amp; time</button>
+          <button class="btn ghost" id="deClear">Clear date (no due date)</button>
+          <button class="btn ghost" id="deCancel">Cancel</button>
+        </div>
+      </div></div>`;
+      document.getElementById('deSave').onclick=()=>{
+        const y=document.getElementById('deYear').value;
+        const m=document.getElementById('deMonth').value;
+        const d=document.getElementById('deDay').value;
+        const yi=+y;
+        if(!yi || yi<2000 || yi>2100){ showAppMessage('Check the year', 'Choose a year from the list (2020–2035).'); return; }
+        // validate day for month
+        const maxD=new Date(+y, +m, 0).getDate();
+        const day=Math.min(+d, maxD);
+        t.date = y+'-'+m+'-'+String(day).padStart(2,'0');
+        t.time = document.getElementById('deTime').value||'';
+        state.dateEditOpen=false; state.dateEditId=null;
+        showAppMessage('Saved', 'Due: '+t.date+(t.time?' '+t.time:''));
+        persistRender();
+      };
+      document.getElementById('deClear').onclick=()=>{
+        t.date=''; t.time='';
+        state.dateEditOpen=false; state.dateEditId=null;
+        showAppMessage('Saved', 'No due date on this task.');
+        persistRender();
+      };
+      document.getElementById('deCancel').onclick=()=>{ state.dateEditOpen=false; state.dateEditId=null; persistRender(); };
+      return;
+    }
+  }
+
   // After Eisenhower add — optional date/time
   if(state.askDateOpen && state.pendingEis){
     const p=state.pendingEis;
@@ -3234,9 +3296,9 @@ function renderModal(){
         box.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:12px">
           <div style="font-weight:700;margin-bottom:8px">Editing — change what you need, then Save</div>
           <div class="field"><label>Title</label><input id="tmEditTitle" value="${escapeHtml(t.title)}"></div>
-          <div class="row" style="margin-top:8px">
-            <div class="field"><label>Date</label><input type="date" id="tmEditDate" value="${t.date||''}"></div>
-            <div class="field"><label>Time</label><input type="time" id="tmEditTime" value="${t.time||''}"></div>
+          <div style="margin-top:8px;padding:10px;background:var(--pine-soft);border-radius:10px;font-size:.9rem">
+            Due: <b>${t.date||'none'}</b> ${t.time||''}
+            <button type="button" class="btn ghost sm" id="tmEditOpenDate" style="margin-left:8px">Change date / time</button>
           </div>
           <div class="field" style="margin-top:8px"><label>Notes</label><textarea id="tmEditNotes" rows="3">${escapeHtml(t.notes||'')}</textarea></div>
           <div style="display:flex;gap:8px;margin-top:12px">
@@ -3246,12 +3308,12 @@ function renderModal(){
         </div>`;
         document.getElementById('tmEditSave').onclick=()=>{
           t.title=(document.getElementById('tmEditTitle').value||'').trim()||t.title;
-          t.date=document.getElementById('tmEditDate').value||'';
-          t.time=document.getElementById('tmEditTime').value||'';
           t.notes=document.getElementById('tmEditNotes').value||'';
           closeTaskMenu();
           showAppMessage('Saved', 'Your changes to “'+t.title+'” are saved.');
         };
+        const od=document.getElementById('tmEditOpenDate');
+        if(od) od.onclick=()=>{ closeTaskMenu(); state.dateEditId=t.id; state.dateEditOpen=true; persistRender(); };
         document.getElementById('tmEditCancel').onclick=()=>{ box.innerHTML=''; };
       };
       document.getElementById('tmDelete').onclick=()=>{
@@ -4554,8 +4616,12 @@ function taskCard(t){
         <!-- Dates & Priority -->
         <div class="tmeta">
           <span style="font-size:.75rem;color:var(--muted);font-weight:600">Due</span>
-          <input type="date" value="${t.date||''}" data-action="set-date" data-id="${t.id}" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
-          <input type="time" value="${t.time||''}" data-action="set-time" data-id="${t.id}" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()">
+          <button type="button" class="btn ghost sm" data-action="open-date-edit" data-id="${t.id}" onclick="event.stopPropagation()" style="font-size:.8rem">
+            📅 ${t.date ? escapeHtml(t.date) : 'Set date'}
+          </button>
+          <button type="button" class="btn ghost sm" data-action="open-date-edit" data-id="${t.id}" data-focus="time" onclick="event.stopPropagation()" style="font-size:.8rem">
+            🕒 ${t.time ? escapeHtml(t.time) : 'Set time'}
+          </button>
           <select data-action="set-priority" data-id="${t.id}">
             <option value="low" ${t.priority==='low'?'selected':''}>Low</option>
             <option value="medium" ${t.priority==='medium'?'selected':''}>Medium</option>
@@ -4742,7 +4808,7 @@ function viewTasks(){
     <h3>Add a task</h3>
     <div class="field"><label>Title</label><input id="newTitle" placeholder="e.g. Finish problem set 4"></div>
     <div class="row" style="margin-top:10px">
-      <div class="field"><label>Due date</label><input id="newDate" type="date" value="${todayStr()}"></div>
+      <div class="field"><label>Due date</label><input id="newDate" type="date" value="${todayStr()}" min="2020-01-01" max="2035-12-31"></div>
       <div class="field"><label>Due time</label><input id="newTime" type="time"></div>
       <div class="field"><label>Priority</label><select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
     </div>
@@ -7190,6 +7256,12 @@ function wireView(){
     const action=el.dataset.action;
     const id = el.dataset.id!==undefined ? Number(el.dataset.id) : null;
     if(action==='toggle-done') el.addEventListener('change', ()=>toggleDone(id));
+    else if(action==='open-date-edit') el.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      state.dateEditId=id;
+      state.dateEditOpen=true;
+      persistRender();
+    });
     else if(action==='task-menu') el.addEventListener('click', (e)=>{
       const tag=(e.target&&e.target.tagName||'').toLowerCase();
       if(['input','textarea','select','button','a','label'].includes(tag)) return;
@@ -8163,6 +8235,8 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(!state.contextFilter) state.contextFilter='all';
     if(state.askDateOpen===undefined) state.askDateOpen=false;
     if(state.sneakTomorrow===undefined) state.sneakTomorrow=false;
+    if(state.dateEditOpen===undefined) state.dateEditOpen=false;
+    if(state.dateEditId===undefined) state.dateEditId=null;
     if(!state.listMode) state.listMode='all'; // all | spotlight | wall | one | jar
     if(!state.spotlightSize) state.spotlightSize=3;
     if(state.jarQueue===undefined) state.jarQueue=null;
