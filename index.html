@@ -7282,13 +7282,14 @@ function viewSettings(){
     </div>
     <div class="setgroup"><h4>Delete data</h4>
       <p style="color:var(--muted);font-size:.85rem;margin:0 0 12px">Clear everything, or only chosen items.</p>
-      <div style="display:flex;flex-direction:column;gap:10px;max-width:320px">
-        ${deleteControl('reset', null, 'Reset All')}
-        <button type="button" class="btn ghost" id="resetSpecificBtn">Reset Specific Data</button>
+      <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:360px">
+        <div style="width:100%">${deleteControl('reset', null, 'Reset All')}</div>
+        <button type="button" class="btn ghost" id="resetSpecificBtn" style="width:100%">Reset Specific Data</button>
       </div>
-      <div id="resetSpecificPanel" style="display:none;margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)">
-        <div class="field"><label>What kind of data?</label>
-          <select id="resetKindSelect">
+      <div id="resetSpecificPanel" style="display:none;margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--card);width:100%;box-sizing:border-box">
+        <div class="field" style="margin:0;width:100%">
+          <label>What kind of data?</label>
+          <select id="resetKindSelect" style="width:100%;max-width:100%">
             <option value="">Choose…</option>
             <option value="tasks">Tasks (${(state.tasks||[]).length})</option>
             <option value="classes">Classes / schedule (${(state.classes||[]).length})</option>
@@ -7298,10 +7299,10 @@ function viewSettings(){
             <option value="journal">Journal notes (${(state.journal||[]).length})</option>
           </select>
         </div>
-        <div id="resetItemsBox" style="margin-top:12px"></div>
-        <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:280px">
-          <button type="button" class="btn danger sm" id="resetItemsDeleteBtn" style="display:none">Delete selected</button>
-          <button type="button" class="btn ghost sm" id="resetSpecificCloseBtn">Cancel</button>
+        <div id="resetItemsBox" style="margin-top:14px;width:100%"></div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;width:100%">
+          <button type="button" class="btn danger sm" id="resetItemsDeleteBtn" style="display:none;width:100%">Delete selected</button>
+          <button type="button" class="btn ghost sm" id="resetSpecificCloseBtn" style="width:100%">Cancel</button>
         </div>
       </div>
     </div>
@@ -8230,11 +8231,11 @@ function wireView(){
         resetItemsBox.innerHTML='<p style="font-size:.85rem;color:var(--muted)">Nothing in this category.</p>';
         return;
       }
-      resetItemsBox.innerHTML=`<p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Tick what to delete, then Delete selected.</p>
-        <div style="max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px">
-          ${list.map((item,i)=>`<label style="display:flex;gap:8px;align-items:flex-start;font-size:.85rem;margin:6px 0">
-            <input type="checkbox" class="resetItemPick" data-kind="${kind}" value="${item.id!=null?item.id:i}" style="margin-top:3px">
-            <span>${escapeHtml(labelForResetItem(kind, item))}</span>
+      resetItemsBox.innerHTML=`<p style="font-size:.8rem;color:var(--muted);margin:0 0 10px">Tick what to delete, then Delete selected.</p>
+        <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:4px 0;width:100%;box-sizing:border-box">
+          ${list.map((item,i)=>`<label style="display:grid;grid-template-columns:24px 1fr;gap:10px;align-items:start;font-size:.88rem;line-height:1.35;padding:10px 12px;margin:0;border-bottom:1px solid var(--line);width:100%;box-sizing:border-box">
+            <input type="checkbox" class="resetItemPick" data-kind="${kind}" value="${item.id!=null?item.id:i}" style="width:18px;height:18px;margin:2px 0 0 0">
+            <span style="word-break:break-word;min-width:0">${escapeHtml(labelForResetItem(kind, item))}</span>
           </label>`).join('')}
         </div>`;
       if(resetItemsDeleteBtn) resetItemsDeleteBtn.style.display='';

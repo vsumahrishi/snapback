@@ -1,0 +1,58 @@
+SNAPBACK — Capacitor (Android) update
+=====================================
+
+Always do these steps in order. Do not skip.
+
+A) On your laptop — replace the web files
+-----------------------------------------
+1. Unzip SNAPBACK-CAPACITOR-FULL.zip
+2. Open the folder SNAPBACK-CAPACITOR-FULL
+3. Open the "www" folder inside it
+4. On your computer, find your existing SnapBack Capacitor project folder
+   (the one that contains android/ and www/ — often named snapback-capacitor)
+5. DELETE everything inside that project's www folder
+   (or rename www to www-old as backup)
+6. COPY everything from SNAPBACK-CAPACITOR-FULL/www into your project's www folder
+7. If there is an android-launcher-icons folder in the zip, copy those mipmap-*
+   folders into: android/app/src/main/res/ (overwrite when asked)
+
+B) Sync Capacitor
+-----------------
+1. Open Command Prompt (cmd)
+2. Type: cd path\to\your\snapback-capacitor
+   Example: cd C:\Users\vs_um\snapback-capacitor
+3. Press Enter
+4. Type: npx cap sync android
+5. Press Enter
+6. Wait until it finishes without red errors
+
+C) Build APK in Android Studio
+------------------------------
+1. Open Android Studio
+2. File → Open → select the "android" folder inside your snapback-capacitor project
+3. Wait until Gradle finishes (bottom progress)
+4. Menu: Build → Clean Project — wait until done
+5. Menu: Build → Generate App Bundles or APKs → Generate APKs
+   (or Build → Build Bundle(s) / APK(s) → Build APK(s))
+6. When finished, click "locate" / open the folder
+7. File is usually:
+   android\app\build\outputs\apk\debug\app-debug.apk
+
+D) Install on the phone
+-----------------------
+1. Copy app-debug.apk to the phone (USB, Drive, or WhatsApp to yourself)
+2. On the phone, open the APK file
+3. Allow install from this source if asked
+4. If Play Protect asks to scan — you can scan or install anyway for your own APK
+5. Open SnapBack
+6. Settings → allow notifications if asked
+7. Settings → Apps → SnapBack → Battery → allow background if available
+
+E) Send to students
+-------------------
+1. Send each student the SAME new APK file
+2. Each student installs it on their phone
+3. Each student sets THEIR OWN name and THEIR OWN sync code in Settings
+4. Do not share one sync code for the whole class
+
+Website (laptop) update is separate: upload SNAPBACK-WEB-FULL to GitHub Pages.
