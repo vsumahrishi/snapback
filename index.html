@@ -4001,6 +4001,22 @@ function importTasksFromRows(rows){
   return n;
 }
 
+function buildStatusUpdateText(){
+  const name=(state.profile&&state.profile.name)||'Student';
+  const open=(state.tasks||[]).filter(t=>!t.done);
+  const done=(state.tasks||[]).filter(t=>t.done).slice(0,20);
+  let msg='SnapBack update from '+name+'\nDate: '+todayStr()+'\n\nDone:\n';
+  msg += done.length ? done.map(t=>'✓ '+t.title).join('\n') : '(none marked done)';
+  msg += '\n\nStill open:\n';
+  msg += open.length ? open.slice(0,25).map(t=>'• '+t.title+(t.date?' ('+t.date+')':'')).join('\n') : '(none)';
+  return msg;
+}
+function saveShareContactsFromForm(){
+  if(!state.profile) state.profile={name:'', grade:'', notes:''};
+  state.profile.teacherWa=(document.getElementById('shareWaPhone')?.value||'').trim();
+  state.profile.teacherEmail=(document.getElementById('shareEmail')?.value||'').trim();
+  saveState();
+}
 function exportBackup(){
   const data = {
     version: 1,
@@ -7284,7 +7300,7 @@ function viewSettings(){
       <p style="color:var(--muted);font-size:.85rem;margin:0 0 12px">Clear everything, or only chosen items.</p>
       <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:360px">
         <div style="width:100%">${deleteControl('reset', null, 'Reset All')}</div>
-        <button type="button" class="btn ghost" id="resetSpecificBtn" style="width:100%">Reset Specific Data</button>
+        <button type="button" class="btn" id="resetSpecificBtn" style="width:100%;box-sizing:border-box">Reset Specific Data</button>
       </div>
       <div id="resetSpecificPanel" style="display:none;margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--card);width:100%;box-sizing:border-box">
         <div class="field" style="margin:0;width:100%">
@@ -7306,9 +7322,20 @@ function viewSettings(){
         </div>
       </div>
     </div>
-    <div class="setgroup"><h4>Send update to your teacher</h4>
-      <p style="color:var(--muted);font-size:.85rem">Creates a short text summary of open/done tasks you can copy or download and send (WhatsApp, email).</p>
-      <button class="btn sm" id="teacherUpdateBtn">Prepare status update</button>
+    <div class="setgroup"><h4>Share an Update</h4>
+      <p style="color:var(--muted);font-size:.85rem;margin:0 0 10px">Share done and open tasks in one step.</p>
+      <div class="field"><label>Optional: WhatsApp number (country code, digits only)</label>
+        <input id="shareWaPhone" type="tel" placeholder="e.g. 9198XXXXXXXX" value="${escapeHtml((state.profile&&state.profile.teacherWa)||'')}">
+      </div>
+      <div class="field" style="margin-top:8px"><label>Optional: email</label>
+        <input id="shareEmail" type="email" placeholder="e.g. teacher@school.edu" value="${escapeHtml((state.profile&&state.profile.teacherEmail)||'')}">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;width:100%">
+        <button type="button" class="btn" id="shareWaBtn" style="width:100%">Share via WhatsApp</button>
+        <button type="button" class="btn ghost" id="shareEmailBtn" style="width:100%">Share via Email</button>
+        <button type="button" class="btn ghost" id="shareDownloadBtn" style="width:100%">Download as file</button>
+        <button type="button" class="btn ghost" id="shareCopyBtn" style="width:100%">Copy text</button>
+      </div>
     </div>
     <div class="savedmsg" id="savedMsg"></div>
   </div>`;
@@ -8265,20 +8292,37 @@ function wireView(){
         showAppMessage('Deleted', picks.length+' item(s) removed.');
       }});
     });
-    const teacherBtn=document.getElementById('teacherUpdateBtn');
-
-    if(teacherBtn) teacherBtn.addEventListener('click', ()=>{
-      const name=(state.profile&&state.profile.name)||'Student';
-      const open=(state.tasks||[]).filter(t=>!t.done);
-      const done=(state.tasks||[]).filter(t=>t.done).slice(0,15);
-      let msg='SnapBack update from '+name+'\nDate: '+todayStr()+'\n\nDone recently:\n';
-      msg += done.length ? done.map(t=>'✓ '+t.title).join('\n') : '(none marked done)';
-      msg += '\n\nStill open:\n';
-      msg += open.length ? open.slice(0,20).map(t=>'• '+t.title+(t.date?' ('+t.date+')':'')).join('\n') : '(none)';
-      try{ navigator.clipboard.writeText(msg); }catch(e){}
+    const shareWaBtn=document.getElementById('shareWaBtn');
+    if(shareWaBtn) shareWaBtn.addEventListener('click', ()=>{
+      saveShareContactsFromForm();
+      const msg=buildStatusUpdateText();
+      let phone=(document.getElementById('shareWaPhone')?.value||'').replace(/[^0-9]/g,'');
+      const url = phone
+        ? ('https://wa.me/'+phone+'?text='+encodeURIComponent(msg))
+        : ('https://wa.me/?text='+encodeURIComponent(msg));
+      window.open(url, '_blank', 'noopener');
+    });
+    const shareEmailBtn=document.getElementById('shareEmailBtn');
+    if(shareEmailBtn) shareEmailBtn.addEventListener('click', ()=>{
+      saveShareContactsFromForm();
+      const msg=buildStatusUpdateText();
+      const to=(document.getElementById('shareEmail')?.value||'').trim();
+      const sub=encodeURIComponent('SnapBack update — '+((state.profile&&state.profile.name)||'student'));
+      window.location.href='mailto:'+encodeURIComponent(to)+'?subject='+sub+'&body='+encodeURIComponent(msg);
+    });
+    const shareDownloadBtn=document.getElementById('shareDownloadBtn');
+    if(shareDownloadBtn) shareDownloadBtn.addEventListener('click', ()=>{
+      const msg=buildStatusUpdateText();
       const blob=new Blob([msg],{type:'text/plain'});
-      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='snapback-update-'+todayStr()+'.txt'; a.click();
-      showAppMessage('Update ready', 'Copied to clipboard (if allowed) and downloaded a .txt file you can send to your teacher.');
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+      a.download='snapback-update-'+todayStr()+'.txt'; a.click();
+      showAppMessage('Downloaded', 'File saved on this device.');
+    });
+    const shareCopyBtn=document.getElementById('shareCopyBtn');
+    if(shareCopyBtn) shareCopyBtn.addEventListener('click', ()=>{
+      const msg=buildStatusUpdateText();
+      try{ navigator.clipboard.writeText(msg); showAppMessage('Copied', 'Paste into any chat.'); }
+      catch(e){ showAppMessage('Text', msg.slice(0,180)+'…'); }
     });
 
     const ex=document.getElementById('exportBackupBtn'); if(ex) ex.addEventListener('click', exportBackup);
