@@ -7280,26 +7280,29 @@ function viewSettings(){
         : isIOSDevice ? `<p style="color:var(--muted);font-size:.85rem">Tap the Share icon in Safari, then "Add to Home Screen".</p>`
         : `<p style="color:var(--muted);font-size:.85rem">Not available yet in this browser — this only appears once the app is loaded from a proper hosted address (not a local file).</p>`}
     </div>
-    <div class="setgroup"><h4>Data</h4>
-      <p style="color:var(--muted);font-size:.82rem;margin-top:-4px">Delete everything, or only the kinds of data you choose.</p>
-      ${deleteControl('reset', null, 'Delete ALL data')}
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
-        <div style="font-weight:700;margin-bottom:8px">Delete only some types</div>
-        <label style="display:flex;gap:8px;font-size:.88rem;margin:4px 0"><input type="checkbox" id="delTypeTasks"> Tasks (${(state.tasks||[]).length})</label>
-        <label style="display:flex;gap:8px;font-size:.88rem;margin:4px 0"><input type="checkbox" id="delTypeClasses"> Classes / schedule (${(state.classes||[]).length})</label>
-        <label style="display:flex;gap:8px;font-size:.88rem;margin:4px 0"><input type="checkbox" id="delTypeBlocks"> Study blocks (${(state.studyBlocks||[]).length})</label>
-        <label style="display:flex;gap:8px;font-size:.88rem;margin:4px 0"><input type="checkbox" id="delTypeMoney"> Money (${(state.money||[]).length})</label>
-        <label style="display:flex;gap:8px;font-size:.88rem;margin:4px 0"><input type="checkbox" id="delTypeReminders"> Custom reminders (${(state.customReminders||[]).length})</label>
-        <label style="display:flex;gap:8px;font-size:.88rem;margin:4px 0"><input type="checkbox" id="delTypeJournal"> Journal notes (${(state.journal||[]).length})</label>
-        <button class="btn ghost sm" id="delTypesBtn" style="margin-top:8px">Delete selected types</button>
+    <div class="setgroup"><h4>Delete data</h4>
+      <p style="color:var(--muted);font-size:.85rem;margin:0 0 12px">Clear everything, or only chosen items.</p>
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:320px">
+        ${deleteControl('reset', null, 'Reset All')}
+        <button type="button" class="btn ghost" id="resetSpecificBtn">Reset Specific Data</button>
       </div>
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
-        <div style="font-weight:700;margin-bottom:6px">Delete specific tasks</div>
-        <p style="font-size:.8rem;color:var(--muted)">Tick tasks, then delete only those.</p>
-        <div style="max-height:160px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px">
-          ${(state.tasks||[]).slice(0,40).map(t=>`<label style="display:flex;gap:8px;font-size:.82rem;margin:4px 0"><input type="checkbox" class="delTaskPick" value="${t.id}"> ${escapeHtml(t.title)}</label>`).join('')||'<span class="empty">No tasks</span>'}
+      <div id="resetSpecificPanel" style="display:none;margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--panel)">
+        <div class="field"><label>What kind of data?</label>
+          <select id="resetKindSelect">
+            <option value="">Choose…</option>
+            <option value="tasks">Tasks (${(state.tasks||[]).length})</option>
+            <option value="classes">Classes / schedule (${(state.classes||[]).length})</option>
+            <option value="studyBlocks">Study blocks (${(state.studyBlocks||[]).length})</option>
+            <option value="money">Money (${(state.money||[]).length})</option>
+            <option value="customReminders">Custom reminders (${(state.customReminders||[]).length})</option>
+            <option value="journal">Journal notes (${(state.journal||[]).length})</option>
+          </select>
         </div>
-        <button class="btn ghost sm" id="delPickedTasksBtn" style="margin-top:8px">Delete selected tasks</button>
+        <div id="resetItemsBox" style="margin-top:12px"></div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:280px">
+          <button type="button" class="btn danger sm" id="resetItemsDeleteBtn" style="display:none">Delete selected</button>
+          <button type="button" class="btn ghost sm" id="resetSpecificCloseBtn">Cancel</button>
+        </div>
       </div>
     </div>
     <div class="setgroup"><h4>Send update to your teacher</h4>
@@ -8200,33 +8203,69 @@ function wireView(){
     });
 
     
-    const delTypesBtn=document.getElementById('delTypesBtn');
-    if(delTypesBtn) delTypesBtn.addEventListener('click', ()=>{
-      const kill=[];
-      if(document.getElementById('delTypeTasks')?.checked) kill.push('tasks');
-      if(document.getElementById('delTypeClasses')?.checked) kill.push('classes');
-      if(document.getElementById('delTypeBlocks')?.checked) kill.push('studyBlocks');
-      if(document.getElementById('delTypeMoney')?.checked) kill.push('money');
-      if(document.getElementById('delTypeReminders')?.checked) kill.push('customReminders');
-      if(document.getElementById('delTypeJournal')?.checked) kill.push('journal');
-      if(!kill.length){ showAppMessage('Pick something', 'Tick at least one data type.'); return; }
-      showAppMessage('Delete selected types?', kill.join(', '), { ok:'Delete', cancel:'Cancel', onOk:()=>{
-        kill.forEach(k=>{ if(k==='tasks') state.tasks=[]; else if(k==='classes') state.classes=[]; else if(k==='studyBlocks') state.studyBlocks=[]; else if(k==='money') state.money=[]; else if(k==='customReminders') state.customReminders=[]; else if(k==='journal') state.journal=[]; });
-        persistRender();
-        showAppMessage('Done', 'Selected data removed.');
-      }});
+    
+    const resetSpecificBtn=document.getElementById('resetSpecificBtn');
+    const resetPanel=document.getElementById('resetSpecificPanel');
+    const resetKind=document.getElementById('resetKindSelect');
+    const resetItemsBox=document.getElementById('resetItemsBox');
+    const resetItemsDeleteBtn=document.getElementById('resetItemsDeleteBtn');
+    const resetSpecificCloseBtn=document.getElementById('resetSpecificCloseBtn');
+    function labelForResetItem(kind, item){
+      if(kind==='tasks') return item.title||'(task)';
+      if(kind==='classes') return (item.title||'Class')+(item.day!=null?' · day '+item.day:'')+(item.start?' '+item.start:'');
+      if(kind==='studyBlocks') return (item.label||'Block')+(item.date?' · '+item.date:'')+(item.start?' '+item.start:'');
+      if(kind==='money') return (item.type||'')+' '+(item.amount!=null?item.amount:'')+(item.note?' · '+item.note:'');
+      if(kind==='customReminders') return item.title||item.when||'Reminder';
+      if(kind==='journal') return (item.text||'').slice(0,60)||'Note';
+      return String(item.id||'');
+    }
+    function renderResetItems(){
+      if(!resetItemsBox||!resetKind) return;
+      const kind=resetKind.value;
+      resetItemsBox.innerHTML='';
+      if(resetItemsDeleteBtn) resetItemsDeleteBtn.style.display='none';
+      if(!kind) return;
+      const list = (state[kind]||[]);
+      if(!list.length){
+        resetItemsBox.innerHTML='<p style="font-size:.85rem;color:var(--muted)">Nothing in this category.</p>';
+        return;
+      }
+      resetItemsBox.innerHTML=`<p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Tick what to delete, then Delete selected.</p>
+        <div style="max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px">
+          ${list.map((item,i)=>`<label style="display:flex;gap:8px;align-items:flex-start;font-size:.85rem;margin:6px 0">
+            <input type="checkbox" class="resetItemPick" data-kind="${kind}" value="${item.id!=null?item.id:i}" style="margin-top:3px">
+            <span>${escapeHtml(labelForResetItem(kind, item))}</span>
+          </label>`).join('')}
+        </div>`;
+      if(resetItemsDeleteBtn) resetItemsDeleteBtn.style.display='';
+    }
+    if(resetSpecificBtn) resetSpecificBtn.addEventListener('click', ()=>{
+      if(resetPanel) resetPanel.style.display='block';
+      if(resetKind) resetKind.value='';
+      renderResetItems();
     });
-    const delPicked=document.getElementById('delPickedTasksBtn');
-    if(delPicked) delPicked.addEventListener('click', ()=>{
-      const ids=[...document.querySelectorAll('.delTaskPick:checked')].map(c=>c.value);
-      if(!ids.length){ showAppMessage('Pick tasks', 'Tick one or more tasks first.'); return; }
-      showAppMessage('Delete '+ids.length+' task(s)?', 'This cannot be undone easily.', { ok:'Delete', cancel:'Cancel', onOk:()=>{
-        state.tasks=(state.tasks||[]).filter(t=>!ids.map(String).includes(String(t.id)));
+    if(resetSpecificCloseBtn) resetSpecificCloseBtn.addEventListener('click', ()=>{
+      if(resetPanel) resetPanel.style.display='none';
+    });
+    if(resetKind) resetKind.addEventListener('change', renderResetItems);
+    if(resetItemsDeleteBtn) resetItemsDeleteBtn.addEventListener('click', ()=>{
+      const picks=[...document.querySelectorAll('.resetItemPick:checked')];
+      if(!picks.length){ showAppMessage('Nothing selected', 'Tick at least one item.'); return; }
+      const kind=resetKind.value;
+      showAppMessage('Delete '+picks.length+' item(s)?', 'From: '+kind, { ok:'Delete', cancel:'Cancel', onOk:()=>{
+        const ids=new Set(picks.map(p=>String(p.value)));
+        if(kind==='tasks') state.tasks=(state.tasks||[]).filter(t=>!ids.has(String(t.id)));
+        else if(kind==='classes') state.classes=(state.classes||[]).filter(t=>!ids.has(String(t.id)));
+        else if(kind==='studyBlocks') state.studyBlocks=(state.studyBlocks||[]).filter(t=>!ids.has(String(t.id)));
+        else if(kind==='money') state.money=(state.money||[]).filter(t=>!ids.has(String(t.id)));
+        else if(kind==='customReminders') state.customReminders=(state.customReminders||[]).filter(t=>!ids.has(String(t.id)));
+        else if(kind==='journal') state.journal=(state.journal||[]).filter(t=>!ids.has(String(t.id)));
         persistRender();
-        showAppMessage('Done', ids.length+' task(s) deleted.');
+        showAppMessage('Deleted', picks.length+' item(s) removed.');
       }});
     });
     const teacherBtn=document.getElementById('teacherUpdateBtn');
+
     if(teacherBtn) teacherBtn.addEventListener('click', ()=>{
       const name=(state.profile&&state.profile.name)||'Student';
       const open=(state.tasks||[]).filter(t=>!t.done);
