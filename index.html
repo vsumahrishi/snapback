@@ -405,6 +405,45 @@ function debouncedSave(){
    Defaults
    ============================================================ */
 function toDateStr(d){ const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
+
+function dateSelectsHtml(prefix, dateStr, timeStr){
+  const base = dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : todayStr();
+  const y0 = base.slice(0,4), m0 = base.slice(5,7), d0 = base.slice(8,10);
+  const years=[]; for(let y=2020;y<=2035;y++) years.push(y);
+  const months=[['01','Jan'],['02','Feb'],['03','Mar'],['04','Apr'],['05','May'],['06','Jun'],['07','Jul'],['08','Aug'],['09','Sep'],['10','Oct'],['11','Nov'],['12','Dec']];
+  const days=[]; for(let d=1;d<=31;d++) days.push(String(d).padStart(2,'0'));
+  return `<div class="row" style="gap:8px;flex-wrap:wrap">
+    <div class="field" style="flex:1;min-width:90px"><label>Year</label>
+      <select id="${prefix}Year">${years.map(y=>`<option value="${y}" ${String(y)===String(+y0)?'selected':''}>${y}</option>`).join('')}</select>
+    </div>
+    <div class="field" style="flex:1;min-width:90px"><label>Month</label>
+      <select id="${prefix}Month">${months.map(([v,l])=>`<option value="${v}" ${v===m0?'selected':''}>${l}</option>`).join('')}</select>
+    </div>
+    <div class="field" style="flex:1;min-width:70px"><label>Day</label>
+      <select id="${prefix}Day">${days.map(d=>`<option value="${d}" ${d===d0?'selected':''}>${+d}</option>`).join('')}</select>
+    </div>
+    <div class="field" style="flex:1;min-width:100px"><label>Time (optional)</label>
+      <input type="time" id="${prefix}Time" value="${timeStr||''}">
+    </div>
+  </div>
+  <label style="font-size:.82rem;margin-top:8px;display:flex;align-items:center;gap:8px">
+    <input type="checkbox" id="${prefix}NoDate"> No due date
+  </label>`;
+}
+function readDateSelects(prefix){
+  const no = document.getElementById(prefix+'NoDate');
+  if(no && no.checked) return {date:'', time:''};
+  const y=document.getElementById(prefix+'Year')?.value;
+  const m=document.getElementById(prefix+'Month')?.value;
+  const d=document.getElementById(prefix+'Day')?.value;
+  const time=document.getElementById(prefix+'Time')?.value||'';
+  const yi=+y;
+  if(!yi || yi<2000 || yi>2100) return {error:'Pick a year between 2020 and 2035'};
+  const maxD=new Date(+y,+m,0).getDate();
+  const day=Math.min(+d||1, maxD);
+  return {date: y+'-'+m+'-'+String(day).padStart(2,'0'), time};
+}
+
 function todayStr(){ return toDateStr(new Date()); }
 function tomorrowStr(){
   const d=new Date(); d.setDate(d.getDate()+1);
@@ -1457,16 +1496,22 @@ function quickAddTask(){
 function addTask(){
   const title=document.getElementById('newTitle').value.trim();
   if(!title) return;
-  const date=document.getElementById('newDate').value;
-  const time=document.getElementById('newTime').value;
+  let date='', time='';
+  if(document.getElementById('newYear')){
+    const rd=readDateSelects('new');
+    if(rd.error){ showAppMessage('Check the date', rd.error); return; }
+    date=rd.date||''; time=rd.time||'';
+  } else {
+    date=(document.getElementById('newDate')&&document.getElementById('newDate').value)||'';
+    time=(document.getElementById('newTime')&&document.getElementById('newTime').value)||'';
+  }
   const startDate=document.getElementById('newStartDate')?.value || '';
   const startTime=document.getElementById('newStartTime')?.value || '';
-  const priority=document.getElementById('newPriority').value;
-  let _nd=document.getElementById('newDate')?.value||'';
-  if(_nd){ const _y=parseInt(_nd.slice(0,4),10); if(!_y||_y<2000||_y>2100){ showAppMessage('Check the date','Year must be between 2000 and 2100.'); return; } }
+  const priority=document.getElementById('newPriority')?.value || 'medium';
+  if(date){ const _y=parseInt(String(date).slice(0,4),10); if(!_y||_y<2000||_y>2100){ showAppMessage('Check the date','Year must be between 2000 and 2100.'); return; } }
   const reminderTime=document.getElementById('newReminderTime')?.value || time || '09:00';
   const leads=[];
-  const dueDate = document.getElementById('newDate')?.value || date;
+  const dueDate = date;
   const daysUntil = dueDate ? Math.round((new Date(dueDate+'T12:00:00') - new Date(todayStr()+'T12:00:00'))/86400000) : 99;
   if(daysUntil >= 7 && document.getElementById('newLead7')?.checked) leads.push(7);
   if(daysUntil >= 3 && document.getElementById('newLead3')?.checked) leads.push(3);
@@ -2934,54 +2979,28 @@ function renderModal(){
     return;
   }
 
-  // Dedicated date/time editor — no flaky inline year typing
+  // Dedicated date/time editor — dropdowns + Save only
   if(state.dateEditOpen && state.dateEditId){
     const t=findTask(state.dateEditId);
-    if(!t){ state.dateEditOpen=false; }
+    if(!t){ state.dateEditOpen=false; state.dateEditId=null; }
     else {
-      const y0 = (t.date&&t.date.slice(0,4)) || String(new Date().getFullYear());
-      const m0 = (t.date&&t.date.slice(5,7)) || String(new Date().getMonth()+1).padStart(2,'0');
-      const d0 = (t.date&&t.date.slice(8,10)) || String(new Date().getDate()).padStart(2,'0');
-      const years=[]; for(let y=2020;y<=2035;y++) years.push(y);
-      const months=[{v:'01',l:'Jan'},{v:'02',l:'Feb'},{v:'03',l:'Mar'},{v:'04',l:'Apr'},{v:'05',l:'May'},{v:'06',l:'Jun'},{v:'07',l:'Jul'},{v:'08',l:'Aug'},{v:'09',l:'Sep'},{v:'10',l:'Oct'},{v:'11',l:'Nov'},{v:'12',l:'Dec'}];
-      const days=[]; for(let d=1;d<=31;d++) days.push(String(d).padStart(2,'0'));
-      root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:400px;text-align:left">
+      root.innerHTML=`<div class="overlay" id="dateEditOverlay"><div class="quotecard" style="max-width:420px;text-align:left">
         <div class="qeyebrow">Date &amp; time</div>
-        <div style="font-weight:800;font-size:1.05rem;margin-bottom:10px">${escapeHtml(t.title)}</div>
-        <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">Pick year, month, and day from the lists — then press <b>Save</b>.</p>
-        <div class="row" style="gap:8px">
-          <div class="field" style="flex:1.2"><label>Year</label>
-            <select id="deYear">${years.map(y=>`<option value="${y}" ${String(y)===String(+y0)?'selected':''}>${y}</option>`).join('')}</select>
-          </div>
-          <div class="field" style="flex:1"><label>Month</label>
-            <select id="deMonth">${months.map(m=>`<option value="${m.v}" ${m.v===m0?'selected':''}>${m.l}</option>`).join('')}</select>
-          </div>
-          <div class="field" style="flex:1"><label>Day</label>
-            <select id="deDay">${days.map(d=>`<option value="${d}" ${d===d0?'selected':''}>${d}</option>`).join('')}</select>
-          </div>
-        </div>
-        <div class="field" style="margin-top:10px"><label>Time (optional)</label>
-          <input type="time" id="deTime" value="${t.time||''}">
-        </div>
+        <div style="font-weight:800;font-size:1.1rem;margin-bottom:8px">${escapeHtml(t.title)}</div>
+        <p style="font-size:.88rem;color:var(--muted);margin:0 0 12px">Choose year, month, and day from the lists. Nothing is saved until you press <b>Save</b>.</p>
+        ${dateSelectsHtml('de', t.date||todayStr(), t.time||'')}
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px">
-          <button class="btn" id="deSave">Save date &amp; time</button>
-          <button class="btn ghost" id="deClear">Clear date (no due date)</button>
-          <button class="btn ghost" id="deCancel">Cancel</button>
+          <button type="button" class="btn" id="deSave">Save date &amp; time</button>
+          <button type="button" class="btn ghost" id="deClear">Clear date (no due date)</button>
+          <button type="button" class="btn ghost" id="deCancel">Cancel</button>
         </div>
       </div></div>`;
       document.getElementById('deSave').onclick=()=>{
-        const y=document.getElementById('deYear').value;
-        const m=document.getElementById('deMonth').value;
-        const d=document.getElementById('deDay').value;
-        const yi=+y;
-        if(!yi || yi<2000 || yi>2100){ showAppMessage('Check the year', 'Choose a year from the list (2020–2035).'); return; }
-        // validate day for month
-        const maxD=new Date(+y, +m, 0).getDate();
-        const day=Math.min(+d, maxD);
-        t.date = y+'-'+m+'-'+String(day).padStart(2,'0');
-        t.time = document.getElementById('deTime').value||'';
+        const rd=readDateSelects('de');
+        if(rd.error){ showAppMessage('Check the date', rd.error); return; }
+        t.date=rd.date; t.time=rd.time||'';
         state.dateEditOpen=false; state.dateEditId=null;
-        showAppMessage('Saved', 'Due: '+t.date+(t.time?' '+t.time:''));
+        showAppMessage('Saved', rd.date ? ('Due: '+rd.date+(rd.time?' '+rd.time:'')) : 'No due date');
         persistRender();
       };
       document.getElementById('deClear').onclick=()=>{
@@ -2990,7 +3009,9 @@ function renderModal(){
         showAppMessage('Saved', 'No due date on this task.');
         persistRender();
       };
-      document.getElementById('deCancel').onclick=()=>{ state.dateEditOpen=false; state.dateEditId=null; persistRender(); };
+      document.getElementById('deCancel').onclick=()=>{
+        state.dateEditOpen=false; state.dateEditId=null; persistRender();
+      };
       return;
     }
   }
@@ -3320,15 +3341,10 @@ function renderModal(){
         showAppMessage('Delete this task?', 'You can Undo for a few seconds after.', { ok:'Delete', cancel:'Cancel', onOk:()=>{ deleteTask(t.id); closeTaskMenu(); } });
       };
       document.getElementById('tmResched').onclick=()=>{
-        const box=document.getElementById('tmExtra');
-        box.innerHTML=`<div class="field"><label>New date</label><input type="date" id="tmNewDate" value="${t.date||todayStr()}"></div>
-          <div class="field"><label>New time</label><input type="time" id="tmNewTime" value="${t.time||''}"></div>
-          <button class="btn sm" id="tmSaveDate" style="margin-top:8px">Save date</button>`;
-        document.getElementById('tmSaveDate').onclick=()=>{
-          t.date=document.getElementById('tmNewDate').value;
-          t.time=document.getElementById('tmNewTime').value;
-          closeTaskMenu();
-        };
+        closeTaskMenu();
+        state.dateEditId=t.id;
+        state.dateEditOpen=true;
+        persistRender();
       };
       const tmPin=document.getElementById('tmPin');
       if(tmPin) tmPin.onclick=()=>{ state.topOfMindId=t.id; state.taskMenuOpen=false; persistRender(); };
@@ -4024,7 +4040,22 @@ function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal()
     window._undoBannerTimer=setTimeout(()=>{ state.undoBanner=null; const b=document.querySelector('.undo-banner'); if(b) b.remove(); }, 12000);
   }
 }
-if(typeof window!=='undefined'){ try{ document.title='SnapBack'; }catch(e){}
+if(typeof window!=='undefined'){
+  if(!window.snapDateEditDelegate){
+    window.snapDateEditDelegate=true;
+    document.addEventListener('click', (e)=>{
+      const btn=e.target&&e.target.closest&&e.target.closest('[data-action="open-date-edit"]');
+      if(!btn) return;
+      e.preventDefault(); e.stopPropagation();
+      const tid=btn.getAttribute('data-id');
+      if(!tid) return;
+      state.dateEditId=tid;
+      state.dateEditOpen=true;
+      state.taskMenuOpen=false;
+      try{ persistRender(); }catch(err){}
+    }, true);
+  }
+  try{ document.title='SnapBack'; }catch(e){}
   window.addEventListener('popstate', (ev)=>{ if(ev.state&&ev.state.view){ state.view=ev.state.view; persistRender(); } });
   setTimeout(()=>{ try{ ensureNotifyPermission(); syncNativeClassReminders(); scheduleWakeAlarms(); startCloudSync(); }catch(e){} }, 2000); }
 if(typeof window!=='undefined' && !window._snapbackNotifyTimer){
@@ -4807,10 +4838,10 @@ function viewTasks(){
   <div class="card">
     <h3>Add a task</h3>
     <div class="field"><label>Title</label><input id="newTitle" placeholder="e.g. Finish problem set 4"></div>
-    <div class="row" style="margin-top:10px">
-      <div class="field"><label>Due date</label><input id="newDate" type="date" value="${todayStr()}" min="2020-01-01" max="2035-12-31"></div>
-      <div class="field"><label>Due time</label><input id="newTime" type="time"></div>
-      <div class="field"><label>Priority</label><select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
+    <div style="margin-top:10px">
+      <div style="font-size:.8rem;font-weight:700;color:var(--muted);margin-bottom:6px">Due date (pick from lists, then Add task)</div>
+      ${dateSelectsHtml('new','')}
+      <div class="field" style="margin-top:10px"><label>Priority</label><select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
     </div>
     <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
       <div style="font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px">BUG ME</div>
@@ -7258,8 +7289,11 @@ function wireView(){
     if(action==='toggle-done') el.addEventListener('change', ()=>toggleDone(id));
     else if(action==='open-date-edit') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
-      state.dateEditId=id;
+      const tid=id||el.getAttribute('data-id');
+      if(!tid){ showAppMessage('No task', 'Could not find this task.'); return; }
+      state.dateEditId=tid;
       state.dateEditOpen=true;
+      state.taskMenuOpen=false;
       persistRender();
     });
     else if(action==='task-menu') el.addEventListener('click', (e)=>{
