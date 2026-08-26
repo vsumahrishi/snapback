@@ -2735,7 +2735,7 @@ const NAV=[
     {id:'challenges', label:'Challenges', ico:'&#127919;'},
     {id:'journal', label:'Journal', ico:'&#128221;'},
     {id:'plan', label:'Plan', ico:'&#128197;'},
-    {id:'techniques', label:'Techniques', ico:'&#127919;'},
+    {id:'techniques', label:'Techniques', ico:'&#128295;'},
     {id:'studytools', label:'Study Tools', ico:'&#128218;'},
     {id:'settings', label:'Settings', ico:'&#9881;'}
   ]}
@@ -3138,9 +3138,10 @@ function renderModal(){
             <button class="btn ghost" id="tmRemind">Bug Me / reminder…</button>
             <button class="btn ghost" id="tmAskAi">✨ Ask AI — I am stuck</button>
             <button class="btn ghost" id="tmPin">📌 Top of Mind</button>
-            <button class="btn ghost" id="tmBurn">🔥 Backburner</button>
+            <button class="btn ghost" id="tmBurn">${t.backburner?'↩️ Bring back from Backburner':'🔥 Send to Backburner'}</button>
+            <button class="btn ghost" id="tmContext">${t.context==='personal'?'🎓 Mark as School / College':'🏠 Mark as Personal'}</button>
             <button class="btn ghost" id="tmFocus">Start Focus Pod</button>
-            <button class="btn ghost" id="tmEdit">Edit title / details</button>
+            <button class="btn" id="tmEdit">✏️ Edit title, date, notes</button>
             <button class="btn danger ghost" id="tmDelete">Delete task</button>
             <button class="btn ghost" id="tmClose">Close</button>
           </div>
@@ -3155,12 +3156,29 @@ function renderModal(){
       };
       document.getElementById('tmFocus').onclick=()=>{ closeTaskMenu(); goFocusWithTask(t.id); };
       document.getElementById('tmEdit').onclick=()=>{
-        closeTaskMenu();
-        navigateTo('tasks');
-        setTimeout(()=>{
-          const el=document.querySelector('.ttitle-edit[data-id="'+t.id+'"]')||document.querySelector('[data-action="task-menu"][data-id="'+t.id+'"]');
-          if(el) el.scrollIntoView({behavior:'smooth',block:'center'});
-        },200);
+        const box=document.getElementById('tmExtra');
+        box.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:12px">
+          <div style="font-weight:700;margin-bottom:8px">Editing — change what you need, then Save</div>
+          <div class="field"><label>Title</label><input id="tmEditTitle" value="${escapeHtml(t.title)}"></div>
+          <div class="row" style="margin-top:8px">
+            <div class="field"><label>Date</label><input type="date" id="tmEditDate" value="${t.date||''}"></div>
+            <div class="field"><label>Time</label><input type="time" id="tmEditTime" value="${t.time||''}"></div>
+          </div>
+          <div class="field" style="margin-top:8px"><label>Notes</label><textarea id="tmEditNotes" rows="3">${escapeHtml(t.notes||'')}</textarea></div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn" id="tmEditSave">Save changes</button>
+            <button class="btn ghost" id="tmEditCancel">Cancel</button>
+          </div>
+        </div>`;
+        document.getElementById('tmEditSave').onclick=()=>{
+          t.title=(document.getElementById('tmEditTitle').value||'').trim()||t.title;
+          t.date=document.getElementById('tmEditDate').value||'';
+          t.time=document.getElementById('tmEditTime').value||'';
+          t.notes=document.getElementById('tmEditNotes').value||'';
+          closeTaskMenu();
+          showAppMessage('Saved', 'Your changes to “'+t.title+'” are saved.');
+        };
+        document.getElementById('tmEditCancel').onclick=()=>{ box.innerHTML=''; };
       };
       document.getElementById('tmDelete').onclick=()=>{
         showAppMessage('Delete this task?', 'You can Undo for a few seconds after.', { ok:'Delete', cancel:'Cancel', onOk:()=>{ deleteTask(t.id); closeTaskMenu(); } });
@@ -3181,7 +3199,17 @@ function renderModal(){
       const tmAsk=document.getElementById('tmAskAi');
       if(tmAsk) tmAsk.onclick=()=>{ state.taskMenuOpen=false; openAIWithPrompt(promptStuckTask(t), preferredAI()); };
       const tmBurn=document.getElementById('tmBurn');
-      if(tmBurn) tmBurn.onclick=()=>{ t.backburner=true; state.taskMenuOpen=false; persistRender(); };
+      if(tmBurn) tmBurn.onclick=()=>{
+        t.backburner=!t.backburner;
+        closeTaskMenu();
+        showAppMessage(t.backburner?'On the Backburner':'Back on your list', t.backburner?'This task is hidden from the main list until you bring it back (Tasks → Backburner filter).':'This task is visible again.');
+      };
+      const tmCtx=document.getElementById('tmContext');
+      if(tmCtx) tmCtx.onclick=()=>{
+        t.context = (t.context==='personal') ? 'school' : 'personal';
+        closeTaskMenu();
+        showAppMessage('Context updated', t.context==='personal'?'Marked Personal — hidden when School/College filter is on.':'Marked School/College — hidden when Personal filter is on.');
+      };
       document.getElementById('tmRemind').onclick=()=>{
         const box=document.getElementById('tmExtra');
         box.innerHTML=`<div class="field"><label>Bug Me at</label><input type="time" id="tmRemTime" value="${t.reminderTime||'09:00'}"></div>
@@ -3395,8 +3423,19 @@ function navigateTo(view){
     state.navHistory.push(state.view);
     if(state.navHistory.length > 30) state.navHistory.shift();
   }
+  // Leaving a nested challenge detail → clear so list shows next time
+  if(view==='challenges'){ state.challengeId=null; }
+  else if(state.view==='challenges' && view!=='challenges'){ /* keep or clear: clear for less confusion */ state.challengeId=null; }
+  const loader=document.getElementById('viewLoader');
+  if(loader){ loader.classList.add('on'); }
   state.view = view;
+  try{
+    document.title = 'SnapBack';
+    const path = view==='today' ? '/snapback/' : '/snapback/#/'+view;
+    history.pushState({view}, 'SnapBack', path);
+  }catch(e){}
   persistRender();
+  setTimeout(()=>{ const l=document.getElementById('viewLoader'); if(l) l.classList.remove('on'); }, 280);
 }
 function goBack(){
   if(state.navHistory && state.navHistory.length){
@@ -3719,7 +3758,9 @@ function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal()
     window._undoBannerTimer=setTimeout(()=>{ state.undoBanner=null; const b=document.querySelector('.undo-banner'); if(b) b.remove(); }, 12000);
   }
 }
-if(typeof window!=='undefined'){ setTimeout(()=>{ try{ ensureNotifyPermission(); syncNativeClassReminders(); scheduleWakeAlarms(); startCloudSync(); }catch(e){} }, 2000); }
+if(typeof window!=='undefined'){ try{ document.title='SnapBack'; }catch(e){}
+  window.addEventListener('popstate', (ev)=>{ if(ev.state&&ev.state.view){ state.view=ev.state.view; persistRender(); } });
+  setTimeout(()=>{ try{ ensureNotifyPermission(); syncNativeClassReminders(); scheduleWakeAlarms(); startCloudSync(); }catch(e){} }, 2000); }
 if(typeof window!=='undefined' && !window._snapbackNotifyTimer){
   window._snapbackNotifyTimer = setInterval(()=>{ try{ checkNotifications(); }catch(e){} }, 30000);
   window._tomTimer = setInterval(()=>{
@@ -3810,7 +3851,8 @@ const SB_TOOLS = {
   journal: {title:'Journal stickies', desc:'Catch thoughts as notes. File, do, or drop them later.', ico:'📒', nav:'journal'},
   schedule: {title:'Your Schedule', desc:'See the week as time blocks, not an endless list.', ico:'📅', nav:'calendar'},
   calendar: {title:'Calendar', desc:'Add classes and appointments once; they show on your week.', ico:'🎓', nav:'semester'},
-  projects: {title:'Projects', desc:'Park school work under each class or project.', ico:'📚', nav:'projects'},
+  projects: {title:'Projects', desc:'Park class/course work under each project so study stays grouped.', ico:'📚', nav:'projects'},
+  contextFilter: {title:'Study vs Personal filter', desc:'Show only School/College tasks, or only Personal — so the two never mix on your list.', ico:'✂️', action:'context-filter'},
   habits: {title:'Healthy Habits', desc:'Quick check-ins for sleep, food, and movement.', ico:'🌿', nav:'habits'},
   soundscape: {title:'Soundscape', desc:'Background sound while you work (in Settings).', ico:'🎧', nav:'settings'},
   today: {title:'Today', desc:'One screen: the next right things for this day.', ico:'☀', nav:'today'},
@@ -3828,7 +3870,7 @@ const CHALLENGES = [
   {id:'what_next', title:'I do not know what to do next', blurb:'Choosing the next step uses up all my energy.', ico:'🧭'},
   {id:'miss_due', title:'I am afraid I will miss a due date', blurb:'Deadlines live in my head and leak out.', ico:'⏰'},
   {id:'schedule_tight', title:'Plans and schedules stress me out', blurb:'A full timetable feels tight and heavy.', ico:'📅'},
-  {id:'life_blur', title:'School and life blur together', blurb:'Study, rest, and personal stuff all mix.', ico:'🌓'},
+  {id:'life_blur', title:'Study and personal life mix together', blurb:'School/college work and home/personal tasks feel mixed up.', ico:'🌓'},
   {id:'adhd_brain', title:'My brain needs ADHD-friendly setup', blurb:'I need short paths, not a complicated system.', ico:'🧠'}
 ];
 
@@ -3840,7 +3882,7 @@ const CHALLENGE_PATHS = {
   what_next: ['spinPick','grabBag','eisenhower','mustFrog','today','spotlight','startWizard'],
   miss_due: ['bugMe','tasks','schedule','calendar','today'],
   schedule_tight: ['today','calendar','schedule','focusPlate','timeOnTask'],
-  life_blur: ['projects','journal','habits','money','schedule','focusPlate'],
+  life_blur: ['contextFilter','projects','journal','habits','schedule'],
   adhd_brain: ['today','bugMe','biteSize','oneAtATime','focusPod','challenges_home']
 };
 
@@ -4299,7 +4341,7 @@ function taskCard(t){
 
         <!-- Quick actions -->
         <div class="taskactions">
-          <button class="btn ghost sm" data-action="focus-title" data-id="${t.id}">✏️ Edit</button>
+          <button class="btn ghost sm" data-action="task-menu" data-id="${t.id}">✏️ Edit</button>
           <button class="btn sm" data-action="goto-focus" data-id="${t.id}">▶ Focus</button>
           <button class="btn ghost sm" data-action="goto-cheese" data-id="${t.id}">🍽 Bite Size</button>
           ${t.date ? `<button class="btn ghost sm" data-action="reschedule" data-id="${t.id}" data-days="1">+1 day</button>
@@ -4350,6 +4392,10 @@ function viewTasks(){
   // hide backburner from main list unless filter says so
   if(f!=='backburner') list=list.filter(t=>!t.backburner);
   else list=(state.tasks||[]).filter(t=>t.backburner && !t.done);
+  // Study vs Personal global filter
+  const cf = state.contextFilter || 'all';
+  if(cf==='school') list=list.filter(t=>(t.context||'school')!=='personal');
+  if(cf==='personal') list=list.filter(t=>(t.context||'school')==='personal');
   // List overwhelm modes — must run BEFORE building items
   const mode = state.listMode || 'all';
   let modeBanner = tasksViewToolbar();
@@ -4502,6 +4548,13 @@ function viewTasks(){
     <button data-filter="must" class="${f==='must'?'active':''}">Must-do</button>
     <button data-filter="frog" class="${f==='frog'?'active':''}">&#128007; Frogs</button>
     <button data-filter="done" class="${f==='done'?'active':''}">Completed</button>
+    <button data-filter="backburner" class="${f==='backburner'?'active':''}">🔥 Backburner</button>
+  </div>
+  <div class="filters" style="margin-top:6px">
+    <span style="font-size:.75rem;color:var(--muted);align-self:center">Show:</span>
+    <button type="button" data-action="ctx-filter" data-ctx="all" class="${(state.contextFilter||'all')==='all'?'active':''}">All</button>
+    <button type="button" data-action="ctx-filter" data-ctx="school" class="${state.contextFilter==='school'?'active':''}">School / College</button>
+    <button type="button" data-action="ctx-filter" data-ctx="personal" class="${state.contextFilter==='personal'?'active':''}">Personal</button>
   </div>
   <ul class="tasklist">${modeBanner}${modeBody}${items}</ul>
   `;
@@ -6932,6 +6985,10 @@ function wireView(){
       state.workSession={taskId:state.spinResult, source:'spin'};
       persistRender();
     });
+    else if(action==='ctx-filter') el.addEventListener('click', ()=>{
+      state.contextFilter = el.dataset.ctx || 'all';
+      persistRender();
+    });
     else if(action==='list-mode') el.addEventListener('click', ()=>{
       state.listMode = el.dataset.mode || 'all';
       if(state.listMode==='jar') state.jarQueue=null;
@@ -7803,6 +7860,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.pickTom===undefined) state.pickTom=false;
     if(state.pickTimer===undefined) state.pickTimer=false;
     if(state.workSession===undefined) state.workSession=null;
+    if(!state.contextFilter) state.contextFilter='all';
     if(!state.listMode) state.listMode='all'; // all | spotlight | wall | one | jar
     if(!state.spotlightSize) state.spotlightSize=3;
     if(state.jarQueue===undefined) state.jarQueue=null;
