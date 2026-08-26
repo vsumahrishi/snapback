@@ -3305,28 +3305,37 @@ function renderModal(){
     const t = findTask(state.taskMenuId);
     if(!t){ state.taskMenuOpen=false; }
     else {
-      root.innerHTML=`<div class="overlay" id="taskMenuOverlay">
-        <div class="quotecard" style="max-width:400px;text-align:left">
-          <div class="qeyebrow">More actions</div>
-          <div style="font-weight:700;margin-bottom:4px">${escapeHtml(t.title)}</div>
-          <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">Extra tools (not for basic edit). To change title or date, close this and use <b>Edit</b>.</p>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            <button class="btn" id="tmDone">${t.done?'Mark as not done':'Mark as done'}</button>
-            <button class="btn ghost" id="tmResched">Reschedule…</button>
-            <button class="btn ghost" id="tmRemind">Bug Me…</button>
-            <button class="btn ghost" id="tmAskAi">✨ Ask AI — I am stuck</button>
-            <button class="btn ghost" id="tmPin">📌 Top of Mind</button>
-            <button class="btn ghost" id="tmBurn">${t.backburner?'↩️ Bring back from Backburner':'🔥 Send to Backburner'}</button>
-            <button class="btn ghost" id="tmContext">${t.context==='personal'?'🎓 Mark as School / College':'🏠 Mark as Personal'}</button>
-            <button class="btn ghost" id="tmFocus">Start Focus Pod</button>
-            <button class="btn" id="tmEdit">✏️ Edit (title, date, notes)</button>
-            <button class="btn danger ghost" id="tmDelete">Delete task</button>
-            <button class="btn ghost" id="tmClose">Close</button>
+      root.innerHTML=`<div class="overlay" id="taskMenuOverlay" style="align-items:flex-end">
+        <div class="quotecard" style="max-width:420px;width:100%;text-align:left;padding:0;max-height:min(88vh,640px);display:flex;flex-direction:column;overflow:hidden">
+          <div style="padding:16px 18px 10px;border-bottom:1px solid var(--line);flex:0 0 auto">
+            <div class="qeyebrow" style="margin:0">More actions</div>
+            <div style="font-weight:700;font-size:1rem;margin-top:4px">${escapeHtml(t.title)}</div>
+            <p style="font-size:.8rem;color:var(--muted);margin:6px 0 0">Scroll for all options. You can leave without choosing one.</p>
           </div>
-          <div id="tmExtra" style="margin-top:12px"></div>
+          <div style="padding:12px 18px;overflow-y:auto;flex:1 1 auto;-webkit-overflow-scrolling:touch">
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <button class="btn" id="tmDone">${t.done?'Mark as not done':'Mark as done'}</button>
+              <button class="btn ghost" id="tmResched">Reschedule…</button>
+              <button class="btn ghost" id="tmRemind">Bug Me…</button>
+              <button class="btn ghost" id="tmAskAi">✨ Ask AI — I am stuck</button>
+              <button class="btn ghost" id="tmPin">📌 Top of Mind</button>
+              <button class="btn ghost" id="tmBurn">${t.backburner?'↩️ Bring back from Backburner':'🔥 Send to Backburner'}</button>
+              <button class="btn ghost" id="tmContext">${t.context==='personal'?'🎓 Mark as School / College':'🏠 Mark as Personal'}</button>
+              <button class="btn ghost" id="tmFocus">Start Focus Pod</button>
+              <button class="btn ghost" id="tmEdit">✏️ Edit title / date / notes</button>
+              <button class="btn danger ghost" id="tmDelete">Delete task</button>
+            </div>
+            <div id="tmExtra" style="margin-top:12px"></div>
+          </div>
+          <div style="padding:12px 18px 16px;border-top:1px solid var(--line);flex:0 0 auto;background:var(--panel)">
+            <button class="btn" id="tmClose" style="width:100%">Cancel — close</button>
+          </div>
         </div>
       </div>`;
       document.getElementById('tmClose').onclick=()=>closeTaskMenu();
+      document.getElementById('taskMenuOverlay').addEventListener('click', (e)=>{
+        if(e.target.id==='taskMenuOverlay') closeTaskMenu();
+      });
       document.getElementById('tmDone').onclick=()=>{
         t.done=!t.done;
         if(t.done) pushUndo({type:'toggle-done', id:t.id, was:false, label:'Marked done — Undo'});
