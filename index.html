@@ -4645,11 +4645,15 @@ function taskCard(t){
       <div class="field"><label>Title</label>
         <input type="text" id="editTitle-${t.id}" value="${escapeHtml(t.title)}">
       </div>
-      <div class="field" style="margin-top:8px"><label>Date — type e.g. 2026-08-26</label>
-        <input type="text" id="editDateText-${t.id}" value="${escapeHtml(t.date||'')}" placeholder="2026-08-26" autocomplete="off">
-      </div>
-      <div class="field" style="margin-top:8px"><label>Or pick date</label>
-        <input type="date" id="editDatePick-${t.id}" value="${t.date||''}" min="2020-01-01" max="2035-12-31">
+      <div class="field" style="margin-top:8px"><label>Date</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="text" id="editDateText-${t.id}" value="${escapeHtml(t.date||'')}" placeholder="Type 2026-08-26" autocomplete="off" style="flex:1">
+          <label style="flex:0 0 auto;cursor:pointer;position:relative;margin:0" title="Pick from calendar">
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border:1px solid var(--line);border-radius:10px;background:var(--card)">📅</span>
+            <input type="date" id="editDatePick-${t.id}" value="${t.date||''}" min="2020-01-01" max="2035-12-31" style="position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer">
+          </label>
+        </div>
+        <div style="font-size:.75rem;color:var(--muted);margin-top:4px">Type the date, or tap the calendar</div>
       </div>
       <div class="field" style="margin-top:8px"><label>Time</label>
         <input type="time" id="editTime-${t.id}" value="${t.time||''}">
@@ -7316,9 +7320,6 @@ function wireView(){
       persistRender();
     });
     else if(action==='task-menu') el.addEventListener('click', (e)=>{
-      const tag=(e.target&&e.target.tagName||'').toLowerCase();
-      if(['input','textarea','select','button','a','label'].includes(tag)) return;
-      if(e.target.closest && e.target.closest('button,input,textarea,select,a,label')) return;
       e.preventDefault(); e.stopPropagation();
       openTaskMenu(id);
     });
