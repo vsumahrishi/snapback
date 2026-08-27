@@ -1115,11 +1115,17 @@ function ensureAudio(){
   if(actx.state==='suspended') actx.resume();
   return actx;
 }
+let _alarmRamp = null; // { stop: fn }
+function stopAlarmRamp(){
+  if(_alarmRamp && _alarmRamp.stop){ try{ _alarmRamp.stop(); }catch(e){} }
+  _alarmRamp = null;
+}
+/** Short chime (timer / test) */
 function playAlarm(){
   if(!state.settings.soundOn) return;
   const ctx = ensureAudio(); if(!ctx) return;
-  const vol = state.settings.soundVolume;
-  const kind = state.settings.alarmSound;
+  const vol = Math.max(0.05, Math.min(1, Number(state.settings.soundVolume)||0.7));
+  const kind = state.settings.alarmSound||'chime';
   const now = ctx.currentTime;
   const notesFor = {chime:[523.25,659.25,783.99],bell:[440,440],beep:[880,880,880]}[kind] || [523.25,659.25,783.99];
   notesFor.forEach((freq,i)=>{
@@ -1134,7 +1140,140 @@ function playAlarm(){
     osc.start(start); osc.stop(start+dur+0.05);
   });
 }
+/**
+ * Bug Me / wake: gradual volume over ~50 seconds, repeating soft pulses.
+ * Uses settings.soundVolume as the peak (phone volume keys still control the device;
+ * the in-app slider sets peak loudness of this alarm).
+ */
+function playAlarmRamp(durationSec){
+  stopAlarmRamp();
+  if(!state.settings.soundOn) return;
+  const ctx = ensureAudio(); if(!ctx) return;
+  const peak = Math.max(0.08, Math.min(1, Number(state.settings.soundVolume)||0.85));
+  const total = durationSec || 50;
+  const master = ctx.createGain();
+  master.gain.setValueAtTime(0.0001, ctx.currentTime);
+  master.gain.linearRampToValueAtTime(peak, ctx.currentTime + total);
+  master.connect(ctx.destination);
+  let stopped = false;
+  const timers = [];
+  function pulse(at){
+    if(stopped) return;
+    const freqs = [523.25, 659.25, 784];
+    freqs.forEach((freq,i)=>{
+      const osc=ctx.createOscillator(), g=ctx.createGain();
+      osc.type='sine';
+      osc.frequency.value=freq;
+      const t0 = ctx.currentTime;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.45, t0+0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0+0.45);
+      osc.connect(g); g.connect(master);
+      osc.start(t0+i*0.08); osc.stop(t0+0.55);
+    });
+  }
+  pulse(0);
+  // pulse every 1.2s for duration
+  for(let ms=1200; ms < total*1000; ms+=1200){
+    timers.push(setTimeout(()=>{ if(!stopped) pulse(); }, ms));
+  }
+  timers.push(setTimeout(()=>{ stopAlarmRamp(); }, total*1000+200));
+  _alarmRamp = {
+    stop(){
+      stopped = true;
+      timers.forEach(clearTimeout);
+      try{
+        master.gain.cancelScheduledValues(ctx.currentTime);
+        master.gain.setValueAtTime(0.0001, ctx.currentTime);
+      }catch(e){}
+    }
+  };
+}
 function testAlarm(){ playAlarm(); }
+
+/* ---- Bug Me (wake) alarm logic ---- */
+function saveWakeAlarmFromForm(){
+  if(!state.wakeAlarm) state.wakeAlarm={};
+  state.wakeAlarm.enabled = !!document.getElementById('wakeEnabled')?.checked;
+  state.wakeAlarm.time = document.getElementById('wakeTime')?.value || '07:00';
+  const days=[];
+  for(let i=0;i<7;i++){ if(document.getElementById('wakeDay'+i)?.checked) days.push(i); }
+  state.wakeAlarm.days = days.length ? days : [0,1,2,3,4];
+  state.wakeAlarm.snoozesMax = 2;
+  state.wakeAlarm.snoozesLeft = 2;
+  saveState();
+  scheduleWakeAlarms();
+  showAppMessage('Bug Me saved', state.wakeAlarm.enabled ? ('On at '+state.wakeAlarm.time) : 'Turned off');
+}
+function nextWakeDate(){
+  const wa=state.wakeAlarm; if(!wa||!wa.enabled||!wa.time) return null;
+  const [hh,mm]=(wa.time||'07:00').split(':').map(Number);
+  const days=wa.days||[0,1,2,3,4];
+  const now=new Date();
+  for(let add=0; add<8; add++){
+    const d=new Date(now.getFullYear(), now.getMonth(), now.getDate()+add, hh||0, mm||0, 0, 0);
+    if(d.getTime() <= now.getTime()+5000) continue;
+    // JS getDay: 0=Sun … our UI: Mon=0 … Fri=4, Sat=5, Sun=6
+    const uiDay = (d.getDay()+6)%7;
+    if(days.indexOf(uiDay)>=0) return d;
+  }
+  return null;
+}
+let _wakeCheckTimer=null;
+function scheduleWakeAlarms(){
+  clearTimeout(_wakeCheckTimer);
+  const next=nextWakeDate();
+  if(!next) return;
+  const ms = next.getTime() - Date.now();
+  if(ms > 2147483647) return; // setTimeout max
+  _wakeCheckTimer = setTimeout(()=>{
+    triggerWakeMath('scheduled');
+  }, Math.max(1000, ms));
+}
+function triggerWakeMath(reason){
+  if(!state.wakeAlarm) state.wakeAlarm={snoozesLeft:2,snoozesMax:2};
+  if(reason==='scheduled'){
+    state.wakeAlarm.snoozesLeft = state.wakeAlarm.snoozesMax||2;
+  }
+  const a=2+Math.floor(Math.random()*8);
+  const b=2+Math.floor(Math.random()*8);
+  state.wakeMath = { a, b, answer: a+b, reason: reason||'' };
+  state.wakeMathOpen = true;
+  playAlarmRamp(50);
+  persistRender();
+}
+function wakeDismissMath(val){
+  const m=state.wakeMath;
+  if(!m){ state.wakeMathOpen=false; stopAlarmRamp(); persistRender(); return; }
+  if(String(val).trim()===String(m.answer)){
+    stopAlarmRamp();
+    state.wakeMathOpen=false;
+    state.wakeMath=null;
+    scheduleWakeAlarms();
+    showAppMessage('Stopped', 'Good morning — Bug Me is off.');
+    persistRender();
+  } else {
+    showAppMessage('Not quite', 'Try the math again to stop the alarm.');
+  }
+}
+function wakeSnooze(minutes){
+  const mins = minutes || 5;
+  if(!state.wakeAlarm) state.wakeAlarm={snoozesLeft:0};
+  if((state.wakeAlarm.snoozesLeft||0)<=0){
+    showAppMessage('No snoozes left', 'Solve the math to stop.');
+    return;
+  }
+  state.wakeAlarm.snoozesLeft = (state.wakeAlarm.snoozesLeft||0) - 1;
+  stopAlarmRamp();
+  state.wakeMathOpen=false;
+  state.wakeMath=null;
+  persistRender();
+  clearTimeout(_wakeCheckTimer);
+  _wakeCheckTimer = setTimeout(()=>triggerWakeMath('snooze'), mins*60*1000);
+  showAppMessage('Snoozed', mins+' minutes. Snoozes left: '+state.wakeAlarm.snoozesLeft);
+}
+function testAlarm(){ playAlarm(); }
+
 
 function makeNoiseBuffer(ctx,type){
   const bufferSize=2*ctx.sampleRate;
@@ -3289,14 +3428,17 @@ function renderModal(){
         <input type="number" id="wakeAnswer" inputmode="numeric" style="font-size:1.4rem;text-align:center;width:120px;padding:12px;border-radius:12px;border:2px solid var(--pine)" />
         <div class="qactions" style="margin-top:16px;flex-direction:column;gap:8px">
           <button class="btn" id="wakeSubmit">Stop alarm</button>
-          <button class="btn ghost" id="wakeSnoozeBtn" ${snoozes<=0?'disabled':''}>Snooze 5 min (${snoozes} left)</button>
+          <button class="btn ghost" id="wakeSnooze5" ${snoozes<=0?'disabled':''}>Snooze 5 minutes (${snoozes} left)</button>
+          <button class="btn ghost" id="wakeSnooze10" ${snoozes<=0?'disabled':''}>Snooze 10 minutes (${snoozes} left)</button>
         </div>
       </div>
     </div>`;
     const ans=document.getElementById('wakeAnswer');
     if(ans) setTimeout(()=>ans.focus(),200);
     document.getElementById('wakeSubmit').onclick=()=>wakeDismissMath(document.getElementById('wakeAnswer')?.value);
-    document.getElementById('wakeSnoozeBtn').onclick=()=>wakeSnooze();
+    const s5=document.getElementById('wakeSnooze5'); if(s5) s5.onclick=()=>wakeSnooze(5);
+    const s10=document.getElementById('wakeSnooze10'); if(s10) s10.onclick=()=>wakeSnooze(10);
+    const sOld=document.getElementById('wakeSnoozeBtn'); if(sOld) sOld.onclick=()=>wakeSnooze(5);
     if(ans) ans.addEventListener('keydown', e=>{ if(e.key==='Enter') wakeDismissMath(ans.value); });
     return;
   }
@@ -3808,20 +3950,26 @@ async function signOutUser(){
   }
 }
 function authStatusHtml(){
-  if(_currentUser){
-    return `<div style="padding:12px;border-radius:12px;background:var(--pine-soft);margin-bottom:12px">
-      <div style="font-weight:700">Signed in</div>
-      <div style="font-size:.9rem;margin-top:4px">${escapeHtml(_currentUser.displayName||'Student')}</div>
-      <div style="font-size:.8rem;color:var(--muted)">${escapeHtml(_currentUser.email||'')}</div>
-      <p style="font-size:.8rem;color:var(--muted);margin:8px 0 0">Your data is private to this Google account (users/${escapeHtml(_currentUser.uid)}/…).</p>
-      <button type="button" class="btn ghost sm" id="googleSignOutBtn" style="margin-top:10px;width:100%">Sign out</button>
-    </div>`;
+  try {
+    if(_currentUser){
+      const name = escapeHtml(_currentUser.displayName||'Student');
+      const email = escapeHtml(_currentUser.email||'');
+      return '<div style="padding:12px;border-radius:12px;background:var(--pine-soft);margin-bottom:12px">'
+        + '<div style="font-weight:700">Signed in</div>'
+        + '<div style="font-size:.9rem;margin-top:4px">' + name + '</div>'
+        + '<div style="font-size:.8rem;color:var(--muted)">' + email + '</div>'
+        + '<p style="font-size:.8rem;color:var(--muted);margin:8px 0 0">Your data is private to this Google account.</p>'
+        + '<button type="button" class="btn ghost sm" id="googleSignOutBtn" style="margin-top:10px;width:100%">Sign out</button>'
+        + '</div>';
+    }
+    return '<div style="padding:12px;border-radius:12px;border:1px solid var(--line);margin-bottom:12px">'
+      + '<div style="font-weight:700;margin-bottom:6px">Account (recommended)</div>'
+      + '<p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Sign in with Google so only you can open your tasks — even if someone else installs the APK.</p>'
+      + '<button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google</button>'
+      + '</div>';
+  } catch(e){
+    return '<div class="card"><p>Account section unavailable.</p></div>';
   }
-  return `<div style="padding:12px;border-radius:12px;border:1px solid var(--line);margin-bottom:12px">
-    <div style="font-weight:700;margin-bottom:6px">Account (recommended)</div>
-    <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Sign in with Google so only you can open your tasks — even if someone else installs the APK.</p>
-    <button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google</button>
-  </div>`;
 }
 
 function persistRender(){ saveState(); render(); try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} }
@@ -6942,7 +7090,19 @@ function viewSoundscape(){
 function numField(id,label,val,min,max){ return `<div class="field"><label>${label}</label><input type="number" id="${id}" value="${val}" min="${min}" max="${max}"></div>`; }
 function toggleRow(id,label,checked){ return `<div class="toggle"><span>${label}</span><label class="switch"><input type="checkbox" id="${id}" ${checked?'checked':''}><span class="slidepill"></span></label></div>`; }
 function viewSettings(){
+  try {
+  if(!state.settings || typeof state.settings!=='object') state.settings = (emptyState().settings)||{};
   const s=state.settings;
+  if(!Array.isArray(s.customQuotes)) s.customQuotes=[];
+  if(s.soundVolume==null) s.soundVolume=0.7;
+  if(!state.profile || typeof state.profile!=='object') state.profile={name:'',grade:'',school:'',notes:''};
+  if(!state.wakeAlarm || typeof state.wakeAlarm!=='object') state.wakeAlarm={enabled:false,time:'07:00',days:[0,1,2,3,4],snoozesMax:2,snoozesLeft:2};
+  if(!Array.isArray(state.tasks)) state.tasks=[];
+  if(!Array.isArray(state.classes)) state.classes=[];
+  if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
+  if(!Array.isArray(state.money)) state.money=[];
+  if(!Array.isArray(state.customReminders)) state.customReminders=[];
+  if(!Array.isArray(state.journal)) state.journal=[];
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
@@ -6973,7 +7133,7 @@ function viewSettings(){
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
         ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label style="font-size:.8rem"><input type="checkbox" id="wakeDay${i}" ${(state.wakeAlarm&&state.wakeAlarm.days&&state.wakeAlarm.days.indexOf(i)>=0)?'checked':(i<5&&!(state.wakeAlarm&&state.wakeAlarm.days)?'checked':'')}> ${d}</label>`).join('')}
       </div>
-      <p style="font-size:.82rem;color:var(--muted);margin:10px 0 0">When the alarm fires, a simple math problem appears. Solve it to stop. You can snooze twice (5 minutes each).</p>
+      <p style="font-size:.82rem;color:var(--muted);margin:10px 0 0">When it fires, sound rises gradually for about 50 seconds. Solve the math to stop. Snooze 5 or 10 minutes (2 snoozes). Use the Alarm sound volume slider below — your phone volume keys also control how loud it is.</p>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:280px">
         <button class="btn" id="saveWakeBtn">Save Bug Me</button>
         <button class="btn ghost sm" id="testWakeBtn" type="button">Preview Bug Me screen</button>
@@ -7037,6 +7197,7 @@ function viewSettings(){
       ${toggleRow('setAutoWork','Start next focus session automatically', s.autoStartWork)}
     </div>
     <div class="setgroup"><h4>Alarm sound</h4>
+      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Set how loud Bug Me can get (peak). On a phone, the side volume buttons still control the device volume while this app is open.</p>
       ${toggleRow('setSoundOn','Play a sound when a session ends', s.soundOn)}
       <div class="row" style="margin-top:8px">
         <div class="field"><label>Sound</label><select id="setAlarmSound">
@@ -7108,6 +7269,14 @@ function viewSettings(){
     </div>
     <div class="savedmsg" id="savedMsg"></div>
   </div>`;
+  } catch(err){
+    console.error('viewSettings', err);
+    return `<div class="pagehead"><button class="btn ghost sm" data-action="go-back">← Back</button>
+      <h1>Settings</h1>
+      <div class="card"><p>Could not load Settings. Try a hard refresh (Ctrl+Shift+R).</p>
+      <p style="font-size:.8rem;color:var(--muted)">${escapeHtml(String(err&&err.message||err))}</p>
+      <button class="btn" onclick="location.reload()">Reload</button></div></div>`;
+  }
 }
 
 /* ============================================================
