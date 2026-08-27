@@ -6,6 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
+<meta name="snapback-build" content="76">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -3104,12 +3105,23 @@ function renderMain(){
     habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp};
   try{
     let html=(views[state.view]||viewToday)();
-    if(state.view!=='challenges') html = topOfMindBanner() + html;
+    if(state.view!=='challenges'){
+      try{ html = topOfMindBanner() + html; }catch(e2){ console.warn('topOfMindBanner', e2); }
+    }
     el.innerHTML=html;
-    wireView();
+    try{ wireView(); }catch(e3){ console.error('wireView', e3); }
   }catch(e){
     console.error('Rendering failed for view "'+state.view+'":', e);
-    el.innerHTML=`<div class="pagehead"><h1>This page hit a snag</h1><p style="color:var(--muted)">Try another tab and come back, or reload. If it keeps happening on this tab specifically, that's worth reporting.</p></div>`;
+    const msg = (e && e.message) ? String(e.message) : String(e);
+    const stack = (e && e.stack) ? String(e.stack).split('\n').slice(0,3).join(' | ') : '';
+    el.innerHTML=`<div class="pagehead"><h1>This page hit a snag</h1>
+      <p style="color:var(--muted)">View: <b>${state.view||'?'}</b></p>
+      <p style="color:var(--brick);font-size:.9rem;word-break:break-word"><b>Error:</b> ${escapeHtml(msg)}</p>
+      <p style="font-size:.75rem;color:var(--muted);word-break:break-word">${escapeHtml(stack)}</p>
+      <p style="color:var(--muted)">Hard refresh: Ctrl+Shift+R. Or clear site data for this site, then reload.</p>
+      <button class="btn" onclick="location.reload()">Reload</button>
+      <button class="btn ghost" data-action="go-back" style="margin-left:8px">Back</button>
+    </div>`;
   }
 }
 function renderModal(){
@@ -7106,7 +7118,7 @@ function viewSettings(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Make it yours</div><h1>Settings</h1>
+    <div class="eyebrow">Make it yours · build 76</div><h1>Settings</h1>
     <p style="margin-top:4px"><button class="btn ghost sm" id="gotoHelpBtn">Help &amp; FAQ</button></p>
     <div class="card">
       <h3 style="margin:0 0 6px">Your profile</h3>
