@@ -1,0 +1,22 @@
+SNAPBACK PRODUCT ROADMAP (do not lose track)
+============================================
+
+DONE / IN PROGRESS
+------------------
+[x] Web app features (tasks, calendar, techniques, challenges, etc.)
+[x] Capacitor Android shell (debug APK)
+[x] Firestore live sync (legacy sync code)
+[x] Phase B (code): Google sign-in + data under users/{uid}/data/main
+[ ] Phase B (console): Enable Google provider + authorized domains + rules
+[ ] Phase A: Signed release APK (keystore + app-release.apk)
+
+NEXT (remember after A+B)
+-------------------------
+[ ] Phase C: Exact / reliable background alarms (Android APIs + permissions)
+[ ] Phase D: WhatsApp-Web style QR "link computer" (hosted web + sessions)
+[ ] Phase E: Play Store listing (privacy policy, store assets, review)
+
+OWNERSHIP
+---------
+You (school): Firebase project, Google login policy, student accounts, APK distribution
+Grok/dev: App code, rules templates, build checklists, Capacitor wiring

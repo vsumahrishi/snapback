@@ -1,0 +1,57 @@
+PHASE B — FIREBASE GOOGLE SIGN-IN (console steps)
+=================================================
+
+Do this in https://console.firebase.google.com on project snapback-2697b
+(or your school project).
+
+1) Enable Google sign-in
+-----------------------
+Build → Authentication → Sign-in method → Google → Enable → Save
+
+2) Authorized domains
+---------------------
+Authentication → Settings → Authorized domains
+Add:
+  - localhost (usually already there)
+  - your GitHub Pages host, e.g. vsumahrishi.github.io
+  - any custom domain later
+
+3) Firestore rules (replace test mode when ready)
+-------------------------------------------------
+Rules tab → publish something like:
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    // optional: keep legacy sync codes read/write only while migrating
+    match /snapback/{code} {
+      allow read, write: if false; // turn off when everyone uses Google
+    }
+  }
+}
+
+4) In the app (Settings → Account & cloud)
+-----------------------------------------
+1. Paste Firebase web config once (if not already saved)
+2. Tap Save & start live sync (saves config)
+3. Tap Sign in with Google
+4. Choose the student's Gmail
+5. Data now lives under users/{theirUid}/data/main
+
+5) Android APK + Google sign-in
+-------------------------------
+Web Google sign-in works in the browser and often in Capacitor WebView.
+For rock-solid native Google Sign-In on Android later:
+  - Add SHA-1 of your release keystore to Firebase Project settings
+  - Optionally add @capacitor-firebase/authentication
+
+Get SHA-1:
+keytool -list -v -keystore snapback-release.keystore -alias snapback
+
+6) Students
+-----------
+Each student signs in with THEIR Google account.
+Forwarding the APK does not give access to someone else's cloud data.

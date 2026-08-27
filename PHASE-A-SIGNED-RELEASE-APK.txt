@@ -1,0 +1,73 @@
+PHASE A — SIGNED RELEASE APK (step by step on YOUR PC)
+======================================================
+
+A signed release APK is what you distribute to students (not app-debug.apk).
+
+------------------------------------------------
+1. Create a keystore (ONCE — keep forever)
+------------------------------------------------
+1. Open Command Prompt
+2. cd to a safe folder, e.g. C:\snapback-keys
+3. Run (one line):
+
+keytool -genkey -v -keystore snapback-release.keystore -alias snapback -keyalg RSA -keysize 2048 -validity 10000
+
+4. Answer the questions. Remember:
+   - keystore password
+   - alias: snapback
+   - key password
+5. BACK UP snapback-release.keystore + passwords offline.
+   If you lose this file, you cannot update the same app signature later.
+
+------------------------------------------------
+2. Tell Android Studio about the keystore
+------------------------------------------------
+Option — generate signed APK from Studio (easiest):
+
+1. Open your project android/ folder in Android Studio
+2. Menu: Build → Generate Signed App Bundle or APK
+3. Choose APK → Next
+4. Create new / choose existing keystore:
+   - Path: C:\snapback-keys\snapback-release.keystore
+   - Alias: snapback
+   - Enter passwords
+5. Build variant: release
+6. Finish
+7. Output is usually:
+   android\app\release\app-release.apk
+   or app\build\outputs\apk\release\app-release.apk
+
+------------------------------------------------
+3. Install on a phone
+------------------------------------------------
+1. Copy app-release.apk to the phone
+2. Install (allow unknown sources if asked)
+3. Prefer uninstalling old debug SnapBack first
+
+------------------------------------------------
+4. Optional: gradle signing config (for repeat builds)
+------------------------------------------------
+In android/app/build.gradle (Module app), under android { }:
+
+signingConfigs {
+  release {
+    storeFile file("C:/snapback-keys/snapback-release.keystore")
+    storePassword "YOUR_STORE_PASSWORD"
+    keyAlias "snapback"
+    keyPassword "YOUR_KEY_PASSWORD"
+  }
+}
+buildTypes {
+  release {
+    signingConfig signingConfigs.release
+    minifyEnabled false
+  }
+}
+
+Do NOT commit passwords to GitHub.
+
+------------------------------------------------
+5. Play Store later (Phase E)
+------------------------------------------------
+Play Store needs a signing key + store listing + privacy policy.
+The same keystore is typically used for updates.

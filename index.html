@@ -354,6 +354,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 </style>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 </head>
 <body>
 <div class="app">
@@ -3624,24 +3625,24 @@ function goBack(){
 
 
 /* ============================================================
-   Cloud sync (Firebase) — laptop + phone same data live
+   Auth + cloud (Firebase) — Phase B
+   Google sign-in · data under users/{uid}/data/main
+   Legacy sync-code path kept only as optional fallback
    ============================================================ */
 let _db = null;
+let _auth = null;
 let _unsubSync = null;
+let _unsubAuth = null;
 let _syncApplying = false;
 let _syncTimer = null;
-
+let _currentUser = null; // { uid, email, displayName, photoURL }
 
 function parseFirebaseConfigText(raw){
   let s = String(raw||'').trim();
   if(!s) throw new Error('empty');
-  // strip script tags / const firebaseConfig =
   s = s.replace(/^[\s\S]*?(\{[\s\S]*\})[\s\S]*$/, '$1');
-  // JS object → JSON: quote unquoted keys
   s = s.replace(/([,{]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
-  // remove trailing commas before } or ]
   s = s.replace(/,\s*([}\]])/g, '$1');
-  // single quotes to double
   s = s.replace(/'/g, '"');
   const cfg = JSON.parse(s);
   if(!cfg.apiKey || !cfg.projectId) throw new Error('need apiKey and projectId');
@@ -3673,14 +3674,31 @@ function initFirebase(){
   try{
     if(!firebase.apps.length) firebase.initializeApp(cfg);
     _db = firebase.firestore();
+    _auth = firebase.auth();
     return _db;
   }catch(e){ console.warn('firebase init', e); return null; }
+}
+function userDocRef(){
+  if(!_db || !_currentUser || !_currentUser.uid) return null;
+  return _db.collection('users').doc(_currentUser.uid).collection('data').doc('main');
+}
+function legacySyncDocRef(){
+  const code = getSyncCode();
+  if(!_db || !code) return null;
+  return _db.collection('snapback').doc(code);
+}
+function cloudDocRef(){
+  return userDocRef() || legacySyncDocRef();
 }
 function syncPayloadFromState(){
   const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm'];
   const payload = {};
   keys.forEach(k=>{ if(state[k]!==undefined) payload[k]=state[k]; });
   payload.updatedAt = new Date().toISOString();
+  if(_currentUser){
+    payload.ownerUid = _currentUser.uid;
+    payload.ownerEmail = _currentUser.email||'';
+  }
   return payload;
 }
 function applyCloudPayload(payload){
@@ -3688,374 +3706,122 @@ function applyCloudPayload(payload){
   _syncApplying = true;
   const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm'];
   keys.forEach(k=>{ if(payload[k]!==undefined) state[k]=payload[k]; });
-  try{ saveState(); }catch(e){}
+  saveState();
   _syncApplying = false;
-  console.log('SnapBack cloud applied', (state.tasks||[]).length, 'tasks');
   render();
 }
-function startCloudSync(){
+function stopCloudSync(){
   if(_unsubSync){ try{ _unsubSync(); }catch(e){} _unsubSync=null; }
-  const code = getSyncCode();
-  if(!code || code.length < 4) return;
+}
+function startCloudSync(){
+  stopCloudSync();
   const db = initFirebase();
-  if(!db){
-    console.warn('startCloudSync: no db');
-    return;
-  }
-  const ref = db.collection('snapback').doc(code);
-  // One-time pull so phone gets data even if snapshot is slow
-  ref.get().then(snap=>{
-    if(snap.exists){
-      const data = snap.data();
-      if(data) applyCloudPayload(data);
-    }
-  }).catch(e=> console.warn('sync get', e));
+  if(!db) return;
+  const ref = cloudDocRef();
+  if(!ref) return;
   _unsubSync = ref.onSnapshot(snap=>{
     if(!snap.exists) return;
     const data = snap.data();
     if(!data) return;
-    if(data.updatedAt && state._lastCloudWrite && data.updatedAt === state._lastCloudWrite) return;
+    if(_syncApplying) return;
     applyCloudPayload(data);
-  }, err=> {
-    console.warn('sync listen', err);
-    try{ showAppMessage('Sync problem', String(err.message||err)); }catch(e){}
-  });
+  }, err => console.warn('sync listen', err));
 }
 function pushCloudSync(){
   if(_syncApplying) return;
-  const code = getSyncCode();
-  if(!code || code.length < 4) return;
   const db = initFirebase();
   if(!db) return;
+  const ref = cloudDocRef();
+  if(!ref) return;
   clearTimeout(_syncTimer);
   _syncTimer = setTimeout(()=>{
     try{
-      const payload = syncPayloadFromState();
-      state._lastCloudWrite = payload.updatedAt;
-      db.collection('snapback').doc(code).set(payload, { merge: true })
-        .then(()=>{ console.log('SnapBack cloud write OK', code); })
-        .catch(e=>{ console.warn('sync push fail', e); showAppMessage('Sync write failed', String(e.message||e)); });
-    }catch(e){ console.warn('sync push', e); }
-  }, 800);
+      ref.set(syncPayloadFromState(), { merge: true });
+    }catch(e){ console.warn('pushCloudSync', e); }
+  }, 400);
 }
-
-
-/* ============================================================
-   Wake-up alarm — math dismiss + 2 snoozes
-   ============================================================ */
-function nextWakeDate(from){
-  const wa=state.wakeAlarm||{};
-  if(!wa.enabled||!wa.time) return null;
-  const [hh,mm]=(wa.time||'07:00').split(':').map(Number);
-  const days=wa.days&&wa.days.length?wa.days:[0,1,2,3,4,5,6];
-  let d=new Date(from||Date.now());
-  for(let i=0;i<8;i++){
-    const cand=new Date(d);
-    if(i>0) cand.setDate(cand.getDate()+i);
-    else {
-      // today: only if time still ahead
-    }
-    const dayIdx=mondayIndex(cand); // Mon=0
-    if(days.indexOf(dayIdx)<0) continue;
-    const when=new Date(cand);
-    when.setHours(hh,mm,0,0);
-    if(when.getTime() > Date.now()+5000) return when;
-  }
-  return null;
-}
-function scheduleWakeAlarms(){
-  const wa=state.wakeAlarm||{};
-  if(!wa.enabled) return;
-  const when=nextWakeDate();
-  if(!when) return;
-  if(typeof scheduleNativeNotification==='function'){
-    scheduleNativeNotification({
-      key:'wake-main',
-      title:'Bug Me — SnapBack',
-      body:'Time to get up. Open SnapBack to stop the alarm.',
-      when
-    });
-  }
-  // Also schedule browser-side check
-  const ms=when.getTime()-Date.now();
-  if(ms>0 && ms<86400000*2){
-    clearTimeout(window._wakeTimer);
-    window._wakeTimer=setTimeout(()=>triggerWakeMath('alarm'), Math.min(ms, 2147483647));
-  }
-}
-function triggerWakeMath(reason){
-  const a=Math.floor(Math.random()*8)+2;
-  const b=Math.floor(Math.random()*8)+2;
-  state.wakeMath={a,b,answer:a+b,reason:reason||'alarm'};
-  state.wakeMathOpen=true;
-  try{ playWakeBeep(); }catch(e){}
-  persistRender();
-}
-function playWakeBeep(){
-  try{
-    const ctx=new (window.AudioContext||window.webkitAudioContext)();
-    const o=ctx.createOscillator(); const g=ctx.createGain();
-    o.connect(g); g.connect(ctx.destination);
-    o.frequency.value=880; g.gain.value=0.15;
-    o.start();
-    setTimeout(()=>{ o.stop(); ctx.close(); }, 400);
-    // repeat a few times
-    let n=0;
-    const id=setInterval(()=>{
-      n++;
-      if(n>8||!state.wakeMathOpen){ clearInterval(id); return; }
-      try{
-        const c=new (window.AudioContext||window.webkitAudioContext)();
-        const o2=c.createOscillator(); const g2=c.createGain();
-        o2.connect(g2); g2.connect(c.destination);
-        o2.frequency.value=880; g2.gain.value=0.12;
-        o2.start(); setTimeout(()=>{o2.stop();c.close();},300);
-      }catch(e){}
-    }, 1200);
-    window._wakeBeepInterval=id;
-  }catch(e){}
-}
-function stopWakeBeep(){
-  clearInterval(window._wakeBeepInterval);
-}
-function wakeSnooze(){
-  const wa=state.wakeAlarm||{};
-  if((wa.snoozesLeft||0)<=0){
-    showAppMessage('No snoozes left', 'Solve the math problem to stop Bug Me.');
-    return;
-  }
-  wa.snoozesLeft=(wa.snoozesLeft||1)-1;
-  stopWakeBeep();
-  state.wakeMathOpen=false;
-  state.wakeMath=null;
-  const when=new Date(Date.now()+5*60000);
-  if(typeof scheduleNativeNotification==='function'){
-    scheduleNativeNotification({
-      key:'wake-snooze-'+Date.now(),
-      title:'Bug Me — snooze over',
-      body:'Wake-up again. Open the app.',
-      when
-    });
-  }
-  clearTimeout(window._wakeTimer);
-  window._wakeTimer=setTimeout(()=>triggerWakeMath('snooze'), 5*60000);
-  persistRender();
-}
-function wakeDismissMath(answer){
-  const m=state.wakeMath;
-  if(!m) return;
-  if(Number(answer)!==m.answer){
-    showAppMessage('Not quite', 'Try the math again.');
-    return;
-  }
-  stopWakeBeep();
-  state.wakeMathOpen=false;
-  state.wakeMath=null;
-  if(state.wakeAlarm) state.wakeAlarm.snoozesLeft=state.wakeAlarm.snoozesMax||2;
-  scheduleWakeAlarms(); // next day
-  persistRender();
-}
-function saveWakeAlarmFromForm(){
-  if(!state.wakeAlarm) state.wakeAlarm={};
-  state.wakeAlarm.enabled=!!document.getElementById('wakeEnabled')?.checked;
-  state.wakeAlarm.time=document.getElementById('wakeTime')?.value||'07:00';
-  state.wakeAlarm.snoozesMax=2;
-  state.wakeAlarm.snoozesLeft=2;
-  const days=[];
-  for(let i=0;i<7;i++){
-    if(document.getElementById('wakeDay'+i)?.checked) days.push(i);
-  }
-  state.wakeAlarm.days=days.length?days:[0,1,2,3,4];
-  scheduleWakeAlarms();
-  persistRender();
-  showAppMessage('Bug Me', state.wakeAlarm.enabled?'Saved and scheduled.':'Turned off.');
-}
-
-
-/* ============================================================
-   Import tasks from Todoist / TickTick / MS To Do / etc (CSV)
-   ============================================================ */
-function parseCSVLine(line){
-  const out=[]; let cur=''; let q=false;
-  for(let i=0;i<line.length;i++){
-    const ch=line[i];
-    if(ch==='"'){
-      if(q && line[i+1]==='"'){ cur+='"'; i++; }
-      else q=!q;
-    } else if(ch===',' && !q){ out.push(cur); cur=''; }
-    else cur+=ch;
-  }
-  out.push(cur);
-  return out.map(s=>s.trim());
-}
-function parseTaskCSV(text){
-  const raw=String(text||'').replace(/^\uFEFF/,'').trim();
-  if(!raw) return [];
-  const lines=raw.split(/\r?\n/).filter(l=>l.trim());
-  if(lines.length<2) return [];
-  const headers=parseCSVLine(lines[0]).map(h=>h.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim());
-  const idx=(names)=>{
-    for(const n of names){
-      const i=headers.findIndex(h=>h===n || h.includes(n));
-      if(i>=0) return i;
-    }
-    return -1;
-  };
-  const iTitle=idx(['content','task name','task','title','name','item','subject','text']);
-  const iDate=idx(['due date','due','deadline','date','due_date','completed on']);
-  const iTime=idx(['due time','time','due_time']);
-  const iNotes=idx(['description','notes','note','body','comment']);
-  const iPri=idx(['priority','prio','importance']);
-  const iDone=idx(['status','completed','done','checked']);
-  const iProject=idx(['project','list','folder','category']);
-  if(iTitle<0) return {error:'No task title column found. Need a column like Content, Title, Task, or Name.'};
-  const tasks=[];
-  for(let r=1;r<lines.length;r++){
-    const cols=parseCSVLine(lines[r]);
-    if(!cols.length) continue;
-    let title=(cols[iTitle]||'').trim();
-    if(!title) continue;
-    let date='';
-    if(iDate>=0 && cols[iDate]){
-      date=normalizeImportDate(cols[iDate]);
-    }
-    let time='';
-    if(iTime>=0 && cols[iTime]) time=normalizeImportTime(cols[iTime]);
-    // Sometimes due has date+time together
-    if(iDate>=0 && cols[iDate] && !time){
-      const parts=String(cols[iDate]).split(/[ T]/);
-      if(parts[1]) time=normalizeImportTime(parts[1]);
-    }
-    let notes=iNotes>=0?(cols[iNotes]||''):'';
-    if(iProject>=0 && cols[iProject]) notes = (notes?notes+' · ':'')+'List: '+cols[iProject];
-    let priority='medium';
-    if(iPri>=0 && cols[iPri]){
-      const p=String(cols[iPri]).toLowerCase();
-      if(/p1|1|high|urgent|!!/.test(p)) priority='high';
-      else if(/p3|p4|3|4|low/.test(p)) priority='low';
-    }
-    let done=false;
-    if(iDone>=0 && cols[iDone]){
-      const d=String(cols[iDone]).toLowerCase();
-      done=/^(done|completed|true|yes|1|checked)$/.test(d);
-    }
-    tasks.push({title, date, time, notes, priority, done});
-  }
-  return tasks;
-}
-function normalizeImportDate(s){
-  s=String(s||'').trim();
-  if(!s) return '';
-  // YYYY-MM-DD
-  let m=s.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if(m){
-    const y=+m[1]; if(y>=2000&&y<=2100) return m[1]+'-'+m[2]+'-'+m[3];
-    return '';
-  }
-  // DD/MM/YYYY or MM/DD/YYYY — prefer ISO if clear
-  m=s.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
-  if(m){
-    let a=+m[1], b=+m[2], y=+m[3];
-    if(y<2000||y>2100) return '';
-    // if a>12 treat as DD/MM
-    let day, month;
-    if(a>12){ day=a; month=b; }
-    else if(b>12){ day=b; month=a; }
-    else { month=a; day=b; } // default MM/DD (US); students can fix
-    return y+'-'+String(month).padStart(2,'0')+'-'+String(day).padStart(2,'0');
-  }
-  // YYYY/MM/DD
-  m=s.match(/(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/);
-  if(m){
-    const y=+m[1]; if(y<2000||y>2100) return '';
-    return m[1]+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[3]).padStart(2,'0');
-  }
-  return '';
-}
-function normalizeImportTime(s){
-  s=String(s||'').trim();
-  if(!s) return '';
-  let m=s.match(/(\d{1,2}):(\d{2})\s*(am|pm)?/i);
-  if(!m) return '';
-  let h=+m[1], min=m[2];
-  const ap=(m[3]||'').toLowerCase();
-  if(ap==='pm' && h<12) h+=12;
-  if(ap==='am' && h===12) h=0;
-  if(h>23) return '';
-  return String(h).padStart(2,'0')+':'+min;
-}
-function importTasksFromRows(rows){
-  if(!rows||!rows.length) return 0;
-  let n=0;
-  rows.forEach(r=>{
-    const id=uid();
-    state.tasks.unshift({
-      id, title:r.title, notes:r.notes||'', date:r.date||'', time:r.time||'',
-      priority:r.priority||'medium', urgent:false, important:r.priority==='high',
-      tier:'could', frog:false, meetingUrl:'', reminderLeads:[], reminderTime:'',
-      startDate:'', startTime:'', startReminderMinutes:[], chunks:[], pomodoros:0,
-      done:!!r.done, whenThen:{}, rewarding:{}, strategic:{}, flip:{}, context:'school'
-    });
-    n++;
-  });
-  return n;
-}
-
-function buildStatusUpdateText(){
-  const name=(state.profile&&state.profile.name)||'Student';
-  const open=(state.tasks||[]).filter(t=>!t.done);
-  const done=(state.tasks||[]).filter(t=>t.done).slice(0,20);
-  let msg='SnapBack update from '+name+'\nDate: '+todayStr()+'\n\nDone:\n';
-  msg += done.length ? done.map(t=>'✓ '+t.title).join('\n') : '(none marked done)';
-  msg += '\n\nStill open:\n';
-  msg += open.length ? open.slice(0,25).map(t=>'• '+t.title+(t.date?' ('+t.date+')':'')).join('\n') : '(none)';
-  return msg;
-}
-function saveShareContactsFromForm(){
-  if(!state.profile) state.profile={name:'', grade:'', notes:''};
-  state.profile.teacherWa=(document.getElementById('shareWaPhone')?.value||'').trim();
-  state.profile.teacherEmail=(document.getElementById('shareEmail')?.value||'').trim();
-  saveState();
-}
-function exportBackup(){
-  const data = {
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    state: JSON.parse(JSON.stringify(state))
-  };
-  // strip transient UI flags
-  const s = data.state;
-  delete s.taskMenuOpen; delete s.ampmPromptOpen; delete s.conflictModalOpen;
-  delete s.undoBanner; delete s.navHistory;
-  const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'snapback-backup-'+todayStr()+'.json';
-  a.click();
-  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
-  showAppMessage('Backup downloaded', 'Send this file to your other device (WhatsApp, Drive, or email). On that device: Settings → Import backup.');
-}
-function importBackupFile(file){
-  const reader = new FileReader();
-  reader.onload = ()=>{
-    try{
-      const data = JSON.parse(reader.result);
-      const incoming = data.state || data;
-      if(!incoming || typeof incoming !== 'object') throw new Error('Invalid file');
-      showAppMessage('Replace all data?', 'This cannot be undone unless you exported first.', { ok:'Replace', cancel:'Cancel', onOk:()=>{ const keys=['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','timer','bodyDouble','profile']; keys.forEach(k=>{ if(incoming[k]!==undefined) state[k]=incoming[k]; }); saveState(); persistRender(); showAppMessage('Backup imported','Your schedule should now match the other device.'); } }); return;
-      // merge carefully - full replace of main data keys
-      const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','timer','bodyDouble'];
-      keys.forEach(k=>{ if(incoming[k] !== undefined) state[k]=incoming[k]; });
-      if(incoming.settings) state.settings = incoming.settings;
+function startAuthListener(){
+  const db = initFirebase();
+  if(!_auth) return;
+  if(_unsubAuth) return;
+  _unsubAuth = _auth.onAuthStateChanged(user=>{
+    if(user){
+      _currentUser = {
+        uid: user.uid,
+        email: user.email||'',
+        displayName: user.displayName||'',
+        photoURL: user.photoURL||''
+      };
+      if(!state.profile) state.profile={};
+      if(_currentUser.displayName && !state.profile.name) state.profile.name = _currentUser.displayName;
+      if(_currentUser.email) state.profile.email = _currentUser.email;
       saveState();
-      persistRender();
-      showAppMessage('Backup imported', 'Your schedule on this device should now match the other one.');
-    }catch(e){
-      console.error(e);
-      showAppMessage('Could not read backup', 'Try exporting again and choose the .json file.');
+      startCloudSync();
+      pushCloudSync();
+    } else {
+      _currentUser = null;
+      stopCloudSync();
     }
-  };
-  reader.readAsText(file);
+    try{ if(state.view==='settings') persistRender(); else render(); }catch(e){}
+  });
+}
+async function signInWithGoogle(){
+  initFirebase();
+  if(!_auth){
+    showAppMessage('Firebase not ready', 'Paste your Firebase config in Settings first (same as before), then try Sign in again.');
+    return;
+  }
+  try{
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    // popup works on desktop; redirect is safer on some mobile browsers
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'');
+    if(isMobile){
+      await _auth.signInWithRedirect(provider);
+    } else {
+      await _auth.signInWithPopup(provider);
+    }
+  }catch(e){
+    console.warn(e);
+    showAppMessage('Sign-in failed', (e && e.message) ? e.message : 'Enable Google sign-in in Firebase Console and add this site to Authorized domains.');
+  }
+}
+async function completeRedirectSignIn(){
+  try{
+    initFirebase();
+    if(!_auth) return;
+    const result = await _auth.getRedirectResult();
+    if(result && result.user){
+      showAppMessage('Signed in', result.user.email||result.user.displayName||'Welcome');
+    }
+  }catch(e){ console.warn('redirect result', e); }
+}
+async function signOutUser(){
+  try{
+    if(_auth) await _auth.signOut();
+    _currentUser = null;
+    stopCloudSync();
+    showAppMessage('Signed out', 'Your data on this device stays until you Reset. Cloud data stays with your Google account.');
+    persistRender();
+  }catch(e){
+    showAppMessage('Sign out failed', e.message||'Try again');
+  }
+}
+function authStatusHtml(){
+  if(_currentUser){
+    return `<div style="padding:12px;border-radius:12px;background:var(--pine-soft);margin-bottom:12px">
+      <div style="font-weight:700">Signed in</div>
+      <div style="font-size:.9rem;margin-top:4px">${escapeHtml(_currentUser.displayName||'Student')}</div>
+      <div style="font-size:.8rem;color:var(--muted)">${escapeHtml(_currentUser.email||'')}</div>
+      <p style="font-size:.8rem;color:var(--muted);margin:8px 0 0">Your data is private to this Google account (users/${escapeHtml(_currentUser.uid)}/…).</p>
+      <button type="button" class="btn ghost sm" id="googleSignOutBtn" style="margin-top:10px;width:100%">Sign out</button>
+    </div>`;
+  }
+  return `<div style="padding:12px;border-radius:12px;border:1px solid var(--line);margin-bottom:12px">
+    <div style="font-weight:700;margin-bottom:6px">Account (recommended)</div>
+    <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Sign in with Google so only you can open your tasks — even if someone else installs the APK.</p>
+    <button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google</button>
+  </div>`;
 }
 
 function persistRender(){ saveState(); render(); try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} }
@@ -7215,16 +6981,19 @@ function viewSettings(){
     </div>
 
     <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
-      <h3 style="margin:0 0 6px">Live sync — your devices only</h3>
-      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">
-        Keeps <b>this student's</b> laptop and phone in sync. Use a private sync code (like a password) — do not share it with other students. Each person has their own code and their own data.
-      </p>
-      <div class="field"><label>Your private sync code</label>
-        <input id="syncCodeInput" placeholder="e.g. GOURI-STUDY-9xK2" value="">
+      <h3 style="margin:0 0 6px">Account &amp; cloud</h3>
+      ${authStatusHtml()}
+      <div class="field"><label>Firebase config (paste once from Firebase console)</label>
+        <textarea id="fbConfigInput" rows="4" placeholder='{ "apiKey": "...", "projectId": "...", ... }' style="width:100%;font-size:.75rem"></textarea>
       </div>
-      <div class="field" style="margin-top:8px"><label>Firebase config (paste once from Firebase console)</label>
-        <textarea id="fbConfigInput" rows="5" placeholder='{ "apiKey": "...", "projectId": "...", ... }' style="width:100%;font-size:.75rem"></textarea>
-      </div>
+      <p style="font-size:.78rem;color:var(--muted);margin:8px 0">One-time setup for the school project. Students only need <b>Sign in with Google</b> after this is saved.</p>
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer;font-weight:700;font-size:.9rem">Advanced: old sync code (optional)</summary>
+        <p style="font-size:.8rem;color:var(--muted)">Only if you are not using Google sign-in yet. Prefer Google account for privacy.</p>
+        <div class="field"><label>Private sync code</label>
+          <input id="syncCodeInput" placeholder="e.g. GOURI-STUDY-9xK2" value="">
+        </div>
+      </details>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;max-width:320px">
         <button class="btn sm" id="saveSyncBtn">Save &amp; start live sync</button>
         <button class="btn ghost sm" id="pullSyncBtn">Pull from cloud now</button>
@@ -8327,6 +8096,22 @@ function wireView(){
 
     const ex=document.getElementById('exportBackupBtn'); if(ex) ex.addEventListener('click', exportBackup);
     const imp=document.getElementById('importBackupInput'); if(imp) imp.addEventListener('change', e=>{ if(e.target.files[0]) importBackupFile(e.target.files[0]); });
+    
+    const gIn=document.getElementById('googleSignInBtn');
+    if(gIn) gIn.addEventListener('click', ()=>{
+      const raw=(document.getElementById('fbConfigInput')?.value||'').trim();
+      if(raw){
+        try{ setFirebaseConfig(parseFirebaseConfigText(raw)); }catch(e){}
+      }
+      if(!getFirebaseConfig()){
+        showAppMessage('Config needed once', 'Paste Firebase config above, then tap Sign in with Google.');
+        return;
+      }
+      signInWithGoogle();
+    });
+    const gOut=document.getElementById('googleSignOutBtn');
+    if(gOut) gOut.addEventListener('click', ()=>signOutUser());
+
     const sc=document.getElementById('syncCodeInput'); if(sc) sc.value=getSyncCode();
     const fb=document.getElementById('fbConfigInput'); if(fb){ const c=getFirebaseConfig(); if(c) fb.value=JSON.stringify(c,null,2); }
     const saveWake=document.getElementById('saveWakeBtn');
@@ -8358,22 +8143,24 @@ function wireView(){
     if(saveSync) saveSync.addEventListener('click', ()=>{
       const code=(document.getElementById('syncCodeInput')?.value||'').trim();
       const raw=(document.getElementById('fbConfigInput')?.value||'').trim();
-      if(code.length<4){ showAppMessage('Sync code too short', 'Use at least 4 characters.'); return; }
+      if(code && code.length<4){ showAppMessage('Sync code too short', 'Use at least 4 characters, or leave blank and use Google sign-in.'); return; }
+      if(!code && !_currentUser){ /* config-only save ok */ }
       try{
         const cfg=parseFirebaseConfigText(raw);
         setFirebaseConfig(cfg);
-        setSyncCode(code);
+        if(code) setSyncCode(code);
         const db = initFirebase();
         if(!db){
           showAppMessage('Firebase did not start', 'Check the config and that you are online.');
           return;
         }
+        startAuthListener();
         startCloudSync();
         _syncApplying = false;
         pushCloudSync();
         const st=document.getElementById('syncStatus');
-        if(st) st.textContent='Live sync on for code '+getSyncCode()+'. Both devices must use this exact code.';
-        showAppMessage('Live sync started', 'Code: '+getSyncCode()+'\n\nUse this same code on your other device. After that, changes stay in sync when you are online.');
+        if(st) st.textContent=_currentUser ? ('Signed in as '+(_currentUser.email||_currentUser.uid)) : (getSyncCode()?'Legacy sync code on':'Config saved — use Sign in with Google');
+        showAppMessage('Cloud ready', _currentUser ? 'Your data syncs to your Google account.' : (getSyncCode()?'Legacy sync code saved. Prefer Google sign-in for privacy.':'Config saved. Tap Sign in with Google.'));
       }catch(e){
         showAppMessage('Could not read config', 'Paste only the block that starts with { and ends with } from Firebase.');
       }
