@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="81">
+<meta name="snapback-build" content="82">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1162,69 +1162,62 @@ function playBeepFallback(){
   }catch(e){ return false; }
 }
 function setTestSoundStatus(msg){
+  try{ state.lastTestSoundMsg = msg; }catch(e){}
   const el=document.getElementById('testSoundStatus');
   if(el) el.textContent=msg;
 }
 function testAlarm(){
   setTestSoundStatus('Working…');
-  let steps=[];
-  // 1) Vibrate (many phones)
+  const steps=[];
+  // Play FIRST (same user-gesture tick) — critical on Chrome/Android
+  try{ if(playBeepFallback()) steps.push('wav'); }catch(e){ steps.push('wav-fail'); }
   try{
-    if(navigator.vibrate){ navigator.vibrate([120,60,120,60,200]); steps.push('vibrate'); }
-  }catch(e){}
-  // 2) Capacitor Haptics if present
+    const ctx = ensureAudio();
+    if(ctx){
+      const kick = ()=>{
+        try{
+          const now=ctx.currentTime;
+          [880,1174,1396].forEach((freq,i)=>{
+            const osc=ctx.createOscillator(), g=ctx.createGain();
+            osc.type='square'; osc.frequency.value=freq;
+            const start=now+i*0.14;
+            g.gain.setValueAtTime(0.0001,start);
+            g.gain.linearRampToValueAtTime(0.5,start+0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001,start+0.5);
+            osc.connect(g); g.connect(ctx.destination);
+            osc.start(start); osc.stop(start+0.55);
+          });
+          steps.push('webaudio');
+        }catch(e){ steps.push('webaudio-fail'); }
+      };
+      if(ctx.state==='suspended') ctx.resume().then(kick).catch(kick);
+      else kick();
+    } else steps.push('no-webaudio');
+  }catch(e){ steps.push('audio-err'); }
+  try{ if(navigator.vibrate){ navigator.vibrate([200,100,200]); steps.push('vibrate'); } }catch(e){}
   try{
     if(window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.Haptics){
       window.Capacitor.Plugins.Haptics.impact({ style: 'HEAVY' });
       steps.push('haptics');
     }
   }catch(e){}
-  // 3) ALWAYS try WAV beep (most reliable on Android WebView)
-  try{
-    if(playBeepFallback()) steps.push('wav');
-  }catch(e){}
-  // 4) Web Audio chime as well
-  try{
-    resumeAudioThen((ctx)=>{
-      try{
-        const vol=1;
-        const now=ctx.currentTime;
-        [880,1108,1318].forEach((freq,i)=>{
-          const osc=ctx.createOscillator(), g=ctx.createGain();
-          osc.type='square'; osc.frequency.value=freq;
-          const start=now+i*0.12;
-          g.gain.setValueAtTime(0.0001,start);
-          g.gain.linearRampToValueAtTime(vol*0.35,start+0.02);
-          g.gain.exponentialRampToValueAtTime(0.0001,start+0.35);
-          osc.connect(g); g.connect(ctx.destination);
-          osc.start(start); osc.stop(start+0.4);
-        });
-        steps.push('webaudio');
-        setTestSoundStatus('Tried: '+(steps.join(', ')||'none')+'. If silent: turn OFF silent mode and raise MEDIA volume.');
-      }catch(e){
-        setTestSoundStatus('Audio error: '+(e&&e.message?e.message:'unknown')+'. Steps: '+steps.join(', '));
-      }
-    });
-  }catch(e){}
-  // 5) On native: also fire a test notification in 3 seconds so user hears system sound
   try{
     if(typeof isNativeApp==='function' && isNativeApp() && typeof scheduleNativeNotification==='function'){
-      const when=new Date(Date.now()+3000);
       scheduleNativeNotification({
         key:'test-sound-'+Date.now(),
-        title:'SnapBack test',
-        body:'If you see this, notifications work. Sound test also ran.',
-        when
-      }).then(ok=>{
-        if(ok) setTestSoundStatus((document.getElementById('testSoundStatus')?.textContent||'')+' · Test notification in ~3s');
+        title:'SnapBack sound test',
+        body:'Notifications work. Check media volume if you heard no beep.',
+        when: new Date(Date.now()+3000)
       });
+      steps.push('notif-in-3s');
     }
   }catch(e){}
-  showAppMessage('Sound test', 'Tried beep + vibrate. Turn OFF silent/DND. Raise MEDIA volume (side buttons while a video would play). Status line under the button shows details.');
+  const msg = 'Tried: '+(steps.join(', ')||'nothing')+'. If no beep: turn off silent/DND and raise MEDIA volume.';
+  setTestSoundStatus(msg);
+  // Delay modal so it does not interrupt the click-gesture audio unlock on some devices
   setTimeout(()=>{
-    if(steps.length===0) setTestSoundStatus('No audio/vibrate API worked. Use phone notification test via Grant permission.');
-    else setTestSoundStatus('Tried: '+steps.join(', ')+'. Silent mode or media volume may still mute sound.');
-  }, 500);
+    try{ showAppMessage('Sound test', msg); }catch(e){}
+  }, 600);
 }
 
 function playAlarm(force){
@@ -2779,15 +2772,18 @@ function isInIframe(){
 }
 function requestNotifyPermission(){
   const status=document.getElementById('notifyStatus');
+  state.lastNotifyMsg='Requesting…';
   if(status) status.textContent='Requesting…';
   // Phone APK (Capacitor): use Local Notifications
   if(typeof isNativeApp==='function' && isNativeApp()){
     ensureNotifyPermission().then(ok=>{
       state.settings.notifyBrowser = !!ok;
       if(status){
-        status.textContent = ok
-          ? 'Permission OK. If alerts are rare: Phone Settings → Apps → SnapBack → Notifications → set to NOT restricted / unrestricted. Allow all categories.'
+        const msg = ok
+          ? 'Permission OK. If alerts are rare: Phone Settings → Apps → SnapBack → Notifications → Unrestricted.'
           : 'Not granted. Phone Settings → Apps → SnapBack → Notifications → Allow.';
+      state.lastNotifyMsg = msg;
+      if(status) status.textContent = msg;
       }
       showAppMessage('Notifications', ok
         ? 'Allowed. If rare alerts: Apps → SnapBack → Notifications → Unrestricted.'
@@ -3151,7 +3147,7 @@ function renderSidebar(){
       NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('') +
-      `<div class="navfoot">Saved automatically · build 81</div>`;
+      `<div class="navfoot">Saved automatically · build 82</div>`;
     el.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.nav)));
     document.getElementById('brandHomeBtn').addEventListener('click', ()=>setView('today'));
     mobileMenuOpen=false;
@@ -3169,7 +3165,7 @@ function renderMobileDrawer(){
       ${NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('')}
-      <div class="navfoot">Saved automatically · build 81</div>
+      <div class="navfoot">Saved automatically · build 82</div>
     </div>`;
   root.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{ mobileMenuOpen=false; setView(b.dataset.nav); }));
   document.getElementById('drawerBackdrop').addEventListener('click', ()=>{ mobileMenuOpen=false; renderMobileDrawer(); });
@@ -7212,7 +7208,7 @@ function viewSettings(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Make it yours · build 81</div><h1>Settings</h1>
+    <div class="eyebrow">Make it yours · build 82</div><h1>Settings</h1>
     <p style="margin-top:4px"><button class="btn ghost sm" id="gotoHelpBtn">Help &amp; FAQ</button></p>
     <div class="card">
       <h3 style="margin:0 0 6px">Your profile</h3>
@@ -7311,16 +7307,16 @@ function viewSettings(){
           <option value="bell" ${s.alarmSound==='bell'?'selected':''}>Bell</option>
           <option value="beep" ${s.alarmSound==='beep'?'selected':''}>Beep</option></select></div>
         <div class="field"><label>Volume</label><input class="slider" style="width:100%" type="range" id="setSoundVol" min="0" max="1" step="0.05" value="${s.soundVolume}"></div>
-        <div class="field" style="flex:0 0 auto;align-self:flex-end"><button class="btn" id="testSoundBtn" type="button">Test sound</button></div>
+        <div class="field" style="flex:0 0 auto;align-self:flex-end"><button class="btn" id="testSoundBtn" type="button" onclick="try{testAlarm()}catch(e){alert(e)}">Test sound</button></div>
       </div>
-      <p id="testSoundStatus" style="font-size:.8rem;color:var(--pine);margin:8px 0 0;min-height:1.2em"></p>
+      <p id="testSoundStatus" style="font-size:.85rem;color:var(--pine);margin:8px 0 0;min-height:1.2em;font-weight:600">${escapeHtml(state.lastTestSoundMsg||'Tap Test sound — a status line will appear here.')}</p>
     </div>
     <div class="setgroup"><h4>Deadline notifications</h4>
       ${toggleRow('setNotifyBrowser','Notifications for deadlines (browser tab, or phone APK when allowed)', s.notifyBrowser)}
       <p style="color:var(--muted);font-size:.8rem;margin-top:4px">On the website: only while the tab can run. On the phone APK: uses system notifications if you Grant permission (and allow SnapBack notifications in Android settings).</p>
-      <button class="btn sm" id="grantNotifyBtn" type="button">Grant permission</button>
+      <button class="btn sm" id="grantNotifyBtn" type="button" onclick="try{requestNotifyPermission()}catch(e){alert(e)}">Grant permission</button>
       <p style="font-size:.78rem;color:var(--muted);margin-top:8px">If Android says <b>restricted</b> or ~1 notification per day: open phone <b>Settings → Apps → SnapBack → Notifications</b> and set to <b>Unrestricted</b> / allow all.</p>
-      <div id="notifyStatus" style="font-size:.78rem;color:var(--muted);margin-top:8px"></div>
+      <div id="notifyStatus" style="font-size:.85rem;color:var(--pine);margin-top:8px;font-weight:600">${escapeHtml(state.lastNotifyMsg||'Tap Grant permission — result appears here.')}</div>
     </div>
     <div class="setgroup"><h4>Quotes</h4>
       ${toggleRow('setQuoteOnLoad','Show a quote once when I open the app', s.quoteOnLoad)}
