@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="76">
+<meta name="snapback-build" content="81">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1113,8 +1113,18 @@ function ensureAudio(){
   const AC = window.AudioContext || window.webkitAudioContext;
   if(!AC) return null;
   if(!actx) actx = new AC();
-  if(actx.state==='suspended') actx.resume();
+  if(actx.state==='suspended'){
+    try{ actx.resume(); }catch(e){}
+  }
   return actx;
+}
+function resumeAudioThen(fn){
+  const ctx = ensureAudio();
+  if(!ctx){ showAppMessage('No audio', 'This device blocked Web Audio. Check silent mode / media volume.'); return; }
+  const run = ()=>{ try{ fn(ctx); }catch(e){ console.warn(e); showAppMessage('Sound failed', String(e&&e.message||e)); } };
+  if(ctx.state==='suspended'){
+    ctx.resume().then(run).catch(()=>run());
+  } else run();
 }
 let _alarmRamp = null; // { stop: fn }
 function stopAlarmRamp(){
@@ -1122,23 +1132,119 @@ function stopAlarmRamp(){
   _alarmRamp = null;
 }
 /** Short chime (timer / test) */
-function playAlarm(){
-  if(!state.settings.soundOn) return;
-  const ctx = ensureAudio(); if(!ctx) return;
-  const vol = Math.max(0.05, Math.min(1, Number(state.settings.soundVolume)||0.7));
-  const kind = state.settings.alarmSound||'chime';
-  const now = ctx.currentTime;
-  const notesFor = {chime:[523.25,659.25,783.99],bell:[440,440],beep:[880,880,880]}[kind] || [523.25,659.25,783.99];
-  notesFor.forEach((freq,i)=>{
-    const osc=ctx.createOscillator(), g=ctx.createGain();
-    osc.type = kind==='beep' ? 'square' : 'sine';
-    osc.frequency.value=freq;
-    const start=now+i*0.22, dur= kind==='bell'?0.9:0.32;
-    g.gain.setValueAtTime(0,start);
-    g.gain.linearRampToValueAtTime(vol,start+0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001,start+dur);
-    osc.connect(g); g.connect(ctx.destination);
-    osc.start(start); osc.stop(start+dur+0.05);
+
+function playBeepFallback(){
+  // Minimal WAV (short beep) via data URI — works when Web Audio is blocked
+  try{
+    const sr=22050, dur=0.35, n=Math.floor(sr*dur);
+    const data=new Float32Array(n);
+    for(let i=0;i<n;i++){
+      const t=i/sr;
+      data[i]=Math.sin(2*Math.PI*880*t)*Math.exp(-t*4)*0.6;
+    }
+    const buf=new ArrayBuffer(44+n*2);
+    const v=new DataView(buf);
+    const w=(o,s)=>{ for(let i=0;i<s.length;i++) v.setUint8(o+i,s.charCodeAt(i)); };
+    w(0,'RIFF'); v.setUint32(4,36+n*2,true); w(8,'WAVE'); w(12,'fmt ');
+    v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
+    v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
+    w(36,'data'); v.setUint32(40,n*2,true);
+    let o=44;
+    for(let i=0;i<n;i++){ let s=Math.max(-1,Math.min(1,data[i])); v.setInt16(o,s<0?s*0x8000:s*0x7FFF,true); o+=2; }
+    const blob=new Blob([buf],{type:'audio/wav'});
+    const url=URL.createObjectURL(blob);
+    const a=new Audio(url);
+    a.volume=1;
+    const p=a.play();
+    if(p&&p.catch) p.catch(()=>{});
+    setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    return true;
+  }catch(e){ return false; }
+}
+function setTestSoundStatus(msg){
+  const el=document.getElementById('testSoundStatus');
+  if(el) el.textContent=msg;
+}
+function testAlarm(){
+  setTestSoundStatus('Working…');
+  let steps=[];
+  // 1) Vibrate (many phones)
+  try{
+    if(navigator.vibrate){ navigator.vibrate([120,60,120,60,200]); steps.push('vibrate'); }
+  }catch(e){}
+  // 2) Capacitor Haptics if present
+  try{
+    if(window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.Haptics){
+      window.Capacitor.Plugins.Haptics.impact({ style: 'HEAVY' });
+      steps.push('haptics');
+    }
+  }catch(e){}
+  // 3) ALWAYS try WAV beep (most reliable on Android WebView)
+  try{
+    if(playBeepFallback()) steps.push('wav');
+  }catch(e){}
+  // 4) Web Audio chime as well
+  try{
+    resumeAudioThen((ctx)=>{
+      try{
+        const vol=1;
+        const now=ctx.currentTime;
+        [880,1108,1318].forEach((freq,i)=>{
+          const osc=ctx.createOscillator(), g=ctx.createGain();
+          osc.type='square'; osc.frequency.value=freq;
+          const start=now+i*0.12;
+          g.gain.setValueAtTime(0.0001,start);
+          g.gain.linearRampToValueAtTime(vol*0.35,start+0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001,start+0.35);
+          osc.connect(g); g.connect(ctx.destination);
+          osc.start(start); osc.stop(start+0.4);
+        });
+        steps.push('webaudio');
+        setTestSoundStatus('Tried: '+(steps.join(', ')||'none')+'. If silent: turn OFF silent mode and raise MEDIA volume.');
+      }catch(e){
+        setTestSoundStatus('Audio error: '+(e&&e.message?e.message:'unknown')+'. Steps: '+steps.join(', '));
+      }
+    });
+  }catch(e){}
+  // 5) On native: also fire a test notification in 3 seconds so user hears system sound
+  try{
+    if(typeof isNativeApp==='function' && isNativeApp() && typeof scheduleNativeNotification==='function'){
+      const when=new Date(Date.now()+3000);
+      scheduleNativeNotification({
+        key:'test-sound-'+Date.now(),
+        title:'SnapBack test',
+        body:'If you see this, notifications work. Sound test also ran.',
+        when
+      }).then(ok=>{
+        if(ok) setTestSoundStatus((document.getElementById('testSoundStatus')?.textContent||'')+' · Test notification in ~3s');
+      });
+    }
+  }catch(e){}
+  showAppMessage('Sound test', 'Tried beep + vibrate. Turn OFF silent/DND. Raise MEDIA volume (side buttons while a video would play). Status line under the button shows details.');
+  setTimeout(()=>{
+    if(steps.length===0) setTestSoundStatus('No audio/vibrate API worked. Use phone notification test via Grant permission.');
+    else setTestSoundStatus('Tried: '+steps.join(', ')+'. Silent mode or media volume may still mute sound.');
+  }, 500);
+}
+
+function playAlarm(force){
+  if(!force && state.settings && state.settings.soundOn===false) return;
+  resumeAudioThen((ctx)=>{
+    const vol = Math.max(0.15, Math.min(1, Number(state.settings&&state.settings.soundVolume)||0.8));
+    const kind = (state.settings&&state.settings.alarmSound)||'chime';
+    const now = ctx.currentTime;
+    const notesFor = {chime:[523.25,659.25,783.99],bell:[440,440],beep:[880,880,880]}[kind] || [523.25,659.25,783.99];
+    notesFor.forEach((freq,i)=>{
+      const osc=ctx.createOscillator(), g=ctx.createGain();
+      osc.type = kind==='beep' ? 'square' : 'sine';
+      osc.frequency.value=freq;
+      const start=now+i*0.22, dur= kind==='bell'?0.9:0.45;
+      g.gain.setValueAtTime(0.0001,start);
+      g.gain.linearRampToValueAtTime(vol,start+0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001,start+dur);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(start); osc.stop(start+dur+0.05);
+    });
   });
 }
 /**
@@ -1190,22 +1296,7 @@ function playAlarmRamp(durationSec){
     }
   };
 }
-function testAlarm(){ playAlarm(); }
 
-/* ---- Bug Me (wake) alarm logic ---- */
-function saveWakeAlarmFromForm(){
-  if(!state.wakeAlarm) state.wakeAlarm={};
-  state.wakeAlarm.enabled = !!document.getElementById('wakeEnabled')?.checked;
-  state.wakeAlarm.time = document.getElementById('wakeTime')?.value || '07:00';
-  const days=[];
-  for(let i=0;i<7;i++){ if(document.getElementById('wakeDay'+i)?.checked) days.push(i); }
-  state.wakeAlarm.days = days.length ? days : [0,1,2,3,4];
-  state.wakeAlarm.snoozesMax = 2;
-  state.wakeAlarm.snoozesLeft = 2;
-  saveState();
-  scheduleWakeAlarms();
-  showAppMessage('Bug Me saved', state.wakeAlarm.enabled ? ('On at '+state.wakeAlarm.time) : 'Turned off');
-}
 function nextWakeDate(){
   const wa=state.wakeAlarm; if(!wa||!wa.enabled||!wa.time) return null;
   const [hh,mm]=(wa.time||'07:00').split(':').map(Number);
@@ -1273,33 +1364,7 @@ function wakeSnooze(minutes){
   _wakeCheckTimer = setTimeout(()=>triggerWakeMath('snooze'), mins*60*1000);
   showAppMessage('Snoozed', mins+' minutes. Snoozes left: '+state.wakeAlarm.snoozesLeft);
 }
-function testAlarm(){ playAlarm(); }
 
-
-function makeNoiseBuffer(ctx,type){
-  const bufferSize=2*ctx.sampleRate;
-  const buffer=ctx.createBuffer(1,bufferSize,ctx.sampleRate);
-  const data=buffer.getChannelData(0);
-  if(type==='white'){
-    for(let i=0;i<bufferSize;i++) data[i]=Math.random()*2-1;
-  }else if(type==='pink'||type==='grey'){
-    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
-    for(let i=0;i<bufferSize;i++){
-      const w=Math.random()*2-1;
-      b0=0.99886*b0+w*0.0555179; b1=0.99332*b1+w*0.0750759; b2=0.96900*b2+w*0.1538520;
-      b3=0.86650*b3+w*0.3104856; b4=0.55000*b4+w*0.5329522; b5=-0.7616*b5-w*0.0168980;
-      const out=b0+b1+b2+b3+b4+b5+b6+w*0.5362; b6=w*0.115926;
-      data[i]=out*0.11;
-    }
-  }else if(type==='brown'){
-    let last=0;
-    for(let i=0;i<bufferSize;i++){ const w=Math.random()*2-1; last=(last+0.02*w)/1.02; data[i]=last*3.5; }
-  }else if(type==='blue'){
-    let prev=0;
-    for(let i=0;i<bufferSize;i++){ const w=Math.random()*2-1; data[i]=(w-prev)*0.6; prev=w; }
-  }
-  return buffer;
-}
 function pickAdaptiveColor(){
   if(state.timer.mode==='work') return 'brown';
   if(state.timer.mode==='shortBreak') return 'pink';
@@ -2714,26 +2779,55 @@ function isInIframe(){
 }
 function requestNotifyPermission(){
   const status=document.getElementById('notifyStatus');
-  if(!('Notification' in window)){
-    if(status) status.textContent='Not supported in this browser.';
+  if(status) status.textContent='Requesting…';
+  // Phone APK (Capacitor): use Local Notifications
+  if(typeof isNativeApp==='function' && isNativeApp()){
+    ensureNotifyPermission().then(ok=>{
+      state.settings.notifyBrowser = !!ok;
+      if(status){
+        status.textContent = ok
+          ? 'Permission OK. If alerts are rare: Phone Settings → Apps → SnapBack → Notifications → set to NOT restricted / unrestricted. Allow all categories.'
+          : 'Not granted. Phone Settings → Apps → SnapBack → Notifications → Allow.';
+      }
+      showAppMessage('Notifications', ok
+        ? 'Allowed. If rare alerts: Apps → SnapBack → Notifications → Unrestricted.'
+        : 'Permission missing. Enable under Apps → SnapBack → Notifications.');
+      if(ok && typeof scheduleNativeNotification==='function'){
+        scheduleNativeNotification({
+          key:'grant-test-'+Date.now(),
+          title:'SnapBack',
+          body:'Test alert — notifications are working.',
+          when: new Date(Date.now()+4000)
+        }).then(sent=>{
+          if(status) status.textContent = (status.textContent||'') + (sent ? ' · Test alert in ~4 seconds — watch the shade/status bar.' : ' · Could not schedule test alert.');
+        });
+      }
+      try{ persistRender(); }catch(e){}
+    }).catch(e=>{
+      if(status) status.textContent='Could not request: '+(e&&e.message?e.message:'error');
+    });
     return;
   }
-  if(status) status.textContent='Requesting…';
+  // Website / browser
+  if(!('Notification' in window)){
+    if(status) status.textContent='Not supported in this browser. Use the phone APK for reliable reminders.';
+    return;
+  }
   const timeout=new Promise(res=>setTimeout(()=>res('timeout'), 3000));
   Promise.race([Notification.requestPermission(), timeout]).then(perm=>{
     if(perm==='timeout'){
-      if(status) status.textContent="Didn't get a response — try again, or just use the Reminders page instead, which always works.";
+      if(status) status.textContent="Didn't get a response — try again.";
       state.settings.notifyBrowser=false;
     }else if(perm==='denied'){
-      if(status) status.textContent="Blocked by the browser. You can re-enable it from your browser's site settings if you want to try again.";
+      if(status) status.textContent="Blocked. Re-enable from browser site settings if needed.";
       state.settings.notifyBrowser=false;
     }else{
       state.settings.notifyBrowser = perm==='granted';
-      if(status) status.textContent = perm==='granted' ? 'Enabled.' : '';
+      if(status) status.textContent = perm==='granted' ? 'Enabled for this browser (only while the tab can run).' : '';
     }
     persistRender();
   }).catch(()=>{
-    if(status) status.textContent="Couldn't enable this right now — the Reminders page still works without it.";
+    if(status) status.textContent="Couldn't enable notifications right now.";
     state.settings.notifyBrowser=false;
     persistRender();
   });
@@ -3057,7 +3151,7 @@ function renderSidebar(){
       NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('') +
-      `<div class="navfoot">Saved automatically as you go.</div>`;
+      `<div class="navfoot">Saved automatically · build 81</div>`;
     el.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.nav)));
     document.getElementById('brandHomeBtn').addEventListener('click', ()=>setView('today'));
     mobileMenuOpen=false;
@@ -3075,7 +3169,7 @@ function renderMobileDrawer(){
       ${NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('')}
-      <div class="navfoot">Saved automatically as you go.</div>
+      <div class="navfoot">Saved automatically · build 81</div>
     </div>`;
   root.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{ mobileMenuOpen=false; setView(b.dataset.nav); }));
   document.getElementById('drawerBackdrop').addEventListener('click', ()=>{ mobileMenuOpen=false; renderMobileDrawer(); });
@@ -7118,7 +7212,7 @@ function viewSettings(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Make it yours · build 76</div><h1>Settings</h1>
+    <div class="eyebrow">Make it yours · build 81</div><h1>Settings</h1>
     <p style="margin-top:4px"><button class="btn ghost sm" id="gotoHelpBtn">Help &amp; FAQ</button></p>
     <div class="card">
       <h3 style="margin:0 0 6px">Your profile</h3>
@@ -7217,13 +7311,15 @@ function viewSettings(){
           <option value="bell" ${s.alarmSound==='bell'?'selected':''}>Bell</option>
           <option value="beep" ${s.alarmSound==='beep'?'selected':''}>Beep</option></select></div>
         <div class="field"><label>Volume</label><input class="slider" style="width:100%" type="range" id="setSoundVol" min="0" max="1" step="0.05" value="${s.soundVolume}"></div>
-        <div class="field" style="flex:0 0 auto;align-self:flex-end"><button class="btn ghost" id="testSoundBtn">Test sound</button></div>
+        <div class="field" style="flex:0 0 auto;align-self:flex-end"><button class="btn" id="testSoundBtn" type="button">Test sound</button></div>
       </div>
+      <p id="testSoundStatus" style="font-size:.8rem;color:var(--pine);margin:8px 0 0;min-height:1.2em"></p>
     </div>
     <div class="setgroup"><h4>Deadline notifications</h4>
-      ${toggleRow('setNotifyBrowser','Browser notifications for tasks due in 7 / 3 / 1 / 0 days', s.notifyBrowser)}
-      <p style="color:var(--muted);font-size:.8rem;margin-top:4px">Only fires while this tab is open — browsers can't reliably wake a closed tab. The Today page always shows deadlines regardless.</p>
-      <button class="btn ghost sm" id="grantNotifyBtn">Grant permission</button>
+      ${toggleRow('setNotifyBrowser','Notifications for deadlines (browser tab, or phone APK when allowed)', s.notifyBrowser)}
+      <p style="color:var(--muted);font-size:.8rem;margin-top:4px">On the website: only while the tab can run. On the phone APK: uses system notifications if you Grant permission (and allow SnapBack notifications in Android settings).</p>
+      <button class="btn sm" id="grantNotifyBtn" type="button">Grant permission</button>
+      <p style="font-size:.78rem;color:var(--muted);margin-top:8px">If Android says <b>restricted</b> or ~1 notification per day: open phone <b>Settings → Apps → SnapBack → Notifications</b> and set to <b>Unrestricted</b> / allow all.</p>
       <div id="notifyStatus" style="font-size:.78rem;color:var(--muted);margin-top:8px"></div>
     </div>
     <div class="setgroup"><h4>Quotes</h4>
@@ -7233,10 +7329,11 @@ function viewSettings(){
       <div style="margin-top:8px">${(s.customQuotes||[]).map((q,i)=>`<div class="qmini"><span style="flex:1">${escapeHtml(q)}</span><button class="btn danger sm" data-action="remove-quote" data-idx="${i}">✕</button></div>`).join('') || ''}</div>
     </div>
     <div class="setgroup"><h4>Install app</h4>
-      ${isAppInstalled() ? `<p style="color:var(--muted);font-size:.85rem">Already installed on this device.</p>`
+      ${(typeof isNativeApp==='function' && isNativeApp()) ? `<p style="color:var(--muted);font-size:.85rem">You already have the phone app installed.</p>`
+        : isAppInstalled() ? `<p style="color:var(--muted);font-size:.85rem">Already installed on this device.</p>`
         : deferredInstallPrompt ? `<button class="btn" id="settingsInstallBtn">Install SnapBack</button>`
         : isIOSDevice ? `<p style="color:var(--muted);font-size:.85rem">Tap the Share icon in Safari, then "Add to Home Screen".</p>`
-        : `<p style="color:var(--muted);font-size:.85rem">Not available yet in this browser — this only appears once the app is loaded from a proper hosted address (not a local file).</p>`}
+        : `<p style="color:var(--muted);font-size:.85rem">On a phone browser, use Install if offered. For full alarms, use the SnapBack APK.</p>`}
     </div>
     <div class="setgroup"><h4>Delete data</h4>
       <p style="color:var(--muted);font-size:.85rem;margin:0 0 12px">Clear everything, or only chosen items.</p>
@@ -7244,7 +7341,7 @@ function viewSettings(){
         <div style="width:100%">${deleteControl('reset', null, 'Reset All')}</div>
         <button type="button" class="btn" id="resetSpecificBtn" style="width:100%;box-sizing:border-box">Reset Specific Data</button>
       </div>
-      <div id="resetSpecificPanel" style="display:none;margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--card);width:100%;box-sizing:border-box">
+      <div id="resetSpecificPanel" style="display:none;margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--card);width:100%;max-width:100%;box-sizing:border-box;overflow-x:hidden">
         <div class="field" style="margin:0;width:100%">
           <label>What kind of data?</label>
           <select id="resetKindSelect" style="width:100%;max-width:100%">
@@ -7296,6 +7393,7 @@ function viewSettings(){
    ============================================================ */
 function wireView(){
   const main=document.getElementById('main');
+  if(!main) return;
   main.querySelectorAll('[data-action]').forEach(el=>{
     const action=el.dataset.action;
     let id = el.dataset.id;
@@ -7307,6 +7405,13 @@ function wireView(){
       e.preventDefault(); e.stopPropagation();
       toggleDone(id);
     });
+    
+    else if(action==='open-date-edit') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); state.editingTaskId=id; persistRender(); });
+    else if(action==='save-inline-date') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const t=findTask(id); if(!t) return; const inp=document.getElementById('inlineDate-'+id)||document.getElementById('editDateText-'+id); if(inp) t.date=(inp.value||'').trim(); state.editingTaskId=null; persistRender(); });
+    else if(action==='cancel-inline-date') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); state.editingTaskId=null; persistRender(); });
+    else if(action==='clear-inline-date') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const t=findTask(id); if(t) t.date=''; persistRender(); });
+    else if(action==='toggle-chunk') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const t=findTask(id); if(!t||!t.chunks) return; const idx=Number(el.dataset.chunk); if(t.chunks[idx]) t.chunks[idx].done=!t.chunks[idx].done; persistRender(); });
+
     else if(action==='start-task-edit') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
       state.editingTaskId=id; state.taskMenuOpen=false; persistRender();
