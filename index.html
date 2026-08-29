@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="85">
+<meta name="snapback-build" content="140">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1174,21 +1174,18 @@ function testAlarm(){
   if(!state.settings) state.settings = {};
   state.settings.alarmSound = kind;
   const labels = {
-    chime: 'CHIME — four rising notes',
-    bell: 'BELL — one long deep ring',
-    beep: 'BEEP — four sharp short beeps',
-    digital: 'DIGITAL — fast high blips',
-    radar: 'RADAR — two rising whoops',
-    knock: 'KNOCK — three low thuds'
+    chime: 'Chime — rising notes',
+    bell: 'Bell — long ring',
+    beep: 'Beep — sharp pulses',
+    digital: 'Digital — fast blips',
+    radar: 'Radar — whoops',
+    knock: 'Knock — low thuds'
   };
-  // Play immediately using explicit kind (do not rely on stale state only)
   resumeAudioThen((ctx)=>{
-    try{ playDistinctAlarm(ctx, kind, 0.95); }catch(e){ console.warn(e); setTestSoundStatus('Audio error: '+e); }
+    try{ playDistinctAlarm(ctx, kind, 0.95); }catch(e){ console.warn(e); }
   });
-  try{ if(navigator.vibrate) navigator.vibrate(kind==='beep'?[40,30,40,30,40]:[100]); }catch(e){}
-  const label = labels[kind] || kind;
-  setTestSoundStatus('Selected value="'+kind+'" → '+label);
-  setTimeout(()=>{ try{ showAppMessage('Sound test', 'Playing: '+label+'\n\nIf every choice sounds identical, tell us — the status line must show a different value= each time.'); }catch(e){} }, 300);
+  try{ if(navigator.vibrate) navigator.vibrate(kind==='beep'?[40,30,40]:[80]); }catch(e){}
+  setTestSoundStatus('Playing: '+(labels[kind]||kind));
 }
 
 function playAlarm(force){
@@ -1242,75 +1239,57 @@ function playDistinctAlarm(ctx, kind, vol){
  */
 function playAlarmRamp(durationSec){
   stopAlarmRamp();
-  if(!state.settings.soundOn) return;
+  if(state.settings && state.settings.soundOn===false) return;
   const ctx = ensureAudio(); if(!ctx) return;
-  const peak = Math.max(0.08, Math.min(1, Number(state.settings.soundVolume)||0.85));
-  const total = durationSec || 50;
+  const total = durationSec || 55;
+  const peak = Math.max(0.15, Math.min(1, Number(state.settings&&state.settings.soundVolume)||0.9));
+  const kind = (state.settings&&state.settings.alarmSound)||'chime';
   const master = ctx.createGain();
-  master.gain.setValueAtTime(0.0001, ctx.currentTime);
+  master.gain.setValueAtTime(0.02, ctx.currentTime);
   master.gain.linearRampToValueAtTime(peak, ctx.currentTime + total);
   master.connect(ctx.destination);
   let stopped = false;
   const timers = [];
-  function pulse(at){
+  function pulse(){
     if(stopped) return;
-    const freqs = [523.25, 659.25, 784];
-    freqs.forEach((freq,i)=>{
-      const osc=ctx.createOscillator(), g=ctx.createGain();
-      osc.type='sine';
-      osc.frequency.value=freq;
-      const t0 = ctx.currentTime;
-      g.gain.setValueAtTime(0, t0);
-      g.gain.linearRampToValueAtTime(0.45, t0+0.03);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0+0.45);
-      osc.connect(g); g.connect(master);
-      osc.start(t0+i*0.08); osc.stop(t0+0.55);
-    });
+    try{
+      // route distinct pattern through ramping master
+      const now = ctx.currentTime;
+      const gwrap = ctx.createGain();
+      gwrap.gain.value = 1;
+      gwrap.connect(master);
+      // mini pattern each pulse
+      if(kind==='beep'){
+        const osc=ctx.createOscillator(), g=ctx.createGain();
+        osc.type='square'; osc.frequency.value=1200;
+        g.gain.setValueAtTime(0.0001,now); g.gain.linearRampToValueAtTime(0.5,now+0.02); g.gain.exponentialRampToValueAtTime(0.0001,now+0.12);
+        osc.connect(g); g.connect(gwrap); osc.start(now); osc.stop(now+0.15);
+      } else if(kind==='knock'){
+        const osc=ctx.createOscillator(), g=ctx.createGain();
+        osc.type='sine'; osc.frequency.value=100;
+        g.gain.setValueAtTime(0.0001,now); g.gain.linearRampToValueAtTime(0.7,now+0.02); g.gain.exponentialRampToValueAtTime(0.0001,now+0.2);
+        osc.connect(g); g.connect(gwrap); osc.start(now); osc.stop(now+0.22);
+      } else {
+        const osc=ctx.createOscillator(), g=ctx.createGain();
+        osc.type='sine'; osc.frequency.value=659;
+        g.gain.setValueAtTime(0.0001,now); g.gain.linearRampToValueAtTime(0.45,now+0.03); g.gain.exponentialRampToValueAtTime(0.0001,now+0.35);
+        osc.connect(g); g.connect(gwrap); osc.start(now); osc.stop(now+0.4);
+      }
+    }catch(e){}
   }
-  pulse(0);
-  // pulse every 1.2s for duration
+  pulse();
   for(let ms=1200; ms < total*1000; ms+=1200){
     timers.push(setTimeout(()=>{ if(!stopped) pulse(); }, ms));
   }
-  timers.push(setTimeout(()=>{ stopAlarmRamp(); }, total*1000+200));
+  timers.push(setTimeout(()=>{ stopAlarmRamp(); }, total*1000+300));
   _alarmRamp = {
     stop(){
       stopped = true;
       timers.forEach(clearTimeout);
-      try{
-        master.gain.cancelScheduledValues(ctx.currentTime);
-        master.gain.setValueAtTime(0.0001, ctx.currentTime);
-      }catch(e){}
+      try{ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setValueAtTime(0.0001, ctx.currentTime); }catch(e){}
     }
   };
-}
-
-function nextWakeDate(){
-  const wa=state.wakeAlarm; if(!wa||!wa.enabled||!wa.time) return null;
-  const [hh,mm]=(wa.time||'07:00').split(':').map(Number);
-  const days=wa.days||[0,1,2,3,4];
-  const now=new Date();
-  for(let add=0; add<8; add++){
-    const d=new Date(now.getFullYear(), now.getMonth(), now.getDate()+add, hh||0, mm||0, 0, 0);
-    if(d.getTime() <= now.getTime()+5000) continue;
-    // JS getDay: 0=Sun … our UI: Mon=0 … Fri=4, Sat=5, Sun=6
-    const uiDay = (d.getDay()+6)%7;
-    if(days.indexOf(uiDay)>=0) return d;
-  }
-  return null;
-}
-let _wakeCheckTimer=null;
-function scheduleWakeAlarms(){
-  clearTimeout(_wakeCheckTimer);
-  const next=nextWakeDate();
-  if(!next) return;
-  const ms = next.getTime() - Date.now();
-  if(ms > 2147483647) return; // setTimeout max
-  _wakeCheckTimer = setTimeout(()=>{
-    triggerWakeMath('scheduled');
-  }, Math.max(1000, ms));
-}
-function triggerWakeMath(reason){
+}function triggerWakeMath(reason){
   if(!state.wakeAlarm) state.wakeAlarm={snoozesLeft:2,snoozesMax:2};
   if(reason==='scheduled'){
     state.wakeAlarm.snoozesLeft = state.wakeAlarm.snoozesMax||2;
@@ -1319,7 +1298,7 @@ function triggerWakeMath(reason){
   const b=2+Math.floor(Math.random()*8);
   state.wakeMath = { a, b, answer: a+b, reason: reason||'' };
   state.wakeMathOpen = true;
-  playAlarmRamp(50);
+  playAlarmRamp(55);
   persistRender();
 }
 function wakeDismissMath(val){
@@ -2923,11 +2902,50 @@ async function scheduleNativeNotification({key, title, body, when}){
         channelId: 'snapback',
         sound: 'default',
         smallIcon: 'ic_stat_icon',
-        extra: { key }
+        actionTypeId: 'OPEN',
+        extra: { key },
+        ongoing: false
       }]
     });
     return true;
   }catch(e){ console.warn('schedule notify', e); return false; }
+}
+
+async function scheduleNativeWakeAlarms(){
+  if(!isNativeApp()) return;
+  const wa = state.wakeAlarm;
+  if(!wa || !wa.enabled || !wa.time) return;
+  const ok = await ensureNotifyPermission();
+  if(!ok) return;
+  const { LocalNotifications } = window.Capacitor.Plugins;
+  try{
+    // cancel previous wake ids 900001-900014
+    const cancelIds = [];
+    for(let i=0;i<14;i++) cancelIds.push({id: 900001+i});
+    await LocalNotifications.cancel({ notifications: cancelIds });
+  }catch(e){}
+  const [hh,mm] = (wa.time||'07:00').split(':').map(Number);
+  const days = wa.days || [0,1,2,3,4];
+  let scheduled = 0;
+  for(let offset=0; offset<14; offset++){
+    const d = new Date();
+    d.setSeconds(0,0);
+    d.setDate(d.getDate()+offset);
+    d.setHours(hh||0, mm||0, 0, 0);
+    if(d.getTime() <= Date.now()+5000) continue;
+    const uiDay = (d.getDay()+6)%7; // Mon=0
+    if(days.indexOf(uiDay)<0) continue;
+    try{
+      await scheduleNativeNotification({
+        key: 'wake-'+toDateStr(d),
+        title: '🐛 Bug Me',
+        body: 'Open SnapBack — time to get up. Solve the math to stop.',
+        when: d
+      });
+      scheduled++;
+    }catch(e){}
+  }
+  return scheduled;
 }
 async function syncNativeClassReminders(){
   if(!isNativeApp()) return;
@@ -3121,6 +3139,12 @@ function installBannerHtml(){
 function isMobileViewport(){ return typeof window!=='undefined' && window.innerWidth<=820; }
 function renderSidebar(){
   const el=document.getElementById('sidebar');
+  if(typeof needsLoginScreen==='function' && needsLoginScreen()){
+    if(el) el.innerHTML='';
+    document.body.classList.add('login-only');
+    return;
+  }
+  document.body.classList.remove('login-only');
   if(isMobileViewport()){
     const current = NAV.flatMap(s=>s.items).find(n=>n.id===state.view);
     el.className='sidebar mobile-topbar';
@@ -3142,7 +3166,7 @@ function renderSidebar(){
       NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('') +
-      `<div class="navfoot">Saved automatically · build 85</div>`;
+      `<div class="navfoot">Saved automatically · build 140</div>`;
     el.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.nav)));
     document.getElementById('brandHomeBtn').addEventListener('click', ()=>setView('today'));
     mobileMenuOpen=false;
@@ -3160,7 +3184,7 @@ function renderMobileDrawer(){
       ${NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('')}
-      <div class="navfoot">Saved automatically · build 85</div>
+      <div class="navfoot">Saved automatically · build 140</div>
     </div>`;
   root.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{ mobileMenuOpen=false; setView(b.dataset.nav); }));
   document.getElementById('drawerBackdrop').addEventListener('click', ()=>{ mobileMenuOpen=false; renderMobileDrawer(); });
@@ -3184,6 +3208,12 @@ function topOfMindBanner(){
 }
 function renderMain(){
   const el=document.getElementById('main');
+  if(!el) return;
+  if(typeof needsLoginScreen==='function' && needsLoginScreen()){
+    el.innerHTML = viewLogin();
+    try{ wireLoginScreen(); }catch(e){ console.warn(e); }
+    return;
+  }
   const views={today:viewToday,tasks:viewTasks,challenges:viewChallenges,planAhead:viewPlanAhead,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
     eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,
     bodydouble:viewBodyDouble,settings:viewSettings,
@@ -3994,6 +4024,7 @@ function startAuthListener(){
       if(!state.profile) state.profile={};
       if(_currentUser.displayName && !state.profile.name) state.profile.name = _currentUser.displayName;
       if(_currentUser.email) state.profile.email = _currentUser.email;
+      setSessionLoggedIn(true, true);
       saveState();
       startCloudSync();
       pushCloudSync();
@@ -4020,9 +4051,11 @@ async function signInWithGoogle(){
     } else {
       await _auth.signInWithPopup(provider);
     }
+    setSessionLoggedIn(true, true);
   }catch(e){
     console.warn(e);
     showAppMessage('Sign-in failed', (e && e.message) ? e.message : 'Enable Google sign-in in Firebase Console and add this site to Authorized domains.');
+    throw e;
   }
 }
 async function completeRedirectSignIn(){
@@ -4048,6 +4081,13 @@ async function signOutUser(){
 }
 function authStatusHtml(){
   try {
+    const la = getLocalAuth();
+    if(!_currentUser && la && la.username && getSessionLoggedIn()){
+      return '<div style="padding:12px;border-radius:12px;background:var(--pine-soft);margin-bottom:12px">'
+        +'<div style="font-weight:700">Signed in locally</div>'
+        +'<div style="font-size:.85rem">'+escapeHtml(la.username)+'</div>'
+        +'<div style="font-size:.78rem;color:var(--muted);margin-top:4px">Simple account on this device. Log out from Profile to switch user.</div></div>';
+    }
     if(_currentUser){
       const name = escapeHtml(_currentUser.displayName||'Student');
       const email = escapeHtml(_currentUser.email||'');
@@ -4069,7 +4109,183 @@ function authStatusHtml(){
   }
 }
 
-function persistRender(){ saveState(); render(); try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} }
+function persistRender(){ saveState(); render(); try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} try{ scheduleNativeWakeAlarms(); }catch(e){} }
+
+/* ============================================================
+   First-launch login gate (Google and/or simple local account)
+   ============================================================ */
+function simpleHash(str){
+  // Not bank-grade — keeps casual access private on a shared device
+  let h = 5381;
+  const s = String(str||'');
+  for(let i=0;i<s.length;i++) h = ((h<<5)+h) ^ s.charCodeAt(i);
+  return 'sb_'+ (h>>>0).toString(16);
+}
+function getLocalAuth(){
+  try{ return JSON.parse(localStorage.getItem('snapback_local_auth')||'null'); }catch(e){ return null; }
+}
+function setLocalAuth(obj){
+  try{ localStorage.setItem('snapback_local_auth', JSON.stringify(obj)); }catch(e){}
+}
+function getSessionLoggedIn(){
+  try{ return sessionStorage.getItem('snapback_session_ok')==='1' || localStorage.getItem('snapback_session_ok')==='1'; }catch(e){ return false; }
+}
+function setSessionLoggedIn(on, remember){
+  try{
+    if(on){
+      sessionStorage.setItem('snapback_session_ok','1');
+      if(remember) localStorage.setItem('snapback_session_ok','1');
+    } else {
+      sessionStorage.removeItem('snapback_session_ok');
+      localStorage.removeItem('snapback_session_ok');
+    }
+  }catch(e){}
+}
+function isLoggedIn(){
+  if(_currentUser && _currentUser.uid) return true;
+  if(getSessionLoggedIn()){
+    const la = getLocalAuth();
+    if(la && la.username && la.passHash) return true;
+    // Google session restored via firebase listener may lag — allow if session flag and profile
+    if(_currentUser) return true;
+  }
+  // First install: require login screen
+  return false;
+}
+function needsLoginScreen(){
+  return !isLoggedIn();
+}
+function completeLocalLogin(username, remember){
+  setSessionLoggedIn(true, !!remember);
+  if(!state.profile) state.profile={};
+  if(username && !state.profile.name) state.profile.name = username;
+  try{ saveState(); }catch(e){}
+  try{ render(); }catch(e){}
+}
+function registerLocalAccount(username, password, remember){
+  username = String(username||'').trim();
+  password = String(password||'');
+  if(username.length < 2){ showAppMessage('Username', 'Use at least 2 characters.'); return false; }
+  if(password.length < 4){ showAppMessage('Password', 'Use at least 4 characters.'); return false; }
+  setLocalAuth({ username, passHash: simpleHash(password+':'+username.toLowerCase()), created: Date.now() });
+  completeLocalLogin(username, remember);
+  showAppMessage('Account ready', 'You are signed in as '+username+'. Use the same username and password next time on this device.');
+  return true;
+}
+function loginLocalAccount(username, password, remember){
+  username = String(username||'').trim();
+  password = String(password||'');
+  const la = getLocalAuth();
+  if(!la || !la.username){
+    showAppMessage('No local account yet', 'Create one with “Create account”, or use Google sign-in.');
+    return false;
+  }
+  if(username.toLowerCase() !== String(la.username).toLowerCase()){
+    showAppMessage('Wrong username', 'This device has a local account named “'+la.username+'”.');
+    return false;
+  }
+  if(simpleHash(password+':'+username.toLowerCase()) !== la.passHash){
+    showAppMessage('Wrong password', 'Try again, or create a new local account after clearing site data (you will lose local-only data).');
+    return false;
+  }
+  completeLocalLogin(username, remember);
+  return true;
+}
+function logoutSnapBack(){
+  setSessionLoggedIn(false, false);
+  try{ if(typeof signOutUser==='function') signOutUser(); }catch(e){}
+  _currentUser = null;
+  try{ render(); }catch(e){}
+}
+function viewLogin(){
+  const la = getLocalAuth();
+  const hasLocal = !!(la && la.username);
+  return `
+  <div class="pagehead" style="max-width:420px;margin:0 auto;padding:24px 16px">
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="font-size:2.5rem">🐿️</div>
+      <h1 style="margin:8px 0 4px">SnapBack</h1>
+      <p style="color:var(--muted);font-size:.95rem;margin:0">Sign in to continue. Students each use their own login on their own device.</p>
+    </div>
+    <div class="card" style="border-color:var(--pine)">
+      <h3 style="margin:0 0 8px">Google</h3>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Best for laptop + phone with the same Gmail (teacher sets Firebase once).</p>
+      <details style="margin-bottom:10px">
+        <summary style="cursor:pointer;font-size:.85rem;font-weight:600">Firebase config (paste once if Google fails)</summary>
+        <textarea id="loginFbConfig" rows="3" placeholder='{ "apiKey": "...", "projectId": "..." }' style="width:100%;font-size:.72rem;margin-top:6px"></textarea>
+        <button type="button" class="btn ghost sm" id="loginSaveFb" style="margin-top:6px">Save config</button>
+      </details>
+      <button type="button" class="btn" id="loginGoogleBtn" style="width:100%">Sign in with Google</button>
+      <p style="font-size:.78rem;color:var(--muted);margin:10px 0 0">If Google is not ready, use the simple account below.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 8px">Simple account (this device)</h3>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">${hasLocal ? 'Sign in as <b>'+escapeHtml(la.username)+'</b> or create a new one (overwrites the old local login).' : 'Create a username and password for this phone or laptop.'}</p>
+      <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="e.g. gouri"></div>
+      <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="At least 4 characters"></div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin:10px 0"><input type="checkbox" id="loginRemember" checked> Stay signed in on this device</label>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button type="button" class="btn" id="loginLocalBtn" style="width:100%">${hasLocal?'Sign in':'Create account & sign in'}</button>
+        ${hasLocal?'<button type="button" class="btn ghost" id="loginCreateBtn" style="width:100%">Create new local account</button>':''}
+      </div>
+    </div>
+    <p style="font-size:.78rem;color:var(--muted);text-align:center;margin:16px 0 8px">Already using SnapBack on this device?</p>
+    <button type="button" class="btn ghost sm" id="loginGuestBtn" style="width:100%;max-width:420px;margin:0 auto;display:block">Continue with saved data on this device</button>
+    <p style="font-size:.75rem;color:var(--muted);text-align:center;margin-top:16px">SnapBack · build 140 · Your data stays on this device unless cloud sync is enabled.</p>
+  </div>`;
+}
+function wireLoginScreen(){
+  const saveFb=document.getElementById('loginSaveFb');
+  if(saveFb) saveFb.addEventListener('click', ()=>{
+    const raw=(document.getElementById('loginFbConfig')?.value||'').trim();
+    if(!raw){ showAppMessage('Paste config', 'Paste the Firebase web config JSON first.'); return; }
+    try{
+      setFirebaseConfig(parseFirebaseConfigText(raw));
+      showAppMessage('Config saved', 'Now tap Sign in with Google.');
+    }catch(e){ showAppMessage('Invalid config', e.message||'Need valid JSON from Firebase console.'); }
+  });
+  const g = document.getElementById('loginGoogleBtn');
+  if(g) g.addEventListener('click', async ()=>{
+    const raw=(document.getElementById('loginFbConfig')?.value||'').trim();
+    if(raw){
+      try{ setFirebaseConfig(parseFirebaseConfigText(raw)); }catch(e){}
+    }
+    if(!getFirebaseConfig()){
+      showAppMessage('Google not set up yet', 'Open “Firebase config” above and paste once, or use simple username login below.');
+      return;
+    }
+    try{
+      await signInWithGoogle();
+      setSessionLoggedIn(true, true);
+      render();
+    }catch(e){}
+  });
+  const remember = ()=> !!(document.getElementById('loginRemember')&&document.getElementById('loginRemember').checked);
+  const localBtn = document.getElementById('loginLocalBtn');
+  if(localBtn) localBtn.addEventListener('click', ()=>{
+    const u = document.getElementById('loginUser')?.value||'';
+    const p = document.getElementById('loginPass')?.value||'';
+    const la = getLocalAuth();
+    if(la && la.username) loginLocalAccount(u,p,remember());
+    else registerLocalAccount(u,p,remember());
+  });
+  const createBtn = document.getElementById('loginCreateBtn');
+  const guest=document.getElementById('loginGuestBtn');
+  if(guest) guest.addEventListener('click', ()=>{
+    const name=(state.profile&&state.profile.name)||'Student';
+    if(!getLocalAuth()){
+      setLocalAuth({ username: name, passHash: simpleHash('device:'+name.toLowerCase()), created: Date.now(), deviceOnly:true });
+    }
+    completeLocalLogin(name, true);
+  });
+  if(createBtn) createBtn.addEventListener('click', ()=>{
+    const u = document.getElementById('loginUser')?.value||'';
+    const p = document.getElementById('loginPass')?.value||'';
+    registerLocalAccount(u,p,remember());
+  });
+}
+
+
 function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
   document.querySelectorAll('#main [data-nav]').forEach(b=>{
     b.addEventListener('click', ()=> setView(b.dataset.nav));
@@ -4141,7 +4357,7 @@ function viewTechniques(){
     {id:'bodydouble', label:'Body Doubling', desc:'Work-with-structure ritual', ico:'👥'},
     {id:'planAhead', label:'Plan this week', desc:'Short list for this week only', ico:'📆'}
   ];
-  return hubPage('Techniques', 'Pick a tool when work feels stuck or too big.', cards);
+  return hubPage('Techniques', 'Use a tool first, or open Tasks and attach a tool to a task. Same tools either way.', cards);
 }
 function hubPage(title, sub, cards){
   return `<div class="pagehead">
@@ -4221,6 +4437,47 @@ const CHALLENGE_PATHS = {
   life_blur: ['contextFilter','projects','journal','habits','schedule'],
   adhd_brain: ['today','bugMe','biteSize','oneAtATime','focusPod','challenges_home']
 };
+
+
+function applyChallengeTool(toolId, challengeId){
+  const open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
+  if(toolId==='spotlight' || toolId==='small-batch'){
+    state.listMode = toolId==='spotlight' ? 'spotlight' : 'batch';
+    state.spotlightLimit = 3;
+    showAppMessage('List trimmed', 'Tasks view will show a smaller set. Open Tasks to work.');
+    navigateTo('tasks');
+    return;
+  }
+  if(toolId==='jar' || toolId==='spin'){
+    if(!open.length){ showAppMessage('No open tasks', 'Add a task first.'); return; }
+    const t = open[Math.floor(Math.random()*open.length)];
+    state.topOfMindId = t.id;
+    showAppMessage('Pulled a task', t.title+'\n\nIt is pinned as Top of Mind. Start when ready.');
+    navigateTo('tasks');
+    return;
+  }
+  if(toolId==='backburner-help'){
+    showAppMessage('Park it', 'Open a task → More → send to Backburner so it leaves Today until you bring it back.');
+    navigateTo('tasks');
+    return;
+  }
+  if(toolId==='bitesize' || toolId==='cheese'){
+    if(open[0]) state.cheeseTaskId = open[0].id;
+    navigateTo('bitesize');
+    return;
+  }
+  if(toolId==='focus' || toolId==='timer'){
+    if(open[0]) state.timer.activeTaskId = open[0].id;
+    navigateTo('timer');
+    return;
+  }
+  if(toolId==='eisenhower'){ navigateTo('eisenhower'); return; }
+  if(toolId==='plan-ahead'){ navigateTo('planAhead'); return; }
+  if(toolId==='bugme'){ navigateTo('settings'); showAppMessage('Bug Me', 'Scroll to Bug Me, set time, Save.'); return; }
+  if(toolId==='journal'){ navigateTo('journal'); return; }
+  showAppMessage('Tool', 'Opening Tasks.');
+  navigateTo('tasks');
+}
 
 function challengePathsFor(id){
   const keys = CHALLENGE_PATHS[id]||[];
@@ -4732,18 +4989,29 @@ function openTasksForModes(){
 }
 function tasksViewToolbar(){
   const mode=state.listMode||'all';
-  const labels={all:'Full list',spotlight:'Spotlight',batch:'Small Batch',wall:'Tile Wall',one:'One at a time',jar:'Grab Bag'};
-  return `<div class="card" style="padding:10px 12px;margin-bottom:10px">
-    <div style="font-size:.8rem;color:var(--muted);margin-bottom:6px">List view: <b>${labels[mode]||mode}</b></div>
+  const labels={all:'Full list',spotlight:'Spotlight',batch:'Small Batch',wall:'Tile Wall',one:'One at a time',jar:'Grab Bag',pool:'Pop Pool',spin:'Spin Pick'};
+  const tips={
+    all:'Every open task (except Backburner).',
+    spotlight:'Only 3 tasks. Finish one and another can appear when you switch modes.',
+    batch:'A set of 3. Finish the set before taking more.',
+    wall:'Same tasks as tiles — less list pressure.',
+    one:'One task only on screen. Use Next to move on.',
+    jar:'List hidden. Pull one when you are ready.',
+    pool:'Bubble-style — tap to complete.',
+    spin:'Spin to pick the next task so you do not decide.'
+  };
+  return `<div class="card" style="padding:10px 12px;margin-bottom:10px;border-left:4px solid var(--pine)">
+    <div style="font-size:.85rem;margin-bottom:4px">List view: <b>${labels[mode]||mode}</b></div>
+    <div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">${tips[mode]||''}</div>
     <div style="display:flex;flex-wrap:wrap;gap:6px">
-      <button class="btn ghost sm" data-action="list-mode" data-mode="all">Full list</button>
-      <button class="btn ghost sm" data-action="list-mode" data-mode="spotlight">Spotlight</button>
-      <button class="btn ghost sm" data-action="list-mode" data-mode="batch">Small Batch</button>
-      <button class="btn ghost sm" data-action="list-mode" data-mode="wall">Tile Wall</button>
-      <button class="btn ghost sm" data-action="list-mode" data-mode="one">One at a time</button>
-      <button class="btn ghost sm" data-action="list-mode" data-mode="jar">Grab Bag</button>
-      <button class="btn ghost sm" data-action="list-mode" data-mode="pool">Pop Pool</button>
-      <button class="btn ghost sm" data-action="list-mode" data-mode="spin">Spin Pick</button>
+      <button class="btn ${mode==='all'?'':'ghost'} sm" data-action="list-mode" data-mode="all">Full list</button>
+      <button class="btn ${mode==='spotlight'?'':'ghost'} sm" data-action="list-mode" data-mode="spotlight">Spotlight</button>
+      <button class="btn ${mode==='batch'?'':'ghost'} sm" data-action="list-mode" data-mode="batch">Small Batch</button>
+      <button class="btn ${mode==='wall'?'':'ghost'} sm" data-action="list-mode" data-mode="wall">Tile Wall</button>
+      <button class="btn ${mode==='one'?'':'ghost'} sm" data-action="list-mode" data-mode="one">One at a time</button>
+      <button class="btn ${mode==='jar'?'':'ghost'} sm" data-action="list-mode" data-mode="jar">Grab Bag</button>
+      <button class="btn ${mode==='pool'?'':'ghost'} sm" data-action="list-mode" data-mode="pool">Pop Pool</button>
+      <button class="btn ${mode==='spin'?'':'ghost'} sm" data-action="list-mode" data-mode="spin">Spin Pick</button>
     </div>
   </div>`;
 }
@@ -4943,6 +5211,58 @@ function nextWeekdayDateStr(dayIdx){
   let delta=(dayIdx-cur+7)%7;
   const d=new Date(now); d.setDate(now.getDate()+delta);
   return toDateStr(d);
+}
+
+
+function exportBackup(){
+  try{
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      version: 1,
+      state: state
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'snapback-backup-'+todayStr()+'.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 2500);
+    showAppMessage('Backup downloaded', 'Saved snapback-backup-'+todayStr()+'.json. Use Import backup on another device to restore.');
+  }catch(e){
+    showAppMessage('Backup failed', String(e && e.message || e));
+  }
+}
+function importBackupFile(file){
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const data = JSON.parse(String(reader.result||''));
+      const incoming = data.state || data;
+      if(!incoming || typeof incoming !== 'object'){
+        showAppMessage('Invalid file', 'That does not look like a SnapBack backup.');
+        return;
+      }
+      showAppMessage('Restore backup?', 'This replaces tasks, calendar, and settings on this device with the file.', {
+        ok: 'Restore',
+        cancel: 'Cancel',
+        onOk: ()=>{
+          const d = emptyState();
+          state = Object.assign(d, incoming);
+          state.settings = Object.assign(d.settings, incoming.settings||{});
+          state.timer = Object.assign(d.timer, incoming.timer||{});
+          if(state.timer) state.timer.running = false;
+          persistRender();
+          showAppMessage('Restored', 'Backup loaded on this device.');
+        }
+      });
+    }catch(e){
+      showAppMessage('Could not read backup', String(e && e.message || e));
+    }
+  };
+  reader.readAsText(file);
 }
 
 function exportTaskICS(taskId){
@@ -5331,7 +5651,7 @@ function viewCalendar(){
   </div>
 
   <div class="card">
-    <h3>Free slots</h3>
+    <h3>Free slots</h3><p style="font-size:.82rem;color:var(--muted);margin:0 0 8px">8:00–18:00 window. Tap a free slot to fill the schedule form.</p>
     <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">See open times on a day before you add a meeting.</p>
     <div class="row">
       <div class="field"><label>Day</label><input type="date" id="freeSlotDate" value="${state.selectedDay||todayStr()}"></div>
@@ -5974,7 +6294,7 @@ function parseDatedOneOffs(raw){
       let amb=!ap;
       if(ap==='pm'&&h<12) h+=12;
       else if(ap==='am'&&h===12) h=0;
-      else if(!ap && h>=1 && h<=6) h+=12;
+      else if(!ap && h>=1 && h<=9) h+=12;
       const pad=x=>String(x).padStart(2,'0');
       const start=pad(h)+':'+pad(min);
       const end=pad((h+1)%24)+':'+pad(min);
@@ -5987,7 +6307,7 @@ function parseDatedOneOffs(raw){
       let amb=!ap;
       if(ap==='pm'&&h<12) h+=12;
       else if(ap==='am'&&h===12) h=0;
-      else if(!ap && h>=1 && h<=6) h+=12;
+      else if(!ap && h>=1 && h<=9) h+=12;
       const pad=x=>String(x).padStart(2,'0');
       return {start:pad(h)+':00', end:pad((h+1)%24)+':00', ambiguous:amb};
     }
@@ -6343,8 +6663,12 @@ function viewProjects(){
             `).join('')}
             ${p.related.length > 6 ? `<div style="font-size:.78rem;color:var(--muted)">+ ${p.related.length-6} more</div>` : ''}
           </div>` : 
-          `<div style="margin-top:12px;font-size:.82rem;color:var(--muted)">No tasks linked yet. Add tasks on the Tasks page and they will show up here if the title mentions this class.</div>`
+          `<div style="margin-top:12px;font-size:.82rem;color:var(--muted)">No tasks linked yet. Add one below or on Tasks (titles that mention this class also link).</div>`
         }
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <input class="proj-add" data-class-id="${p.id}" placeholder="Add task for ${escapeHtml(p.title)}…" style="flex:1;min-width:140px">
+          <button type="button" class="btn sm" data-action="proj-add-task" data-class-id="${p.id}">Add task</button>
+        </div>
       </div>
     `).join('')
   }`;
@@ -6353,6 +6677,22 @@ function viewProjects(){
 /* ============================================================
    VIEW: Focus Plate (formerly 1-3-5 Rule)
    ============================================================ */
+function fillPlateFromTasks(){
+  const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner).slice(0,9);
+  if(!open.length){ showAppMessage('No open tasks', 'Add tasks first.'); return; }
+  const r=getRule135();
+  if(!r.big.text && open[0]) r.big={text:open[0].title, done:false};
+  for(let i=0;i<3;i++){
+    if(!(r.medium[i]&&r.medium[i].text) && open[i+1]) r.medium[i]={text:open[i+1].title, done:false};
+  }
+  for(let i=0;i<5;i++){
+    if(!(r.small[i]&&r.small[i].text) && open[i+4]) r.small[i]={text:open[i+4].title, done:false};
+  }
+  state.rule135=state.rule135||{};
+  state.rule135[todayStr()]=r;
+  persistRender();
+  showAppMessage('Plate filled', 'Used your open tasks as a starting plate. Edit any line.');
+}
 function viewRule135(){
   const r=getRule135();
   const nn=state.nonNegotiable[todayStr()];
@@ -6367,6 +6707,7 @@ function viewRule135(){
     <div class="eyebrow">A hard ceiling on today</div>
     <h1>Focus Plate</h1>
     <p>One big thing. Three medium things. Five small things. That's the whole list for today — nothing else counts.</p>
+    <button type="button" class="btn ghost sm" id="fillPlateBtn" style="margin-top:8px">Fill from my open tasks</button>
   </div>
 
   <div class="card" style="background:var(--gold-soft);border-color:var(--gold)">
@@ -6583,9 +6924,25 @@ function fileJournalEntry(id, bucket){
   const copy = {...item, filed:true, bucket, filedAt:todayStr()};
   state.journalFiled[bucket]=state.journalFiled[bucket]||[];
   state.journalFiled[bucket].unshift(copy);
-  // remove from open stickies
   state.journal = (state.journal||[]).filter(j=>j.id!==id);
+  if(bucket==='do'){
+    const task={
+      id:uid(), title:(item.text||'Journal idea').slice(0,120), date:todayStr(), time:'', done:false,
+      tier:'could', notes:'From journal', context:'school', created:Date.now()
+    };
+    state.tasks.unshift(task);
+    pushUndo({type:'add-task', id:task.id, label:'Task from journal — Undo'});
+    persistRender();
+    showAppMessage('Do it', 'Sticky filed. A task was added for today. Open Tasks to set a better date or time.');
+    return;
+  }
+  if(bucket==='file'){
+    persistRender();
+    showAppMessage('Filed', 'Saved under File it. Download from Saved sheets anytime.');
+    return;
+  }
   persistRender();
+  showAppMessage('Dropped', 'Removed from the board. Still in Drop it sheet if you need it.');
 }
 function downloadJournalBucket(bucket){
   const list=(state.journalFiled&&state.journalFiled[bucket])||[];
@@ -6769,16 +7126,19 @@ const TECH_CARDS=[
   {ico:'&#128101;', name:'Body Doubling', when:'Use when: you can\'t make yourself start alone', desc:'A structured "working alongside someone" session — declare a goal, work, check out.', how:['Pick a session style','Set a goal, then start the timer'], id:'bodydouble'}
 ];
 const FAQ_ITEMS=[
-  {q:'Where do I start?', a:'Open the Today tab. It shows your non-negotiable, must-do vs could-do, and what\'s due soon — that\'s the whole "what now?" answer in one place.'},
-  {q:'How do I break down a big assignment?', a:'Go to Bite Size, pick the task, and either add small steps yourself or hit Smart Breakdown for an instant starting set based on what kind of task it is.'},
-  {q:'Which technique should I actually use?', a:'There\'s no wrong answer. As a rule of thumb: too big → Bite Size. Too many things → Eisenhower or Focus Plate. Can\'t start → Focus Pod or Body Doubling. No shape to your day → Time Blocking.'},
-  {q:'Why didn\'t I get a notification when the app was closed?', a:'This app only runs in one browser tab, so it can only remind you while that tab is open — like a kitchen timer, not a phone alarm. For real alarms, use "Export calendar file" on the Calendar page to add everything to your phone\'s own Calendar app.'},
-  {q:'How do I get my classes onto my phone?', a:'Calendar page → Export calendar file. Open the downloaded file and your phone offers to add it to Google/Apple/Outlook Calendar.'},
-  {q:'Does this need internet?', a:'No — almost everything works completely offline, including Smart Breakdown (no AI, no internet needed). Only exporting to calendar or opening music links needs a connection.'},
-  {q:'What\'s the difference between Must-do and Could-do?', a:'Must-do is what genuinely has to happen today — tag a task "Must-do" on the Tasks page. Could-do is everything else that\'d be nice to get to. Today only shows you these two lists, not your whole backlog.'},
-  {q:'Can this block Instagram/TikTok for me?', a:'No — a webpage can\'t see or block other apps, on phone or computer. Focus Guard (Healthy Habits page) can notice when you switch away from this tab during a session, but for real app-blocking you need a dedicated app like One Sec, AppBlock, or Freedom.'},
-  {q:'Will I lose my data?', a:'Everything saves automatically in this browser on this device. It won\'t transfer if you switch browsers or devices, and clearing your browser\'s site data would clear it too — so avoid that if you want to keep your history.'},
-  {q:'What does the tree/streak thing mean?', a:'Every Focus Pod session you finish (not one you reset early) grows a tree on the Today page — it\'s just a visible way to see your effort add up.'}
+  {q:'Where do I start?', a:'Open Today. It shows your non-negotiable, what is due, and a short list for now. Add tasks under Tasks. Use Challenges if you feel stuck.'},
+  {q:'How do I break a big assignment into steps?', a:'Open Techniques → Bite Size (or Challenges → overwhelmed). Pick the task, add small steps yourself, or use Smart Breakdown. Keep steps under about 15 minutes.'},
+  {q:'How do I set Bug Me (alarm)?', a:'Settings → Bug Me → turn on → set time and days → Save. When it rings, sound gets louder for about 55 seconds, then a simple math problem stops it. You can snooze 5 or 10 minutes (limited snoozes).'},
+  {q:'Why no notification when the app is closed?', a:'On the website: browsers only remind you while the tab can run. On the Android APK: allow Notifications and set SnapBack to Unrestricted battery; then Local Notifications can fire. For class times, also Export calendar to Google/Apple Calendar for system alarms.'},
+  {q:'How do I allow notifications on Android?', a:'In SnapBack: Settings → Grant permission. On the phone: Settings → Apps → SnapBack → Notifications → On (not Restricted), and Battery → Unrestricted / allow background.'},
+  {q:'Alarms still quiet on Android?', a:'1) Notifications unrestricted. 2) Battery unrestricted. 3) On some phones: Settings → Alarms & reminders → allow SnapBack. 4) Save Bug Me again after granting permission. 5) Volume on media, not silent. The website cannot match the Clock app; the APK is closer.'},
+  {q:'How do I get classes onto my phone calendar?', a:'Calendar → export calendar file (.ics). Open the file on the phone and add to Google or Apple Calendar.'},
+  {q:'How do laptop and phone stay in sync?', a:'Settings → Account: sign in with the same Google account on both (after Firebase is set up), or use the advanced private sync code on both devices. Same account/code = same data.'},
+  {q:'Does this need internet?', a:'Most features work offline on this device. Cloud sync, Google sign-in, and some exports need internet.'},
+  {q:'Will I lose my data?', a:'Data saves on this device automatically. Clearing site data or uninstalling can wipe local data. Use cloud sync or export backup in Settings if you need a copy.'},
+  {q:'Can this block Instagram?', a:'No. Use a focus app (One Sec, AppBlock, Freedom) for that. Focus Guard only notices when you leave the SnapBack tab.'},
+  {q:'What is Focus Plate vs Eisenhower?', a:'Focus Plate limits how many things count today (1 big, 3 medium, 5 small). Eisenhower sorts by urgent/important. Use either when the list feels too long.'},
+  {q:'How do I import tasks from Todoist or similar?', a:'Settings → Import tasks from other apps → upload a CSV export or paste CSV → Preview & import.'}
 ];
 
 /* ============================================================
@@ -7203,7 +7563,7 @@ function viewSettings(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Make it yours · build 85</div><h1>Settings</h1>
+    <div class="eyebrow">Make it yours · build 140</div><h1>Settings</h1><p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">Profile and Bug Me first. Scroll for sound, notifications, import, and reset.</p>
     <p style="margin-top:4px"><button class="btn ghost sm" id="gotoHelpBtn">Help &amp; FAQ</button></p>
     <div class="card">
       <h3 style="margin:0 0 6px">Your profile</h3>
@@ -7215,6 +7575,7 @@ function viewSettings(){
       </div>
       <div class="field" style="margin-top:8px"><label>Notes</label><input id="profileNotes" placeholder="Anything helpful" value="${escapeHtml((state.profile&&state.profile.notes)||'')}"></div>
       <button class="btn sm" id="saveProfileBtn" style="margin-top:10px">Save profile</button>
+      <button class="btn ghost sm" id="logoutBtn" style="margin-top:10px;margin-left:8px">Log out</button>
     </div>
 
     
@@ -7230,7 +7591,7 @@ function viewSettings(){
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
         ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label style="font-size:.8rem"><input type="checkbox" id="wakeDay${i}" ${(state.wakeAlarm&&state.wakeAlarm.days&&state.wakeAlarm.days.indexOf(i)>=0)?'checked':(i<5&&!(state.wakeAlarm&&state.wakeAlarm.days)?'checked':'')}> ${d}</label>`).join('')}
       </div>
-      <p style="font-size:.82rem;color:var(--muted);margin:10px 0 0">When it fires, sound rises gradually for about 50 seconds. Solve the math to stop. Snooze 5 or 10 minutes (2 snoozes). Use the Alarm sound volume slider below — your phone volume keys also control how loud it is.</p>
+      <p style="font-size:.82rem;color:var(--muted);margin:10px 0 0">When it fires, sound rises gradually for about 55 seconds, then you solve a short math problem to stop (or snooze 5 / 10 minutes). Solve the math to stop. Snooze 5 or 10 minutes (2 snoozes). Use the Alarm sound volume slider below — your phone volume keys also control how loud it is.</p>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:280px">
         <button class="btn" id="saveWakeBtn">Save Bug Me</button>
         <button class="btn ghost sm" id="testWakeBtn" type="button">Preview Bug Me screen</button>
@@ -7243,10 +7604,10 @@ function viewSettings(){
       <div class="field"><label>Firebase config (paste once from Firebase console)</label>
         <textarea id="fbConfigInput" rows="4" placeholder='{ "apiKey": "...", "projectId": "...", ... }' style="width:100%;font-size:.75rem"></textarea>
       </div>
-      <p style="font-size:.78rem;color:var(--muted);margin:8px 0">One-time setup for the school project. Students only need <b>Sign in with Google</b> after this is saved.</p>
+      <p style="font-size:.78rem;color:var(--muted);margin:8px 0">One-time setup for the school project. 1) Paste config once → Save. 2) Sign in with Google on laptop and phone. Same Google account = same data. Firebase Console must have Google sign-in enabled.</p>
       <details style="margin-top:10px">
-        <summary style="cursor:pointer;font-weight:700;font-size:.9rem">Advanced: old sync code (optional)</summary>
-        <p style="font-size:.8rem;color:var(--muted)">Only if you are not using Google sign-in yet. Prefer Google account for privacy.</p>
+        <summary style="cursor:pointer;font-weight:700;font-size:.9rem">Advanced: private sync code (only if not using Google sign-in)</summary>
+        <p style="font-size:.8rem;color:var(--muted)">Prefer Sign in with Google above. Use a private code only if Google sign-in is not available — same code on laptop and phone.</p>
         <div class="field"><label>Private sync code</label>
           <input id="syncCodeInput" placeholder="e.g. GOURI-STUDY-9xK2" value="">
         </div>
@@ -7277,23 +7638,23 @@ function viewSettings(){
     </div><p>Changes apply immediately.</p>
   </div>
   <div class="card">
-    <div class="setgroup"><h4>Appearance</h4>
+    <details class="setgroup" style="padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:12px"><summary style="font-weight:700;cursor:pointer">Appearance &amp; celebrations</summary><div style="margin-top:10px">
       ${toggleRow('setDarkMode','Dark mode', !!s.darkMode)}
     </div>
-    <div class="setgroup"><h4>Celebrations</h4>
-      ${toggleRow('setCelebrateOn','Confetti when I complete a task', s.celebrateOnComplete !== false)}
-      ${toggleRow('setCelebrateSound','Offer a short celebratory beat (asks each time)', s.celebrateSound !== false)}
+    
+      ${toggleRow('setCelebrateOn','Confetti when a task is marked done', s.celebrateOnComplete !== false)}
+      ${toggleRow('setCelebrateSound','Ask “quick jig?” after confetti (optional sound)', s.celebrateSound !== false)}
       <p style="color:var(--muted);font-size:.78rem;margin-top:4px">The beat is a simple 12-second rhythm made in the browser — not a song. You can turn it off permanently here.</p>
     </div>
-    <div class="setgroup"><h4>Timer lengths (minutes)</h4><div class="grid4">
+    </div></details><details class="setgroup" style="padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:12px"><summary style="font-weight:700;cursor:pointer">Timer lengths (minutes)</summary><div style="margin-top:10px"><div class="grid4">
       ${numField('setWork','Focus session', s.workMin,5,90)}${numField('setShort','Short break', s.shortBreakMin,1,30)}
       ${numField('setLong','Long break', s.longBreakMin,5,60)}${numField('setSessions','Sessions before long break', s.sessionsBeforeLong,2,8)}
     </div></div>
-    <div class="setgroup"><h4>Auto-start</h4>
+    </div></details><details class="setgroup" style="padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:12px"><summary style="font-weight:700;cursor:pointer">Auto-start</summary><div style="margin-top:10px">
       ${toggleRow('setAutoBreak','Start breaks automatically', s.autoStartBreaks)}
       ${toggleRow('setAutoWork','Start next focus session automatically', s.autoStartWork)}
     </div>
-    <div class="setgroup"><h4>Alarm sound</h4>
+    </div></details><details class="setgroup" style="padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:12px"><summary style="font-weight:700;cursor:pointer">Sounds &amp; notifications</summary><div style="margin-top:10px"><h4 style="margin:0 0 8px">Alarm sound</h4>
       <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Set how loud Bug Me can get (peak). On a phone, the side volume buttons still control the device volume while this app is open.</p>
       ${toggleRow('setSoundOn','Play a sound when a session ends', s.soundOn)}
       <div class="row" style="margin-top:8px">
@@ -7310,20 +7671,20 @@ function viewSettings(){
       </div>
       <p id="testSoundStatus" style="font-size:.85rem;color:var(--pine);margin:8px 0 0;min-height:1.2em;font-weight:600">${escapeHtml(state.lastTestSoundMsg||'Tap Test sound — a status line will appear here.')}</p>
     </div>
-    <div class="setgroup"><h4>Deadline notifications</h4>
+    <h4 style="margin:16px 0 8px">Deadline notifications</h4>
       ${toggleRow('setNotifyBrowser','Notifications for deadlines (browser tab, or phone APK when allowed)', s.notifyBrowser)}
       <p style="color:var(--muted);font-size:.8rem;margin-top:4px">On the website: only while the tab can run. On the phone APK: uses system notifications if you Grant permission (and allow SnapBack notifications in Android settings).</p>
       <button class="btn sm" id="grantNotifyBtn" type="button" onclick="try{requestNotifyPermission()}catch(e){alert(e)}">Grant permission</button>
       <p style="font-size:.78rem;color:var(--muted);margin-top:8px">If Android says <b>restricted</b> or ~1 notification per day: open phone <b>Settings → Apps → SnapBack → Notifications</b> and set to <b>Unrestricted</b> / allow all.</p>
       <div id="notifyStatus" style="font-size:.85rem;color:var(--pine);margin-top:8px;font-weight:600">${escapeHtml(state.lastNotifyMsg||'Tap Grant permission — result appears here.')}</div>
     </div>
-    <div class="setgroup"><h4>Quotes</h4>
+    </div></details><details class="setgroup" style="padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:12px"><summary style="font-weight:700;cursor:pointer">Quotes (optional)</summary><div style="margin-top:10px">
       ${toggleRow('setQuoteOnLoad','Show a quote once when I open the app', s.quoteOnLoad)}
       <p style="color:var(--muted);font-size:.8rem;margin:6px 0">Add your own favorite lines (lyrics, mantras, anything) — these are yours, stored only in your app.</p>
       <div class="row"><input id="customQuoteInput" placeholder="Add a personal quote or line"><button class="btn sm" id="addQuoteBtn" style="flex:0 0 auto">Add</button></div>
       <div style="margin-top:8px">${(s.customQuotes||[]).map((q,i)=>`<div class="qmini"><span style="flex:1">${escapeHtml(q)}</span><button class="btn danger sm" data-action="remove-quote" data-idx="${i}">✕</button></div>`).join('') || ''}</div>
     </div>
-    <div class="setgroup"><h4>Install app</h4>
+    </div></details><div class="setgroup"><h4>Install app</h4>
       ${(typeof isNativeApp==='function' && isNativeApp()) ? `<p style="color:var(--muted);font-size:.85rem">You already have the phone app installed.</p>`
         : isAppInstalled() ? `<p style="color:var(--muted);font-size:.85rem">Already installed on this device.</p>`
         : deferredInstallPrompt ? `<button class="btn" id="settingsInstallBtn">Install SnapBack</button>`
@@ -7445,14 +7806,36 @@ function wireView(){
       openTaskMenu(id);
     });
     else if(action==='toggle-done-btn') el.addEventListener('click', (e)=>{ e.stopPropagation(); toggleDone(id); });
+    else if(action==='proj-add-task') el.addEventListener('click', ()=>{
+      const cid=el.dataset.classId;
+      const input=document.querySelector('.proj-add[data-class-id="'+cid+'"]');
+      const title=(input&&input.value||'').trim();
+      if(!title){ showAppMessage('Type a task name', 'Write what to do for this class.'); return; }
+      const cls=(state.classes||[]).find(c=>String(c.id)===String(cid));
+      const task={id:uid(), title, date:'', time:'', done:false, projectId:cid, tier:'could', notes:cls?('Class: '+cls.title):'', context:'school', created:Date.now()};
+      state.tasks.unshift(task);
+      if(input) input.value='';
+      pushUndo({type:'add-task', id:task.id, label:'Project task — Undo'});
+      persistRender();
+      showAppMessage('Task added', title+(cls?' · '+cls.title:''));
+    });
     else if(action==='eis-add') el.addEventListener('click', ()=>{
-      const uq=el.dataset.uq==='1', iq=el.dataset.iq==='1';
+      const uq=Number(el.dataset.uq), iq=Number(el.dataset.iq);
       const input=document.querySelector('.eis-add[data-uq="'+el.dataset.uq+'"][data-iq="'+el.dataset.iq+'"]');
       const title=(input&&input.value||'').trim();
-      if(!title){ showAppMessage('Type a task first', 'Write the task name in the box, then tap Add here.'); return; }
-      state.pendingEis={title, urgent:uq, important:iq};
-      state.askDateOpen=true;
+      if(!title){ showAppMessage('Add a title', 'Type the task name in the box above Add here.'); return; }
+      const task={id:uid(), title, date:'', time:'', done:false, urgent:!!uq, important:!!iq, tier:'could', notes:'', context:'school', created:Date.now()};
+      state.tasks.unshift(task);
+      if(input) input.value='';
+      pushUndo({type:'add-task', id:task.id, label:'Task added — Undo'});
       persistRender();
+      showAppMessage('Task added', title+'\n\nAdd a date?', {
+        ok:'Add date', cancel:'Not now',
+        onOk:()=>{
+          state.editingTaskId=task.id;
+          navigateTo('tasks');
+        }
+      });
     });
     else if(action==='set-date') el.addEventListener('change', ()=>{
       const v=el.value||'';
@@ -7555,6 +7938,7 @@ function wireView(){
       if(t) toggleDone(t.id);
       persistRender();
     });
+    else if(action==='challenge-tool') el.addEventListener('click', ()=>{ applyChallengeTool(el.dataset.tool||el.dataset.id, state.challengeId); });
     else if(action==='challenge-open') el.addEventListener('click', ()=>{ state.challengeId=el.dataset.id; persistRender(); });
     else if(action==='challenge-back') el.addEventListener('click', ()=>{ state.challengeId=null; persistRender(); });
     else if(action==='challenge-path') el.addEventListener('click', ()=>{
@@ -7564,11 +7948,11 @@ function wireView(){
       if(p.action==='challenge-home'){ state.challengeId=null; persistRender(); return; }
       if(p.action==='start-wizard') openStartWizard();
       else if(p.action==='plan-ahead'){ state.view='planAhead'; persistRender(); }
-      else if(p.action==='mode-spotlight'){ state.listMode='spotlight'; state.spotlightSize=3; state.filter='all'; navigateTo('tasks'); }
-      else if(p.action==='mode-batch'){ state.listMode='batch'; state.spotlightSize=3; state.filter='all'; navigateTo('tasks'); }
+      else if(p.action==='mode-spotlight'){ state.listMode='spotlight'; state.spotlightSize=3; state.filter='all'; showAppMessage('Spotlight on', 'Tasks shows only 3 items. Switch to Full list anytime.'); navigateTo('tasks'); }
+      else if(p.action==='mode-batch'){ state.listMode='batch'; state.spotlightSize=3; state.filter='all'; showAppMessage('Small Batch', 'Work a set of 3. Finish them, then take another set.'); navigateTo('tasks'); }
       else if(p.action==='mode-wall'){ state.listMode='wall'; navigateTo('tasks'); }
       else if(p.action==='mode-one'){ state.listMode='one'; state.oneAtATimeIndex=0; navigateTo('tasks'); }
-      else if(p.action==='mode-jar'){ state.listMode='jar'; state.jarQueue=null; navigateTo('tasks'); }
+      else if(p.action==='mode-jar'){ state.listMode='jar'; state.jarQueue=null; showAppMessage('Grab Bag', 'List is hidden. Pull one task when ready.'); navigateTo('tasks'); }
       else if(p.action==='mode-pool'){ state.listMode='pool'; navigateTo('tasks'); }
       else if(p.action==='mode-spin'){ state.listMode='spin'; state.spinResult=null; navigateTo('tasks'); }
       else if(p.action==='top-of-mind'){
@@ -7598,7 +7982,7 @@ function wireView(){
         showAppMessage('Backburner', 'Open a task → choose Backburner to hide it from the main list until you bring it back.'); navigateTo('tasks');
         navigateTo('tasks');
       }
-      else if(p.nav) navigateTo(p.nav);
+      else if(p.nav){ const map={rule135:'focusPlate',bitesize:'bitesize',timer:'focus',settings:'bugme',eisenhower:'eisenhower',planAhead:'plan-ahead',journal:'journal',tasks:'bugme'}; applyChallengeTool(map[p.nav]||p.nav, state.challengeId); if(!['rule135','bitesize','timer','settings','eisenhower','planAhead','journal','tasks'].includes(p.nav)) navigateTo(p.nav); }
     });
     else if(action==='journal-file') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); fileJournalEntry(id, el.dataset.bucket); });
     else if(action==='open-bitesize-from-plate') el.addEventListener('click', ()=>{
@@ -7774,8 +8158,40 @@ function wireView(){
       const free=freeSlotsForDate(ds);
       const box=document.getElementById('freeSlotResult');
       if(!box) return;
-      if(!free.length) box.innerHTML='<span style="color:var(--muted)">No free 30-min slots between 8:00 and 18:00 (or day is fully busy).</span>';
-      else box.innerHTML='<b>Free on '+ds+':</b><br>'+free.map(s=>'• '+s).join('<br>');
+      const busyItems = itemsForDate(ds).filter(it=>it.time).sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+      let html = '';
+      if(busyItems.length){
+        html += '<div style="margin-bottom:10px;font-size:.85rem"><b>Busy:</b><br>'+busyItems.map(it=>'• '+(it.time||'')+' '+escapeHtml(it.label||'') ).join('<br>')+'</div>';
+      }
+      if(!free.length){
+        html += '<span style="color:var(--muted)">No free 30-min slots between 8:00 and 18:00.</span>';
+      } else {
+        html += '<b>Free on '+ds+'</b> <span style="font-size:.8rem;color:var(--muted)">(tap a slot to fill Add to schedule)</span><br>';
+        html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">'+free.map(s=>{
+          const start = s.split('–')[0];
+          return '<button type="button" class="btn ghost sm free-slot-pick" data-start="'+start+'" data-date="'+ds+'">'+s+'</button>';
+        }).join('')+'</div>';
+      }
+      box.innerHTML = html;
+      box.querySelectorAll('.free-slot-pick').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const start = btn.dataset.start;
+          const date = btn.dataset.date;
+          const dateEl = document.getElementById('schedSessionDate') || document.getElementById('classSessionDate');
+          const startEl = document.getElementById('schedStart') || document.getElementById('classStart');
+          const endEl = document.getElementById('schedEnd') || document.getElementById('classEnd');
+          if(dateEl) dateEl.value = date;
+          if(startEl) startEl.value = start;
+          if(endEl && start){
+            const [h,m]=start.split(':').map(Number);
+            const endM = h*60+(m||0)+60;
+            endEl.value = String(Math.floor(endM/60)%24).padStart(2,'0')+':'+String(endM%60).padStart(2,'0');
+          }
+          const addCard = document.getElementById('addSchedBtn') || document.getElementById('addClassBtn');
+          if(addCard) addCard.scrollIntoView({behavior:'smooth', block:'center'});
+          showAppMessage('Slot selected', 'Start time set to '+start+' on '+date+'. Complete the form and save.');
+        });
+      });
     });
     const icsIn=document.getElementById('icsImportInput');
     if(icsIn) icsIn.addEventListener('change', ()=>{ const f=icsIn.files&&icsIn.files[0]; if(f) importICSFile(f); icsIn.value=''; });
@@ -8137,6 +8553,8 @@ function wireView(){
   if(state.view==='bitesize'){
     const sel=document.getElementById('cheeseTaskSelect');
     if(sel) sel.addEventListener('change', ()=>{ state.cheeseTaskId=sel.value; persistRender(); });
+    const fillPlateBtn=document.getElementById('fillPlateBtn');
+    if(fillPlateBtn) fillPlateBtn.addEventListener('click', fillPlateFromTasks);
     const magicBtn=document.getElementById('magicBtn');
     if(magicBtn) magicBtn.addEventListener('click', ()=>{ try{ runMagicBreakdown(); }catch(e){ console.warn(e); } });
     const addChunk=document.getElementById('addChunkBtn');
@@ -8265,6 +8683,8 @@ function wireView(){
         ok:'Import all', cancel:'Cancel',
         onOk:()=>{
           const n=importTasksFromRows(parsed);
+          const st=document.getElementById('taskCsvStatus');
+          if(st) st.textContent='Imported '+n+' task(s). Open Tasks to review or edit dates.';
           showAppMessage('Imported', n+' task(s) added. Open Tasks to review.');
           navigateTo('tasks');
         }
@@ -8346,6 +8766,10 @@ function wireView(){
     if(shareWaBtn) shareWaBtn.addEventListener('click', ()=>{
       saveShareContactsFromForm();
       const msg=buildStatusUpdateText();
+      if(!msg || msg.trim().length<8){
+        showAppMessage('Nothing to share yet', 'Add your name in Profile and complete or schedule something, then try again.');
+        return;
+      }
       let phone=(document.getElementById('shareWaPhone')?.value||'').replace(/[^0-9]/g,'');
       const url = phone
         ? ('https://wa.me/'+phone+'?text='+encodeURIComponent(msg))
@@ -8399,6 +8823,13 @@ function wireView(){
     if(saveWake) saveWake.addEventListener('click', saveWakeAlarmFromForm);
     const testWake=document.getElementById('testWakeBtn');
     if(testWake) testWake.addEventListener('click', ()=>triggerWakeMath('test'));
+    const logoutBtn=document.getElementById('logoutBtn');
+    if(logoutBtn) logoutBtn.addEventListener('click', ()=>{
+      showAppMessage('Log out?', 'You will need to sign in again to use SnapBack on this device.', {
+        ok:'Log out', cancel:'Stay',
+        onOk:()=>logoutSnapBack()
+      });
+    });
     const saveProfile=document.getElementById('saveProfileBtn');
     if(saveProfile) saveProfile.addEventListener('click', ()=>{
       if(!state.profile) state.profile={};
@@ -8452,7 +8883,7 @@ function wireView(){
     const ab=document.getElementById('setAutoBreak'); if(ab) ab.addEventListener('change', ()=>{ updateSetting('autoStartBreaks', ab.checked); flashSaved(); });
     const aw=document.getElementById('setAutoWork'); if(aw) aw.addEventListener('change', ()=>{ updateSetting('autoStartWork', aw.checked); flashSaved(); });
     const so=document.getElementById('setSoundOn'); if(so) so.addEventListener('change', ()=>{ updateSetting('soundOn', so.checked); flashSaved(); });
-    const as=document.getElementById('setAlarmSound'); if(as){ as.addEventListener('change', ()=>{ if(state.settings) state.settings.alarmSound=as.value; updateSetting('alarmSound', as.value); flashSaved(); playAlarm(true); }); as.addEventListener('input', ()=>{ if(state.settings) state.settings.alarmSound=as.value; }); }
+    const as=document.getElementById('setAlarmSound'); if(as){ as.addEventListener('change', ()=>{ if(state.settings) state.settings.alarmSound=as.value; state.settings.alarmSound=as.value; saveState(); playAlarm(true); setTestSoundStatus('Playing: '+as.value); }); }
     const sv=document.getElementById('setSoundVol'); if(sv) sv.addEventListener('input', ()=>{ state.settings.soundVolume=Number(sv.value); debouncedSave(); });
     const tb=document.getElementById('testSoundBtn'); if(tb) tb.addEventListener('click', testAlarm);
     const nb=document.getElementById('setNotifyBrowser'); if(nb) nb.addEventListener('change', ()=>{ updateSetting('notifyBrowser', nb.checked); flashSaved(); });
