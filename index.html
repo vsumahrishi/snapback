@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes">
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="185">
+<meta name="snapback-build" content="186">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1620,7 +1620,7 @@ function setActiveTask(id){ state.timer.activeTaskId = id ? Number(id) : null; p
    Task helpers
    ============================================================ */
 function uid(){ return Date.now()+Math.floor(Math.random()*1000); }
-function findTask(id){ return state.tasks.find(t=>t.id===id); }
+function findTask(id){ if(id==null||id==="") return null; return (state.tasks||[]).find(t=>String(t.id)===String(id)); }
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 /* Native confirm()/alert() are blocked (return nothing / throw) inside sandboxed iframes like this one —
    that's why Delete, Reset, etc. did nothing before. This renders an inline Yes/Cancel instead. */
@@ -1991,37 +1991,51 @@ function ensureTaskForBite(){
 }
 function importAiBitesFromPaste(){
   try{
-    const raw=(document.getElementById('aiBitesPaste')&&document.getElementById('aiBitesPaste').value||'').trim();
+    const ta=document.getElementById('aiBitesPaste');
+    const raw=(ta&&ta.value||'').trim();
     if(!raw){ showAppMessage('Paste first', 'Paste the AI list, then tap Add as bites.'); return; }
+    // Capture Other title before any re-render
+    const otherEl=document.getElementById('biteOtherTitle');
+    if(otherEl && otherEl.value.trim()) state.biteOtherTitle=otherEl.value.trim();
     const t=ensureTaskForBite();
-    if(!t){ showAppMessage('No task', 'Type a title under Others first.'); return; }
+    if(!t){ showAppMessage('No task', 'Choose a task or type a title under Others, then try again.'); return; }
     const lines=raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
     const bites=[];
     lines.forEach(l=>{
       let s=l
         .replace(/^#{1,6}\s*/,'')
-        .replace(/^\s*[-*•●]+\s*/,'')
+        .replace(/^\s*[-*•●○▪▸►]+\s*/,'')
         .replace(/^\s*\d+[.)]\s*/,'')
         .replace(/^\s*\(\d+\)\s*/,'')
         .replace(/^\s*\[ \]\s*/,'')
         .replace(/^\s*\[[xX]\]\s*/,'')
         .replace(/\*\*/g,'')
+        .replace(/^\s*[–—-]\s*/,'')
         .trim();
       if(s.length>=2) bites.push(s);
     });
     if(!bites.length){
-      // whole paste as one bite
-      bites.push(raw.slice(0,200));
+      // whole paste as one bite (or split by semicolon)
+      const parts=raw.split(/[;|]/).map(p=>p.trim()).filter(p=>p.length>=2);
+      if(parts.length>1) parts.forEach(p=>bites.push(p.slice(0,200)));
+      else bites.push(raw.slice(0,200));
     }
     t.chunks=Array.isArray(t.chunks)?t.chunks:[];
-    bites.forEach(s=>{ const tx=String(s||'').trim(); if(tx) t.chunks.push({id:uid(), text:tx, done:false}); });
+    let added=0;
+    bites.forEach(s=>{
+      const tx=String(s||'').trim();
+      if(!tx) return;
+      t.chunks.push({id:uid(), text:tx, done:false});
+      added++;
+    });
     normalizeChunks(t);
-    const ta=document.getElementById('aiBitesPaste'); if(ta) ta.value='';
     state.cheeseTaskId=t.id;
+    // Clear paste only after successful save path
+    if(ta) ta.value='';
     persistRender();
-    showAppMessage('Bites added', bites.length+' bites saved under “'+t.title+'”.');
+    showAppMessage('Bites added', added+' bites saved under “'+(t.title||'task')+'”.');
   }catch(e){
-    console.warn(e);
+    console.warn('importAiBitesFromPaste', e);
     showAppMessage('Could not add bites', String(e&&e.message||e));
   }
 }
@@ -6100,10 +6114,10 @@ function viewBiteSize(){
   <div class="card" style="background:var(--gold-soft);border-color:var(--gold)">
     <div style="font-weight:800;margin-bottom:6px">✨ Ask AI to break up a chapter</div>
     <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Book + chapter → AI suggests realistic 10–20 min bites. Paste ideas back as bites below.</p>
-    <div class="field"><label>Book / subject</label><input id="biteBook" placeholder="e.g. NCERT Physics Class 11" value="${escapeHtml((t.studyMeta&&t.studyMeta.book)||'')}"></div>
+    <div class="field"><label>Book / subject</label><input id="biteBook" placeholder="e.g. NCERT Physics Class 11" value="${escapeHtml((t&&t.studyMeta&&t.studyMeta.book)||'')}"></div>
     <div class="row" style="margin-top:8px">
-      <div class="field"><label>Chapter #</label><input id="biteChNum" placeholder="e.g. 4" value="${escapeHtml((t.studyMeta&&t.studyMeta.chNum)||'')}"></div>
-      <div class="field" style="flex:2"><label>Chapter name</label><input id="biteChName" placeholder="e.g. Motion in a plane" value="${escapeHtml((t.studyMeta&&t.studyMeta.chName)||'')}"></div>
+      <div class="field"><label>Chapter #</label><input id="biteChNum" placeholder="e.g. 4" value="${escapeHtml((t&&t.studyMeta&&t.studyMeta.chNum)||'')}"></div>
+      <div class="field" style="flex:2"><label>Chapter name</label><input id="biteChName" placeholder="e.g. Motion in a plane" value="${escapeHtml((t&&t.studyMeta&&t.studyMeta.chName)||'')}"></div>
     </div>
     <div class="row" style="margin-top:10px;align-items:center;flex-wrap:wrap;gap:8px">
       ${aiPickerHtml('bite')}
@@ -6113,7 +6127,7 @@ function viewBiteSize(){
   <div class="card">
     <label style="color:var(--pine)">⚡ Quick offline breakdown</label>
     <div class="row">
-      <input id="magicInput" placeholder="${escapeHtml(t.title)}">
+      <input id="magicInput" placeholder="${escapeHtml((t&&t.title)||otherTitle||'topic')}">
       <button class="btn sm" id="magicBtn" style="flex:0 0 auto">Break it down</button>
     </div>
     <div id="magicStatus" style="font-size:.8rem;color:var(--muted);margin-top:6px"></div>
@@ -6134,9 +6148,9 @@ function viewBiteSize(){
       ${chunks.length?chunks.map((c,i)=>{
         const label = String((c && (c.text||c.title||c.label)) || ('Bite '+(i+1)));
         return `<li style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);width:100%">
-        <input type="checkbox" ${c.done?'checked':''} data-action="toggle-chunk" data-id="${t.id}" data-idx="${i}" style="flex:0 0 auto;width:18px;height:18px">
-        <input type="text" value="${escapeHtml(label)}" data-action="edit-chunk" data-id="${t.id}" data-idx="${i}" style="flex:1 1 auto;min-width:120px;width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:.95rem;color:var(--ink);background:var(--card);${c.done?'text-decoration:line-through;opacity:.65':''}">
-        <button type="button" class="btn danger sm" data-action="delete-chunk" data-id="${t.id}" data-idx="${i}" style="flex:0 0 auto">Delete</button>
+        <input type="checkbox" ${c.done?'checked':''} data-action="toggle-chunk" data-id="${t?t.id:''}" data-idx="${i}" style="flex:0 0 auto;width:18px;height:18px">
+        <input type="text" value="${escapeHtml(label)}" data-action="edit-chunk" data-id="${t?t.id:''}" data-idx="${i}" style="flex:1 1 auto;min-width:120px;width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:.95rem;color:var(--ink);background:var(--card);${c.done?'text-decoration:line-through;opacity:.65':''}">
+        <button type="button" class="btn danger sm" data-action="delete-chunk" data-id="${t?t.id:''}" data-idx="${i}" style="flex:0 0 auto">Delete</button>
       </li>`;
       }).join(''):'<li class="empty">No bites yet — type a topic, tap Break it down, or paste an AI list.</li>'}
     </ul>
@@ -7894,18 +7908,20 @@ function viewSettings(){
         <div class="field" style="flex:1;min-width:120px"><label>From</label><input type="date" id="shareFrom" value=""></div>
         <div class="field" style="flex:1;min-width:120px"><label>To</label><input type="date" id="shareTo" value=""></div>
       </div>
-      <label style="display:flex;gap:8px;align-items:center;font-size:.9rem;margin:4px 0"><input type="checkbox" id="shareSelDone" checked> Completed tasks</label>
-      <label style="display:flex;gap:8px;align-items:center;font-size:.9rem;margin:4px 0"><input type="checkbox" id="shareSelOpen" checked> Open tasks</label>
-      <label style="display:flex;gap:8px;align-items:center;font-size:.9rem;margin:4px 0"><input type="checkbox" id="shareSelClasses"> Class load summary</label>
+      <div style="display:flex;flex-direction:column;gap:8px;margin:10px 0;max-width:320px">
+        <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelDone" checked style="width:18px;height:18px;flex:0 0 auto"> <span>Completed tasks</span></label>
+        <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelOpen" checked style="width:18px;height:18px;flex:0 0 auto"> <span>Open tasks</span></label>
+        <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelClasses" style="width:18px;height:18px;flex:0 0 auto"> <span>Class load summary</span></label>
+      </div>
       <div class="field" style="margin-top:8px"><label>Preview</label><textarea id="sharePreview" rows="6" style="width:100%;font-size:.85rem"></textarea></div>
       <div class="field"><label>WhatsApp number (optional, with country code)</label><input id="shareWaPhone" placeholder="e.g. 9198xxxxxxxx" value="${escapeHtml((state.profile&&state.profile.waPhone)||'')}"></div>
       <div class="field"><label>Email (optional)</label><input id="shareEmail" type="email" placeholder="teacher@school.edu" value="${escapeHtml((state.profile&&state.profile.teacherEmail)||'')}"></div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
         <button type="button" class="btn" id="shareRefreshPreview">Update preview</button>
         <button type="button" class="btn" id="shareWaBtn">WhatsApp</button>
-        <button type="button" class="btn ghost" id="shareEmailBtn">Email</button>
-        <button type="button" class="btn ghost" id="shareDownloadBtn">Download</button>
-        <button type="button" class="btn ghost" id="shareCopyBtn">Copy text</button>
+        <button type="button" class="btn" id="shareEmailBtn">Email</button>
+        <button type="button" class="btn" id="shareDownloadBtn">Download</button>
+        <button type="button" class="btn" id="shareCopyBtn">Copy text</button>
       </div>
     </div>
     <div class="savedmsg" id="savedMsg"></div>
@@ -7923,6 +7939,114 @@ function viewSettings(){
 /* ============================================================
    Event wiring (delegation, per view)
    ============================================================ */
+
+function saveShareContactsFromForm(){
+  try{
+    if(!state.profile) state.profile={};
+    const wa=(document.getElementById('shareWaPhone')&&document.getElementById('shareWaPhone').value||'').trim();
+    const em=(document.getElementById('shareEmail')&&document.getElementById('shareEmail').value||'').trim();
+    if(wa) state.profile.waPhone=wa;
+    if(em) state.profile.teacherEmail=em;
+    saveState();
+  }catch(e){ console.warn('saveShareContactsFromForm', e); }
+}
+function buildStatusUpdateText(){
+  try{
+    const fromEl=document.getElementById('shareFrom');
+    const toEl=document.getElementById('shareTo');
+    let from=(fromEl&&fromEl.value)||todayStr();
+    let to=(toEl&&toEl.value)||todayStr();
+    if(from>to){ const tmp=from; from=to; to=tmp; }
+    const wantDone=!(document.getElementById('shareSelDone')) || document.getElementById('shareSelDone').checked;
+    const wantOpen=!(document.getElementById('shareSelOpen')) || document.getElementById('shareSelOpen').checked;
+    const wantClasses=document.getElementById('shareSelClasses') && document.getElementById('shareSelClasses').checked;
+    const name=(state.profile&&state.profile.name)||'Student';
+    const lines=[];
+    lines.push('SnapBack update — '+name);
+    lines.push('Range: '+from+' to '+to);
+    lines.push('');
+    const inRange=function(d){
+      if(!d) return false;
+      return d>=from && d<=to;
+    };
+    const tasks=(state.tasks||[]);
+    if(wantDone){
+      const done=tasks.filter(t=>t.done && (inRange(t.date) || inRange(t.completedAt) || (!t.date && t.done)));
+      lines.push('Completed tasks ('+done.length+'):');
+      if(done.length){
+        done.slice(0,40).forEach(t=>{
+          lines.push('• '+(t.title||'Untitled')+(t.date?' ('+t.date+')':''));
+        });
+        if(done.length>40) lines.push('…and '+(done.length-40)+' more');
+      } else lines.push('(none in this range)');
+      lines.push('');
+    }
+    if(wantOpen){
+      const open=tasks.filter(t=>!t.done && (inRange(t.date) || !t.date));
+      // Prefer dated in range; also include undated open tasks as load context
+      const openDated=tasks.filter(t=>!t.done && t.date && inRange(t.date));
+      const openUndated=tasks.filter(t=>!t.done && !t.date);
+      lines.push('Open tasks in range ('+openDated.length+'):');
+      if(openDated.length){
+        openDated.slice(0,40).forEach(t=>{
+          lines.push('• '+(t.title||'Untitled')+' ('+t.date+')');
+        });
+        if(openDated.length>40) lines.push('…and '+(openDated.length-40)+' more');
+      } else lines.push('(none with a due date in this range)');
+      if(openUndated.length){
+        lines.push('Open tasks without a date ('+openUndated.length+'):');
+        openUndated.slice(0,15).forEach(t=>lines.push('• '+(t.title||'Untitled')));
+        if(openUndated.length>15) lines.push('…and '+(openUndated.length-15)+' more');
+      }
+      lines.push('');
+    }
+    if(wantClasses){
+      const classes=(state.classes||[]);
+      lines.push('Class load summary:');
+      if(!classes.length) lines.push('(no classes saved)');
+      else {
+        const byDay={};
+        classes.forEach(c=>{
+          const day=c.day||c.weekday||'Other';
+          if(!byDay[day]) byDay[day]=[];
+          byDay[day].push((c.name||c.title||'Class')+(c.start?(' '+c.start+(c.end?('–'+c.end):'')) : ''));
+        });
+        Object.keys(byDay).forEach(day=>{
+          lines.push(day+': '+byDay[day].join('; '));
+        });
+      }
+      lines.push('');
+    }
+    lines.push('— sent from SnapBack');
+    return lines.join('\n').trim();
+  }catch(e){
+    console.warn('buildStatusUpdateText', e);
+    return 'SnapBack update (could not build full text).';
+  }
+}
+function refreshSharePreview(){
+  try{
+    const ta=document.getElementById('sharePreview');
+    if(!ta) return;
+    ta.value=buildStatusUpdateText();
+  }catch(e){ console.warn('refreshSharePreview', e); }
+}
+function getShareMessage(){
+  try{
+    const ta=document.getElementById('sharePreview');
+    let msg=(ta&&ta.value||'').trim();
+    if(!msg || msg.length<5){
+      msg=buildStatusUpdateText();
+      if(ta) ta.value=msg;
+    }
+    return msg||'';
+  }catch(e){
+    console.warn('getShareMessage', e);
+    return '';
+  }
+}
+
+
 function wireView(){
   const main=document.getElementById('main');
   if(!main) return;
