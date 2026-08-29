@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="84">
+<meta name="snapback-build" content="85">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1169,18 +1169,33 @@ function setTestSoundStatus(msg){
   if(el) el.textContent=msg;
 }
 function testAlarm(){
-  const kind = (state.settings && state.settings.alarmSound) || 'chime';
-  const labels = {chime:'Chime (bright notes)', bell:'Bell (long ring)', beep:'Beep (sharp pulses)', digital:'Digital (fast blips)', radar:'Radar (whoop)', knock:'Knock (low thuds)'};
-  playAlarm(true);
-  try{ if(navigator.vibrate) navigator.vibrate(kind==='beep'?[50,40,50,40,50]:[120]); }catch(e){}
-  const label = labels[kind]||kind;
-  setTestSoundStatus('Now playing: '+label);
-  setTimeout(()=>{ try{ showAppMessage('Sound test', 'Playing: '+label+'\n\nChange the Sound menu and tap Test sound again to compare.'); }catch(e){} }, 350);
+  const sel = document.getElementById('setAlarmSound');
+  const kind = (sel && sel.value) ? sel.value : ((state.settings && state.settings.alarmSound) || 'chime');
+  if(!state.settings) state.settings = {};
+  state.settings.alarmSound = kind;
+  const labels = {
+    chime: 'CHIME — four rising notes',
+    bell: 'BELL — one long deep ring',
+    beep: 'BEEP — four sharp short beeps',
+    digital: 'DIGITAL — fast high blips',
+    radar: 'RADAR — two rising whoops',
+    knock: 'KNOCK — three low thuds'
+  };
+  // Play immediately using explicit kind (do not rely on stale state only)
+  resumeAudioThen((ctx)=>{
+    try{ playDistinctAlarm(ctx, kind, 0.95); }catch(e){ console.warn(e); setTestSoundStatus('Audio error: '+e); }
+  });
+  try{ if(navigator.vibrate) navigator.vibrate(kind==='beep'?[40,30,40,30,40]:[100]); }catch(e){}
+  const label = labels[kind] || kind;
+  setTestSoundStatus('Selected value="'+kind+'" → '+label);
+  setTimeout(()=>{ try{ showAppMessage('Sound test', 'Playing: '+label+'\n\nIf every choice sounds identical, tell us — the status line must show a different value= each time.'); }catch(e){} }, 300);
 }
 
 function playAlarm(force){
   if(!force && state.settings && state.settings.soundOn===false) return;
-  const kind = (state.settings&&state.settings.alarmSound)||'chime';
+  const sel = document.getElementById('setAlarmSound');
+  let kind = (sel && sel.value) || (state.settings&&state.settings.alarmSound) || 'chime';
+  if(state.settings) state.settings.alarmSound = kind;
   const vol = Math.max(0.25, Math.min(1, Number(state.settings&&state.settings.soundVolume)||0.9));
   resumeAudioThen((ctx)=>{
     try{ playDistinctAlarm(ctx, kind, vol); }catch(e){ console.warn(e); }
@@ -1190,38 +1205,34 @@ function playAlarm(force){
 function playDistinctAlarm(ctx, kind, vol){
   const now = ctx.currentTime;
   const out = ctx.destination;
+  console.log('playDistinctAlarm kind=', kind);
   function tone(type, freq, t0, dur, peak, freqEnd){
     const osc=ctx.createOscillator(), g=ctx.createGain();
     osc.type=type;
     osc.frequency.setValueAtTime(freq, t0);
     if(freqEnd) osc.frequency.linearRampToValueAtTime(freqEnd, t0+dur);
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.linearRampToValueAtTime(peak, t0+0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    g.gain.linearRampToValueAtTime(Math.max(0.05, peak), t0+0.025);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+Math.max(0.05, dur));
     osc.connect(g); g.connect(out);
-    osc.start(t0); osc.stop(t0+dur+0.02);
+    osc.start(t0); osc.stop(t0+dur+0.05);
   }
+  // EXTREMELY different patterns (rhythm + pitch + length)
   if(kind==='beep'){
-    // 4 harsh short digital beeps — unmistakable
-    for(let i=0;i<4;i++) tone('square', 1200, now+i*0.28, 0.12, vol*0.5);
+    for(let i=0;i<5;i++) tone('square', 1400, now+i*0.2, 0.08, vol*0.55);
   } else if(kind==='bell'){
-    // One long low church-like bell with overtone
-    tone('sine', 392, now, 1.8, vol*0.75);
-    tone('sine', 784, now, 1.2, vol*0.28);
-    tone('sine', 1176, now, 0.8, vol*0.12);
+    tone('sine', 330, now, 2.2, vol*0.85);
+    tone('sine', 660, now, 1.6, vol*0.3);
   } else if(kind==='digital'){
-    // Fast ascending arcade blips
-    [600,750,900,1100,1300].forEach((f,i)=> tone('square', f, now+i*0.09, 0.08, vol*0.4));
+    [500,700,900,1100,1400,1800].forEach((f,i)=> tone('square', f, now+i*0.07, 0.06, vol*0.45));
   } else if(kind==='radar'){
-    // Slow whoop (siren-ish)
-    tone('sawtooth', 400, now, 0.7, vol*0.35, 900);
-    tone('sawtooth', 400, now+0.75, 0.7, vol*0.35, 900);
+    tone('sawtooth', 300, now, 0.85, vol*0.4, 1100);
+    tone('sawtooth', 300, now+0.95, 0.85, vol*0.4, 1100);
   } else if(kind==='knock'){
-    // Low thuds
-    for(let i=0;i<3;i++) tone('sine', 120, now+i*0.35, 0.2, vol*0.8, 80);
+    for(let i=0;i<3;i++) tone('sine', 90, now+i*0.4, 0.25, vol*0.95, 60);
   } else {
-    // chime — bright rising xylophone-like notes (default)
-    [523.25, 659.25, 783.99, 1046.5].forEach((f,i)=> tone('sine', f, now+i*0.22, 0.4, vol*0.55));
+    // chime
+    [523, 659, 784, 1047].forEach((f,i)=> tone('sine', f, now+i*0.25, 0.5, vol*0.6));
   }
 }
 /**
@@ -3131,7 +3142,7 @@ function renderSidebar(){
       NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('') +
-      `<div class="navfoot">Saved automatically · build 84</div>`;
+      `<div class="navfoot">Saved automatically · build 85</div>`;
     el.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.nav)));
     document.getElementById('brandHomeBtn').addEventListener('click', ()=>setView('today'));
     mobileMenuOpen=false;
@@ -3149,7 +3160,7 @@ function renderMobileDrawer(){
       ${NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('')}
-      <div class="navfoot">Saved automatically · build 84</div>
+      <div class="navfoot">Saved automatically · build 85</div>
     </div>`;
   root.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{ mobileMenuOpen=false; setView(b.dataset.nav); }));
   document.getElementById('drawerBackdrop').addEventListener('click', ()=>{ mobileMenuOpen=false; renderMobileDrawer(); });
@@ -7192,7 +7203,7 @@ function viewSettings(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Make it yours · build 84</div><h1>Settings</h1>
+    <div class="eyebrow">Make it yours · build 85</div><h1>Settings</h1>
     <p style="margin-top:4px"><button class="btn ghost sm" id="gotoHelpBtn">Help &amp; FAQ</button></p>
     <div class="card">
       <h3 style="margin:0 0 6px">Your profile</h3>
@@ -8441,7 +8452,7 @@ function wireView(){
     const ab=document.getElementById('setAutoBreak'); if(ab) ab.addEventListener('change', ()=>{ updateSetting('autoStartBreaks', ab.checked); flashSaved(); });
     const aw=document.getElementById('setAutoWork'); if(aw) aw.addEventListener('change', ()=>{ updateSetting('autoStartWork', aw.checked); flashSaved(); });
     const so=document.getElementById('setSoundOn'); if(so) so.addEventListener('change', ()=>{ updateSetting('soundOn', so.checked); flashSaved(); });
-    const as=document.getElementById('setAlarmSound'); if(as) as.addEventListener('change', ()=>{ updateSetting('alarmSound', as.value); flashSaved(); });
+    const as=document.getElementById('setAlarmSound'); if(as){ as.addEventListener('change', ()=>{ if(state.settings) state.settings.alarmSound=as.value; updateSetting('alarmSound', as.value); flashSaved(); playAlarm(true); }); as.addEventListener('input', ()=>{ if(state.settings) state.settings.alarmSound=as.value; }); }
     const sv=document.getElementById('setSoundVol'); if(sv) sv.addEventListener('input', ()=>{ state.settings.soundVolume=Number(sv.value); debouncedSave(); });
     const tb=document.getElementById('testSoundBtn'); if(tb) tb.addEventListener('click', testAlarm);
     const nb=document.getElementById('setNotifyBrowser'); if(nb) nb.addEventListener('change', ()=>{ updateSetting('notifyBrowser', nb.checked); flashSaved(); });
