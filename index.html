@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="170">
+<meta name="snapback-build" content="180">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1179,21 +1179,18 @@ function testAlarm(){
   const kind = (sel && sel.value) ? sel.value : ((state.settings && state.settings.alarmSound) || 'chime');
   if(!state.settings) state.settings = {};
   state.settings.alarmSound = kind;
-  const labels = {
-    chime: 'Chime — rising notes',
-    bell: 'Bell — long ring',
-    beep: 'Beep — sharp pulses',
-    digital: 'Digital — fast blips',
-    radar: 'Radar — whoops',
-    knock: 'Wake bursts — sharp alarm pulses'
-  };
-  resumeAudioThen((ctx)=>{
-    try{ playDistinctAlarm(ctx, kind, 0.95); }catch(e){ console.warn(e); }
-  });
-  try{ if(navigator.vibrate) navigator.vibrate(kind==='beep'?[40,30,40]:[80]); }catch(e){}
-  setTestSoundStatus('Playing: '+(labels[kind]||kind));
+  saveState();
+  let played = false;
+  try{
+    resumeAudioThen((ctx)=>{
+      try{ playDistinctAlarm(ctx, kind, 1); played = true; }catch(e){ console.warn(e); }
+    });
+  }catch(e){ console.warn(e); }
+  // Always also fire HTML5 beep so laptop users hear something even if Web Audio is flaky
+  try{ playBeepFallback(); played = true; }catch(e){}
+  try{ if(navigator.vibrate) navigator.vibrate([80,40,80]); }catch(e){}
+  setTestSoundStatus(played ? ('Playing: '+kind) : 'Could not play — check device volume');
 }
-
 function playAlarm(force){
   if(!force && state.settings && state.settings.soundOn===false) return;
   const sel = document.getElementById('setAlarmSound');
@@ -1939,7 +1936,7 @@ const TEMPLATES={
   generic:['Figure out exactly what "done" looks like for this','Gather anything you need — notes, links, materials','Do the smallest possible first step','Do the next chunk','Take a short break','Look over what you have so far','Fix any gaps or mistakes','Do a final check','Turn it in or mark it complete']
 };
 function applyTemplate(key){
-  const t=findTask(state.cheeseTaskId); if(!t) return;
+  const t=ensureTaskForBite(); if(!t) return;
   t.chunks=t.chunks||[];
   const existing=new Set(t.chunks.map(c=>c.text.toLowerCase()));
   TEMPLATES[key].forEach(txt=>{ if(!existing.has(txt.toLowerCase())) t.chunks.push({id:uid(),text:txt,done:false}); });
@@ -1960,94 +1957,116 @@ function suggestTemplateForTitle(title){
   return 'generic';
 }
 function ensureTaskForBite(){
-  if(state.cheeseTaskId && state.cheeseTaskId!=='__other__'){
-    const t=findTask(state.cheeseTaskId);
-    if(t) return t;
-  }
-  const title=(document.getElementById('biteOtherTitle')?.value||state.biteOtherTitle||'').trim()
-    || (document.getElementById('magicInput')?.value||'').trim()
-    || 'Study task';
-  let t=(state.tasks||[]).find(x=>!x.done && x.title===title);
-  if(!t){
-    t={id:uid(), title, date:'', time:'', done:false, chunks:[], tier:'could', notes:'', context:'school', created:Date.now()};
-    state.tasks.unshift(t);
-  }
-  state.cheeseTaskId=t.id;
-  state.biteOtherTitle=title;
-  return t;
+  try{
+    if(state.cheeseTaskId && state.cheeseTaskId!=='__other__'){
+      const existing=findTask(state.cheeseTaskId);
+      if(existing) return existing;
+    }
+    const title=(
+      (document.getElementById('biteOtherTitle')&&document.getElementById('biteOtherTitle').value)||
+      state.biteOtherTitle||
+      (document.getElementById('magicInput')&&document.getElementById('magicInput').value)||
+      ''
+    ).trim() || 'New study task';
+    let t=(state.tasks||[]).find(x=>!x.done && String(x.title)===title);
+    if(!t){
+      t={id:uid(), title:title, date:'', time:'', done:false, chunks:[], tier:'could', notes:'', context:'school', created:Date.now()};
+      state.tasks.unshift(t);
+    }
+    state.cheeseTaskId=t.id;
+    state.biteOtherTitle=title;
+    return t;
+  }catch(e){ console.warn('ensureTaskForBite', e); return null; }
 }
 function importAiBitesFromPaste(){
-  const raw=(document.getElementById('aiBitesPaste')?.value||'').trim();
-  if(!raw){ showAppMessage('Paste first', 'Paste the numbered list from the AI, then tap Add as bites.'); return; }
-  const t=ensureTaskForBite();
-  const lines=raw.split(/\n+/).map(l=>l.trim()).filter(Boolean);
-  const bites=[];
-  lines.forEach(l=>{
-    let s=l.replace(/^\s*[-*•]+\s*/,'').replace(/^\s*\d+[.)]\s*/,'').replace(/^\s*\d+\s*[-–—]\s*/,'').trim();
-    if(s.length>2) bites.push(s);
-  });
-  if(!bites.length){ showAppMessage('No lines found', 'Paste one step per line.'); return; }
-  t.chunks=t.chunks||[];
-  bites.forEach(s=> t.chunks.push({id:uid(), text:s, done:false}));
-  const ta=document.getElementById('aiBitesPaste'); if(ta) ta.value='';
-  persistRender();
-  showAppMessage('Bites added', bites.length+' bites on “'+t.title+'”. Edit or delete any line below.');
+  try{
+    const raw=(document.getElementById('aiBitesPaste')&&document.getElementById('aiBitesPaste').value||'').trim();
+    if(!raw){ showAppMessage('Paste first', 'Paste the AI list, then tap Add as bites.'); return; }
+    const t=ensureTaskForBite();
+    if(!t){ showAppMessage('No task', 'Type a title under Others first.'); return; }
+    const lines=raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+    const bites=[];
+    lines.forEach(l=>{
+      let s=l
+        .replace(/^#{1,6}\s*/,'')
+        .replace(/^\s*[-*•●]+\s*/,'')
+        .replace(/^\s*\d+[.)]\s*/,'')
+        .replace(/^\s*\(\d+\)\s*/,'')
+        .replace(/^\s*\[ \]\s*/,'')
+        .replace(/^\s*\[[xX]\]\s*/,'')
+        .replace(/\*\*/g,'')
+        .trim();
+      if(s.length>=2) bites.push(s);
+    });
+    if(!bites.length){
+      // whole paste as one bite
+      bites.push(raw.slice(0,200));
+    }
+    t.chunks=Array.isArray(t.chunks)?t.chunks:[];
+    bites.forEach(s=>{ t.chunks.push({id:uid(), text:s, done:false}); });
+    const ta=document.getElementById('aiBitesPaste'); if(ta) ta.value='';
+    state.cheeseTaskId=t.id;
+    persistRender();
+    showAppMessage('Bites added', bites.length+' bites saved under “'+t.title+'”.');
+  }catch(e){
+    console.warn(e);
+    showAppMessage('Could not add bites', String(e&&e.message||e));
+  }
 }
-function runMagicBreakdown(){ smartBreakdown(); }
+function runMagicBreakdown(){ try{ smartBreakdown(); }catch(e){ console.warn(e); showAppMessage('Breakdown failed', String(e&&e.message||e)); } }
 function smartBreakdown(){
   const promptInput=document.getElementById('magicInput');
-  const typed=(promptInput ? promptInput.value.trim() : '') || (document.getElementById('biteOtherTitle')?.value||'').trim() || (state.biteOtherTitle||'').trim();
+  const otherEl=document.getElementById('biteOtherTitle');
+  const typed=(promptInput && promptInput.value.trim()) || (otherEl && otherEl.value.trim()) || (state.biteOtherTitle||'').trim();
   const status=document.getElementById('magicStatus');
-  if(!typed && state.cheeseTaskId==='__other__'){
-    if(status) status.textContent='Type what you want to break down in the box above (or in Quick offline).';
+  if(!typed && (!state.cheeseTaskId || state.cheeseTaskId==='__other__')){
+    if(status) status.textContent='Type a topic (e.g. chapter 4) then tap Break it down.';
+    showAppMessage('Type something first', 'Enter a chapter or topic, then tap Break it down.');
     return;
   }
   if(typed) state.biteOtherTitle=typed;
   const t=ensureTaskForBite();
-  const title=typed || t.title;
-  if(promptInput && !promptInput.value.trim()) promptInput.value=title;
-  const ch = title.match(/chapter\s*(\d+)/i) || String(document.getElementById('biteChNum')?.value||'').match(/(\d+)/);
-  if(ch || /chapter|ciccarelli|textbook|section|research|paper|essay/i.test(title)){
-    const n = ch ? ch[1] : (document.getElementById('biteChNum')?.value||'');
-    const book = (document.getElementById('biteBook')?.value||'').trim() || '';
-    let steps;
-    if(/research|paper|essay/i.test(title)){
-      steps=[
-        'Clarify the exact question or title for: '+title,
-        'List 5 keywords to search',
-        'Find 2 reliable sources and save links',
-        'Write 5 bullet notes from source 1',
-        'Write 5 bullet notes from source 2',
-        'Draft a rough outline (intro / 3 points / conclusion)',
-        'Write intro paragraph only',
-        'Write body point 1',
-        'Write body point 2–3',
-        'Write conclusion + check citations',
-        'Proofread once out loud'
-      ];
-    } else {
-      steps=[
-        'Skim headings'+(n?' for chapter '+n:'')+(book?' in '+book:''),
-        'List section titles on paper',
-        'Read first section — 3 bullet notes',
-        'Read next section — 3 bullet notes',
-        'Continue section-by-section (one bite each)',
-        'Review bold terms / key vocabulary',
-        'Answer 3 review questions',
-        'Write a 5-line chapter summary',
-        'Schedule a 10-min review tomorrow'
-      ];
-    }
-    t.chunks=t.chunks||[];
-    const existing=new Set(t.chunks.map(c=>(c.text||'').toLowerCase()));
-    steps.forEach(s=>{ if(!existing.has(s.toLowerCase())) t.chunks.push({id:uid(), text:s, done:false}); });
-    if(status) status.textContent='Added '+steps.length+' offline bites. Edit or delete below. Or Ask AI, then paste the list into “Paste AI breakdown”.';
-    persistRender();
+  if(!t){ if(status) status.textContent='Could not create task.'; return; }
+  const title=typed || t.title || 'Study task';
+  t.title = t.title || title;
+  let steps;
+  if(/research|paper|essay|elephants/i.test(title)){
+    steps=[
+      'Clarify the exact question for: '+title,
+      'List 5 search keywords',
+      'Find 2 sources and save links',
+      'Notes from source 1 (5 bullets)',
+      'Notes from source 2 (5 bullets)',
+      'Outline: intro, 3 points, conclusion',
+      'Write intro only',
+      'Write body point 1',
+      'Write body points 2–3',
+      'Conclusion + proofread'
+    ];
+  } else if(/chapter|ciccarelli|textbook|section|unit|lesson/i.test(title) || /\bch\.?\s*\d+/i.test(title) || /\d+/.test(title)){
+    const n=(title.match(/chapter\s*(\d+)/i)||title.match(/\b(\d+)\b/)||[])[1]||'';
+    steps=[
+      'Skim headings'+(n?' for chapter '+n:''),
+      'List section titles',
+      'Read section 1 — 3 bullet notes',
+      'Read section 2 — 3 bullet notes',
+      'Read next sections one at a time',
+      'Review key terms',
+      'Do 3 practice questions',
+      'Write a 5-line summary',
+      'Plan a 10-min review tomorrow'
+    ];
+  } else {
+    const key=suggestTemplateForTitle(title);
+    applyTemplate(key);
+    if(status) status.textContent='Added “'+key+'” steps. Edit below.';
     return;
   }
-  const key=suggestTemplateForTitle(title);
-  applyTemplate(key);
-  if(status) status.textContent='Used the "'+key+'" template. Edit bites below.';
+  t.chunks=Array.isArray(t.chunks)?t.chunks:[];
+  const have=new Set(t.chunks.map(c=>String(c.text||'').toLowerCase()));
+  steps.forEach(s=>{ if(!have.has(s.toLowerCase())) t.chunks.push({id:uid(), text:s, done:false}); });
+  state.cheeseTaskId=t.id;
+  if(status) status.textContent='Added '+steps.length+' bites. Edit or delete below.';
   persistRender();
 }
 function addHole(){
@@ -6101,7 +6120,7 @@ function viewBiteSize(){
     <ul style="list-style:none;padding:0;margin:12px 0 0">
       ${chunks.length?chunks.map((c,i)=>`<li style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)">
         <input type="checkbox" ${c.done?'checked':''} data-action="toggle-chunk" data-id="${t.id}" data-chunk="${i}" data-idx="${i}">
-        <input type="text" value="${escapeHtml(c.text||c.title||'')}" data-action="edit-chunk" data-id="${t.id}" data-idx="${i}" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:6px 8px;${c.done?'text-decoration:line-through;opacity:.6':''}">
+        <input type="text" value="${escapeHtml(String(c.text||c.title||c.label||'Bite '+(i+1)))}" data-action="edit-chunk" data-id="${t.id}" data-idx="${i}" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:6px 8px;${c.done?'text-decoration:line-through;opacity:.6':''}">
         <button type="button" class="btn danger sm" data-action="delete-chunk" data-id="${t.id}" data-idx="${i}">Delete</button>
       </li>`).join(''):'<li class="empty">No bites yet — add some, use offline breakdown, or ask AI.</li>'}
     </ul>
@@ -6115,7 +6134,7 @@ function viewBiteSize(){
       <button class="btn sm" id="biteAiQuizBtn">Ask AI for a short quiz ↗</button>
     </div>
   </div>`:''}
-  `:`<div class="empty">Add a task on the Tasks page first.</div>`}
+  `:`<div class="empty">Choose a task or <b>Others</b> and type what to break down.</div>`}
 `;
 }
 
@@ -7792,15 +7811,15 @@ function viewSettings(){
   <details class="setgroup"><summary>Sounds &amp; notifications</summary>
     <div class="setgroup-body">
       <div class="field"><label>Sound</label><select id="setAlarmSound">
-          <option value="chime" ${s.alarmSound==='chime'?'selected':''}>Chime — rising notes</option>
-          <option value="bell" ${s.alarmSound==='bell'?'selected':''}>Bell — long ring</option>
-          <option value="beep" ${s.alarmSound==='beep'?'selected':''}>Beep — sharp pulses</option>
-          <option value="digital" ${s.alarmSound==='digital'?'selected':''}>Digital — fast blips</option>
-          <option value="radar" ${s.alarmSound==='radar'?'selected':''}>Radar — whoop</option>
-          <option value="knock" ${s.alarmSound==='knock'?'selected':''}>Wake bursts — sharp alarm pulses</option>
+          <option value="chime" ${s.alarmSound==='chime'?'selected':''}>Chime</option>
+          <option value="bell" ${s.alarmSound==='bell'?'selected':''}>Bell</option>
+          <option value="beep" ${s.alarmSound==='beep'?'selected':''}>Beep</option>
+          <option value="digital" ${s.alarmSound==='digital'?'selected':''}>Digital</option>
+          <option value="radar" ${s.alarmSound==='radar'?'selected':''}>Radar</option>
+          <option value="knock" ${s.alarmSound==='knock'?'selected':''}>Wake burst</option>
         </select></div>
       <div class="field"><label>Volume</label><input type="range" id="setSoundVol" min="0.2" max="1" step="0.05" value="${s.soundVolume||0.85}"></div>
-      <button type="button" class="btn sm" id="testSoundBtn">Test sound</button>
+      <button type="button" class="btn sm" id="testSoundBtn" data-action="test-sound">Test sound</button>
       <div id="testSoundStatus" style="font-size:.85rem;margin-top:6px;color:var(--muted)"></div>
       <div style="margin-top:14px">
         ${toggleRow('setDeadlineNotify','Deadline notifications', s.deadlineNotify!==false)}
@@ -8069,6 +8088,7 @@ function wireView(){
     else if(action==='goto-cheese') el.addEventListener('click', ()=>goCheeseWithTask(id));
     else if(action==='back-to-tasks') el.addEventListener('click', ()=>setView('tasks'));
     else if(action==='back-to-today') el.addEventListener('click', ()=>setView('today'));
+    else if(action==='test-sound') el.addEventListener('click', (e)=>{ e.preventDefault(); testAlarm(); });
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
     else if(action==='plan-week') el.addEventListener('click', ()=>{ const t=findTask(id); if(t){ t.planWeek=true; persistRender(); } });
     else if(action==='unplan-week') el.addEventListener('click', ()=>{ const t=findTask(id); if(t){ t.planWeek=false; persistRender(); } });
@@ -8759,9 +8779,15 @@ function wireView(){
     if(magicBtn) magicBtn.addEventListener('click', ()=>{ try{ runMagicBreakdown(); }catch(e){ console.warn(e); } });
     const addChunk=document.getElementById('addChunkBtn');
     if(addChunk) addChunk.addEventListener('click', ()=>{
-      const t=findTask(state.cheeseTaskId); if(!t) return;
-      const v=(document.getElementById('chunkInput')?.value||'').trim(); if(!v) return;
-      t.chunks=t.chunks||[]; t.chunks.push({text:v, done:false}); persistRender();
+      const v=(document.getElementById('chunkInput')?.value||'').trim();
+      if(!v){ showAppMessage('Type a bite', 'Write a small step, then Add.'); return; }
+      if((document.getElementById('biteOtherTitle')||{}).value) state.biteOtherTitle=document.getElementById('biteOtherTitle').value.trim();
+      const t=ensureTaskForBite();
+      if(!t) return;
+      t.chunks=t.chunks||[];
+      t.chunks.push({id:uid(), text:v, done:false});
+      document.getElementById('chunkInput').value='';
+      persistRender();
     });
     const breakBtn=document.getElementById('biteAiBreakBtn');
     if(breakBtn) breakBtn.addEventListener('click', ()=>{
