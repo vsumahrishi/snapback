@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="180">
+<meta name="snapback-build" content="185">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1956,6 +1956,17 @@ function suggestTemplateForTitle(title){
   if(/project|presentation|proposal|group work/.test(t)) return 'project';
   return 'generic';
 }
+function normalizeChunks(t){
+  if(!t) return [];
+  if(!Array.isArray(t.chunks)) t.chunks = [];
+  t.chunks = t.chunks.map(c=>{
+    if(typeof c === 'string') return {id:uid(), text:c.trim(), done:false};
+    if(!c || typeof c !== 'object') return null;
+    const text = String(c.text != null ? c.text : (c.title != null ? c.title : (c.label != null ? c.label : ''))).trim();
+    return {id: c.id || uid(), text, done: !!c.done};
+  }).filter(c=>c && c.text);
+  return t.chunks;
+}
 function ensureTaskForBite(){
   try{
     if(state.cheeseTaskId && state.cheeseTaskId!=='__other__'){
@@ -2003,7 +2014,8 @@ function importAiBitesFromPaste(){
       bites.push(raw.slice(0,200));
     }
     t.chunks=Array.isArray(t.chunks)?t.chunks:[];
-    bites.forEach(s=>{ t.chunks.push({id:uid(), text:s, done:false}); });
+    bites.forEach(s=>{ const tx=String(s||'').trim(); if(tx) t.chunks.push({id:uid(), text:tx, done:false}); });
+    normalizeChunks(t);
     const ta=document.getElementById('aiBitesPaste'); if(ta) ta.value='';
     state.cheeseTaskId=t.id;
     persistRender();
@@ -2064,7 +2076,8 @@ function smartBreakdown(){
   }
   t.chunks=Array.isArray(t.chunks)?t.chunks:[];
   const have=new Set(t.chunks.map(c=>String(c.text||'').toLowerCase()));
-  steps.forEach(s=>{ if(!have.has(s.toLowerCase())) t.chunks.push({id:uid(), text:s, done:false}); });
+  steps.forEach(s=>{ const tx=String(s||'').trim(); if(tx && !have.has(tx.toLowerCase())) t.chunks.push({id:uid(), text:tx, done:false}); });
+  normalizeChunks(t);
   state.cheeseTaskId=t.id;
   if(status) status.textContent='Added '+steps.length+' bites. Edit or delete below.';
   persistRender();
@@ -6050,7 +6063,7 @@ function viewBiteSize(){
   if(!isOther && !t && undone[0]){ t=undone[0]; state.cheeseTaskId=t.id; }
   // Working task for bites: Other uses temporary title until created
   const otherTitle = (state.biteOtherTitle||'').trim();
-  const chunks = t ? (t.chunks||[]) : [];
+  const chunks = t ? normalizeChunks(t) : [];
   const allBitesDone = chunks.length>0 && chunks.every(c=>c.done);
   const guideBanner = (guide && guide.active) ? `
   <div class="card" style="background:var(--amber-soft);border-color:var(--amber);margin-bottom:12px">
@@ -6117,13 +6130,17 @@ function viewBiteSize(){
       <input id="chunkInput" placeholder="Add a small bite…">
       <button class="btn sm" id="addChunkBtn" style="flex:0 0 auto">Add</button>
     </div>
-    <ul style="list-style:none;padding:0;margin:12px 0 0">
-      ${chunks.length?chunks.map((c,i)=>`<li style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)">
-        <input type="checkbox" ${c.done?'checked':''} data-action="toggle-chunk" data-id="${t.id}" data-chunk="${i}" data-idx="${i}">
-        <input type="text" value="${escapeHtml(String(c.text||c.title||c.label||'Bite '+(i+1)))}" data-action="edit-chunk" data-id="${t.id}" data-idx="${i}" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:6px 8px;${c.done?'text-decoration:line-through;opacity:.6':''}">
-        <button type="button" class="btn danger sm" data-action="delete-chunk" data-id="${t.id}" data-idx="${i}">Delete</button>
-      </li>`).join(''):'<li class="empty">No bites yet — add some, use offline breakdown, or ask AI.</li>'}
+    <ul style="list-style:none;padding:0;margin:12px 0 0;width:100%">
+      ${chunks.length?chunks.map((c,i)=>{
+        const label = String((c && (c.text||c.title||c.label)) || ('Bite '+(i+1)));
+        return `<li style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);width:100%">
+        <input type="checkbox" ${c.done?'checked':''} data-action="toggle-chunk" data-id="${t.id}" data-idx="${i}" style="flex:0 0 auto;width:18px;height:18px">
+        <input type="text" value="${escapeHtml(label)}" data-action="edit-chunk" data-id="${t.id}" data-idx="${i}" style="flex:1 1 auto;min-width:120px;width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:.95rem;color:var(--ink);background:var(--card);${c.done?'text-decoration:line-through;opacity:.65':''}">
+        <button type="button" class="btn danger sm" data-action="delete-chunk" data-id="${t.id}" data-idx="${i}" style="flex:0 0 auto">Delete</button>
+      </li>`;
+      }).join(''):'<li class="empty">No bites yet — type a topic, tap Break it down, or paste an AI list.</li>'}
     </ul>
+    ${chunks.length?`<button type="button" class="btn ghost sm" id="clearEmptyBitesBtn" style="margin-top:8px">Remove blank bites</button>`:''}
   </div>
   ${allBitesDone?`
   <div class="card" style="border-color:var(--pine)">
@@ -7931,11 +7948,16 @@ function wireView(){
       const idx=Number(el.dataset.idx);
       t.chunks.splice(idx,1); persistRender();
     });
-    else if(action==='edit-chunk') el.addEventListener('change', (e)=>{
-      const t=findTask(id); if(!t||!t.chunks) return;
-      const idx=Number(el.dataset.idx);
-      if(t.chunks[idx]) t.chunks[idx].text=el.value; saveState();
-    });
+    else if(action==='edit-chunk'){
+      const saveChunk=()=>{
+        const t=findTask(id); if(!t||!t.chunks) return;
+        const idx=Number(el.dataset.idx);
+        if(t.chunks[idx]) t.chunks[idx].text=String(el.value||'').trim();
+        saveState();
+      };
+      el.addEventListener('change', saveChunk);
+      el.addEventListener('blur', saveChunk);
+    }
     else if(action==='toggle-chunk') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const t=findTask(id); if(!t||!t.chunks) return; const idx=Number(el.dataset.chunk); if(t.chunks[idx]) t.chunks[idx].done=!t.chunks[idx].done; persistRender(); });
 
     else if(action==='task-start') el.addEventListener('click', (e)=>{
@@ -8773,6 +8795,13 @@ function wireView(){
     }
     const impAi=document.getElementById('importAiBitesBtn');
     if(impAi) impAi.addEventListener('click', importAiBitesFromPaste);
+    const clr=document.getElementById('clearEmptyBitesBtn');
+    if(clr) clr.addEventListener('click', ()=>{
+      const t=findTask(state.cheeseTaskId);
+      if(!t) return;
+      normalizeChunks(t);
+      persistRender();
+    });
     const fillPlateBtn=document.getElementById('fillPlateBtn');
     if(fillPlateBtn) fillPlateBtn.addEventListener('click', fillPlateFromTasks);
     const magicBtn=document.getElementById('magicBtn');
