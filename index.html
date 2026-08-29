@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="160">
+<meta name="snapback-build" content="170">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1959,54 +1959,95 @@ function suggestTemplateForTitle(title){
   if(/project|presentation|proposal|group work/.test(t)) return 'project';
   return 'generic';
 }
+function ensureTaskForBite(){
+  if(state.cheeseTaskId && state.cheeseTaskId!=='__other__'){
+    const t=findTask(state.cheeseTaskId);
+    if(t) return t;
+  }
+  const title=(document.getElementById('biteOtherTitle')?.value||state.biteOtherTitle||'').trim()
+    || (document.getElementById('magicInput')?.value||'').trim()
+    || 'Study task';
+  let t=(state.tasks||[]).find(x=>!x.done && x.title===title);
+  if(!t){
+    t={id:uid(), title, date:'', time:'', done:false, chunks:[], tier:'could', notes:'', context:'school', created:Date.now()};
+    state.tasks.unshift(t);
+  }
+  state.cheeseTaskId=t.id;
+  state.biteOtherTitle=title;
+  return t;
+}
+function importAiBitesFromPaste(){
+  const raw=(document.getElementById('aiBitesPaste')?.value||'').trim();
+  if(!raw){ showAppMessage('Paste first', 'Paste the numbered list from the AI, then tap Add as bites.'); return; }
+  const t=ensureTaskForBite();
+  const lines=raw.split(/\n+/).map(l=>l.trim()).filter(Boolean);
+  const bites=[];
+  lines.forEach(l=>{
+    let s=l.replace(/^\s*[-*•]+\s*/,'').replace(/^\s*\d+[.)]\s*/,'').replace(/^\s*\d+\s*[-–—]\s*/,'').trim();
+    if(s.length>2) bites.push(s);
+  });
+  if(!bites.length){ showAppMessage('No lines found', 'Paste one step per line.'); return; }
+  t.chunks=t.chunks||[];
+  bites.forEach(s=> t.chunks.push({id:uid(), text:s, done:false}));
+  const ta=document.getElementById('aiBitesPaste'); if(ta) ta.value='';
+  persistRender();
+  showAppMessage('Bites added', bites.length+' bites on “'+t.title+'”. Edit or delete any line below.');
+}
 function runMagicBreakdown(){ smartBreakdown(); }
 function smartBreakdown(){
   const promptInput=document.getElementById('magicInput');
-  const otherTitle=(document.getElementById('biteOtherTitle')?.value||'').trim();
-  let t=findTask(state.cheeseTaskId);
-  // Other: create/find a task from typed title
-  if((state.cheeseTaskId==='__other__' || !t) && otherTitle){
-    let existing=(state.tasks||[]).find(x=>!x.done && x.title===otherTitle);
-    if(!existing){
-      existing={id:uid(), title:otherTitle, date:'', time:'', done:false, chunks:[], tier:'could', notes:'', context:'school', created:Date.now()};
-      state.tasks.unshift(existing);
-    }
-    state.cheeseTaskId=existing.id;
-    t=existing;
-  }
-  if(!t){
-    const status=document.getElementById('magicStatus');
-    if(status) status.textContent='Choose a task or pick Other and type a title first.';
+  const typed=(promptInput ? promptInput.value.trim() : '') || (document.getElementById('biteOtherTitle')?.value||'').trim() || (state.biteOtherTitle||'').trim();
+  const status=document.getElementById('magicStatus');
+  if(!typed && state.cheeseTaskId==='__other__'){
+    if(status) status.textContent='Type what you want to break down in the box above (or in Quick offline).';
     return;
   }
-  const title=(promptInput ? promptInput.value.trim() : '') || otherTitle || t.title;
-  const status=document.getElementById('magicStatus');
-  // Chapter-style offline steps
-  const ch = title.match(/chapter\s*(\d+)/i) || (document.getElementById('biteChNum')?.value||'').match(/(\d+)/);
-  if(ch || /chapter|ciccarelli|textbook|section/i.test(title)){
+  if(typed) state.biteOtherTitle=typed;
+  const t=ensureTaskForBite();
+  const title=typed || t.title;
+  if(promptInput && !promptInput.value.trim()) promptInput.value=title;
+  const ch = title.match(/chapter\s*(\d+)/i) || String(document.getElementById('biteChNum')?.value||'').match(/(\d+)/);
+  if(ch || /chapter|ciccarelli|textbook|section|research|paper|essay/i.test(title)){
     const n = ch ? ch[1] : (document.getElementById('biteChNum')?.value||'');
-    const book = (document.getElementById('biteBook')?.value||'').trim() || 'the textbook';
-    const steps = [
-      'Skim chapter '+(n||'')+' headings in '+book+' (5–10 min)',
-      'List section titles on paper or Notes',
-      'Read section 1 and write 3 bullet points',
-      'Read next section + 3 bullets',
-      'Do the same for remaining sections (one at a time)',
-      'Review bold terms / glossary for this chapter',
-      'Answer 3 review questions (or make 3 of your own)',
-      'Write a 5-line summary of the whole chapter',
-      'Mark done and schedule a short review tomorrow'
-    ];
-    t.chunks = t.chunks || [];
+    const book = (document.getElementById('biteBook')?.value||'').trim() || '';
+    let steps;
+    if(/research|paper|essay/i.test(title)){
+      steps=[
+        'Clarify the exact question or title for: '+title,
+        'List 5 keywords to search',
+        'Find 2 reliable sources and save links',
+        'Write 5 bullet notes from source 1',
+        'Write 5 bullet notes from source 2',
+        'Draft a rough outline (intro / 3 points / conclusion)',
+        'Write intro paragraph only',
+        'Write body point 1',
+        'Write body point 2–3',
+        'Write conclusion + check citations',
+        'Proofread once out loud'
+      ];
+    } else {
+      steps=[
+        'Skim headings'+(n?' for chapter '+n:'')+(book?' in '+book:''),
+        'List section titles on paper',
+        'Read first section — 3 bullet notes',
+        'Read next section — 3 bullet notes',
+        'Continue section-by-section (one bite each)',
+        'Review bold terms / key vocabulary',
+        'Answer 3 review questions',
+        'Write a 5-line chapter summary',
+        'Schedule a 10-min review tomorrow'
+      ];
+    }
+    t.chunks=t.chunks||[];
     const existing=new Set(t.chunks.map(c=>(c.text||'').toLowerCase()));
     steps.forEach(s=>{ if(!existing.has(s.toLowerCase())) t.chunks.push({id:uid(), text:s, done:false}); });
-    if(status) status.textContent='Added chapter-style bites offline. Edit or delete any step below. For a book-specific plan, use Ask AI with book + chapter filled in.';
+    if(status) status.textContent='Added '+steps.length+' offline bites. Edit or delete below. Or Ask AI, then paste the list into “Paste AI breakdown”.';
     persistRender();
     return;
   }
   const key=suggestTemplateForTitle(title);
   applyTemplate(key);
-  if(status) status.textContent = 'Used the "'+key+'" breakdown from what you typed. Edit or delete steps below.';
+  if(status) status.textContent='Used the "'+key+'" template. Edit bites below.';
   persistRender();
 }
 function addHole(){
@@ -4289,7 +4330,7 @@ function viewLogin(){
       <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin:12px 0"><input type="checkbox" id="loginRemember" checked> Stay signed in</label>
       <button type="button" class="btn" id="loginLocalBtn" style="width:100%">${hasLocal?'Sign in':'Create account'}</button>
       ${hasLocal?'<button type="button" class="btn ghost sm" id="loginCreateBtn" style="width:100%;margin-top:8px">Create new account</button>':''}
-      <details style="margin-top:14px"><summary style="font-size:.75rem;color:var(--muted);cursor:pointer">Cloud setup (optional)</summary>
+      <details style="margin-top:14px"><summary style="font-size:.75rem;color:var(--muted);cursor:pointer">Advanced: Google sign-in</summary>
         <textarea id="loginFbConfig" rows="2" placeholder="Firebase config JSON" style="width:100%;font-size:.7rem;margin-top:6px"></textarea>
         <button type="button" class="btn ghost sm" id="loginSaveFb" style="margin-top:6px">Save</button>
       </details>
@@ -5985,9 +6026,12 @@ function viewBiteSize(){
     const gid = guide.queue[guide.index];
     if(gid) state.cheeseTaskId = gid;
   }
-  const t=findTask(state.cheeseTaskId)||undone[0];
-  if(t) state.cheeseTaskId=t.id;
-  const chunks=t?(t.chunks||[]):[];
+  const isOther = state.cheeseTaskId==='__other__';
+  let t = isOther ? null : findTask(state.cheeseTaskId);
+  if(!isOther && !t && undone[0]){ t=undone[0]; state.cheeseTaskId=t.id; }
+  // Working task for bites: Other uses temporary title until created
+  const otherTitle = (state.biteOtherTitle||'').trim();
+  const chunks = t ? (t.chunks||[]) : [];
   const allBitesDone = chunks.length>0 && chunks.every(c=>c.done);
   const guideBanner = (guide && guide.active) ? `
   <div class="card" style="background:var(--amber-soft);border-color:var(--amber);margin-bottom:12px">
@@ -6011,16 +6055,16 @@ function viewBiteSize(){
   <div class="card">
     <label>Task</label>
     <select id="cheeseTaskSelect">
-      ${undone.map(x=>`<option value="${x.id}" ${t&&String(t.id)===String(x.id)?'selected':''}>${escapeHtml(x.title)}</option>`).join('')}
-      <option value="__other__" ${state.cheeseTaskId==='__other__'?'selected':''}>Other (type below)</option>
+      ${undone.map(x=>`<option value="${x.id}" ${!isOther && t && String(t.id)===String(x.id)?'selected':''}>${escapeHtml(x.title)}</option>`).join('')}
+      <option value="__other__" ${isOther?'selected':''}>Others</option>
     </select>
-    <div id="biteOtherWrap" style="margin-top:10px;${state.cheeseTaskId==='__other__'?'':'display:none'}">
-      <div class="field"><label>What are you breaking down?</label>
-        <input id="biteOtherTitle" placeholder="e.g. Ciccarelli Psychology chapter 8" value="${escapeHtml((state.biteOtherTitle||''))}">
+    <div id="biteOtherWrap" style="margin-top:10px;${isOther?'':'display:none'}">
+      <div class="field"><label>Type what you want to break down</label>
+        <input id="biteOtherTitle" placeholder="e.g. Ciccarelli Psychology chapter 8" value="${escapeHtml(otherTitle)}">
       </div>
     </div>
   </div>
-  ${t?`
+  ${(t||isOther)?`
   <div class="card" style="background:var(--gold-soft);border-color:var(--gold)">
     <div style="font-weight:800;margin-bottom:6px">✨ Ask AI to break up a chapter</div>
     <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Book + chapter → AI suggests realistic 10–20 min bites. Paste ideas back as bites below.</p>
@@ -6041,6 +6085,12 @@ function viewBiteSize(){
       <button class="btn sm" id="magicBtn" style="flex:0 0 auto">Break it down</button>
     </div>
     <div id="magicStatus" style="font-size:.8rem;color:var(--muted);margin-top:6px"></div>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 6px">Paste AI breakdown into bites</h3>
+    <p style="font-size:.82rem;color:var(--muted);margin:0 0 8px">After Ask AI, copy the numbered list and paste here. We turn each line into a bite you can edit.</p>
+    <textarea id="aiBitesPaste" rows="4" placeholder="1) Skim headings&#10;2) Read section 1&#10;3) …" style="width:100%"></textarea>
+    <button type="button" class="btn sm" id="importAiBitesBtn" style="margin-top:8px">Add as bites</button>
   </div>
   <div class="card">
     <h3 style="margin:0 0 8px">Bites for this task</h3>
@@ -7681,7 +7731,7 @@ function viewSettings(){
     <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
       <h3 style="margin:0 0 6px">Account</h3>
       ${authStatusHtml()}
-      <details style="margin-top:8px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Cloud setup (optional)</summary><div class="field"><label>Firebase config</label>
+      <details style="margin-top:8px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Advanced: Google sign-in</summary><div class="field"><label>Firebase config</label>
         <textarea id="fbConfigInput" rows="4" placeholder='{ "apiKey": "...", "projectId": "...", ... }' style="width:100%;font-size:.75rem"></textarea>
       </div>
       <p style="font-size:.78rem;color:var(--muted);margin:8px 0">One-time setup for the school project. 1) Paste config once → Save. 2) Sign in with Google on laptop and phone. Same Google account = same data. Firebase Console must have Google sign-in enabled.</p>
@@ -7715,56 +7765,60 @@ function viewSettings(){
         </label>
       </div>
       <p id="syncStatus" style="font-size:.8rem;color:var(--muted);margin:8px 0 0"></p>
-    </div><p>Changes apply immediately.</p>
-  </div>
-  <div class="card">
-    <details class="setgroup"><summary>Appearance &amp; celebrations</summary><div class="setgroup-body">
+    </div></div>
+
+  <details class="setgroup"><summary>Appearance &amp; celebrations</summary>
+    <div class="setgroup-body">
       ${toggleRow('setDarkMode','Dark mode', !!s.darkMode)}
-    </div>
-    
       ${toggleRow('setCelebrateOn','Confetti when a task is marked done', s.celebrateOnComplete !== false)}
-      ${toggleRow('setCelebrateSound','Ask “quick jig?” after confetti (optional sound)', s.celebrateSound !== false)}
-      <p style="color:var(--muted);font-size:.78rem;margin-top:4px">The beat is a simple 12-second rhythm made in the browser — not a song. You can turn it off permanently here.</p>
+      ${toggleRow('setCelebrateSound','Ask for a short celebratory beat', s.celebrateSound !== false)}
     </div>
-    </div></details><details class="setgroup"><summary>Timer lengths (minutes)</summary><div class="setgroup-body"><div style="margin-top:10px"><div class="grid4">
+  </details>
+
+  <details class="setgroup"><summary>Timer lengths (minutes)</summary>
+    <div class="setgroup-body"><div class="grid4">
       ${numField('setWork','Focus session', s.workMin,5,90)}${numField('setShort','Short break', s.shortBreakMin,1,30)}
       ${numField('setLong','Long break', s.longBreakMin,5,60)}${numField('setSessions','Sessions before long break', s.sessionsBeforeLong,2,8)}
     </div></div>
-    </div></details><details class="setgroup"><summary>Auto-start</summary><div class="setgroup-body">
+  </details>
+
+  <details class="setgroup"><summary>Auto-start</summary>
+    <div class="setgroup-body">
       ${toggleRow('setAutoBreak','Start breaks automatically', s.autoStartBreaks)}
       ${toggleRow('setAutoWork','Start next focus session automatically', s.autoStartWork)}
     </div>
-    </div></details><details class="setgroup"><summary>Sounds &amp; notifications</summary><div class="setgroup-body"><h4 style="margin:0 0 8px">Alarm sound</h4>
-      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Set how loud Bug Me can get (peak). On a phone, the side volume buttons still control the device volume while this app is open.</p>
-      ${toggleRow('setSoundOn','Play a sound when a session ends', s.soundOn)}
-      <div class="row" style="margin-top:8px">
-        <div class="field"><label>Sound</label><select id="setAlarmSound">
-          <option value="chime" ${s.alarmSound==='chime'?'selected':''}>Chime — bright rising notes</option>
-          <option value="bell" ${s.alarmSound==='bell'?'selected':''}>Bell — long soft ring</option>
-          <option value="beep" ${s.alarmSound==='beep'?'selected':''}>Beep — sharp digital pulses</option>
-          <option value="digital" ${s.alarmSound==='digital'?'selected':''}>Digital — fast arcade blips</option>
-          <option value="radar" ${s.alarmSound==='radar'?'selected':''}>Radar — rising whoop</option>
+  </details>
+
+  <details class="setgroup"><summary>Sounds &amp; notifications</summary>
+    <div class="setgroup-body">
+      <div class="field"><label>Sound</label><select id="setAlarmSound">
+          <option value="chime" ${s.alarmSound==='chime'?'selected':''}>Chime — rising notes</option>
+          <option value="bell" ${s.alarmSound==='bell'?'selected':''}>Bell — long ring</option>
+          <option value="beep" ${s.alarmSound==='beep'?'selected':''}>Beep — sharp pulses</option>
+          <option value="digital" ${s.alarmSound==='digital'?'selected':''}>Digital — fast blips</option>
+          <option value="radar" ${s.alarmSound==='radar'?'selected':''}>Radar — whoop</option>
           <option value="knock" ${s.alarmSound==='knock'?'selected':''}>Wake bursts — sharp alarm pulses</option>
         </select></div>
-        <div class="field"><label>Volume</label><input class="slider" style="width:100%" type="range" id="setSoundVol" min="0" max="1" step="0.05" value="${s.soundVolume}"></div>
-        <div class="field" style="flex:0 0 auto;align-self:flex-end"><button class="btn" id="testSoundBtn" type="button" onclick="try{testAlarm()}catch(e){alert(e)}">Test sound</button></div>
+      <div class="field"><label>Volume</label><input type="range" id="setSoundVol" min="0.2" max="1" step="0.05" value="${s.soundVolume||0.85}"></div>
+      <button type="button" class="btn sm" id="testSoundBtn">Test sound</button>
+      <div id="testSoundStatus" style="font-size:.85rem;margin-top:6px;color:var(--muted)"></div>
+      <div style="margin-top:14px">
+        ${toggleRow('setDeadlineNotify','Deadline notifications', s.deadlineNotify!==false)}
+        <button type="button" class="btn sm" id="grantNotifyBtn" style="margin-top:8px">Grant permission</button>
+        <div id="notifyStatus" style="font-size:.85rem;margin-top:6px;color:var(--muted)">${escapeHtml(state.lastNotifyMsg||'')}</div>
+        <p style="font-size:.8rem;color:var(--muted);margin-top:8px">On Android: Settings → Apps → SnapBack → Notifications → allow all; Battery → Unrestricted.</p>
       </div>
-      <p id="testSoundStatus" style="font-size:.85rem;color:var(--pine);margin:8px 0 0;min-height:1.2em;font-weight:600">${escapeHtml(state.lastTestSoundMsg||'Tap Test sound — a status line will appear here.')}</p>
     </div>
-    <h4 style="margin:16px 0 8px">Deadline notifications</h4>
-      ${toggleRow('setNotifyBrowser','Notifications for deadlines (browser tab, or phone APK when allowed)', s.notifyBrowser)}
-      <p style="color:var(--muted);font-size:.8rem;margin-top:4px">On the website: only while the tab can run. On the phone APK: uses system notifications if you Grant permission (and allow SnapBack notifications in Android settings).</p>
-      <button class="btn sm" id="grantNotifyBtn" type="button" onclick="try{requestNotifyPermission()}catch(e){alert(e)}">Grant permission</button>
-      <p style="font-size:.78rem;color:var(--muted);margin-top:8px">On Android: phone Settings → Apps → SnapBack → Notifications → allow all (not Restricted). Battery → Unrestricted.</p>
-      <div id="notifyStatus" style="font-size:.85rem;color:var(--pine);margin-top:8px;font-weight:600">${escapeHtml(state.lastNotifyMsg||'Tap Grant permission if alerts are blocked.')}</div>
+  </details>
+
+  <details class="setgroup"><summary>Quotes (optional)</summary>
+    <div class="setgroup-body">
+      <p style="font-size:.85rem;color:var(--muted)">Custom quotes appear in the random quote picker.</p>
+      <div class="row"><input id="customQuoteInput" placeholder="Add a quote"><button class="btn sm" id="addQuoteBtn">Add</button></div>
     </div>
-    </div></details><details class="setgroup"><summary>Quotes (optional)</summary><div class="setgroup-body">
-      ${toggleRow('setQuoteOnLoad','Show a quote once when I open the app', s.quoteOnLoad)}
-      <p style="color:var(--muted);font-size:.8rem;margin:6px 0">Add your own favorite lines (lyrics, mantras, anything) — these are yours, stored only in your app.</p>
-      <div class="row"><input id="customQuoteInput" placeholder="Add a personal quote or line"><button class="btn sm" id="addQuoteBtn" style="flex:0 0 auto">Add</button></div>
-      <div style="margin-top:8px">${(s.customQuotes||[]).map((q,i)=>`<div class="qmini"><span style="flex:1">${escapeHtml(q)}</span><button class="btn danger sm" data-action="remove-quote" data-idx="${i}">✕</button></div>`).join('') || ''}</div>
-    </div>
-    </div></details><div class="setgroup"><h4>Install app</h4>
+  </details>
+
+  <div class="setgroup"><h4>Install app</h4>
       ${(typeof isNativeApp==='function' && isNativeApp()) ? `<p style="color:var(--muted);font-size:.85rem">You already have the phone app installed.</p>`
         : isAppInstalled() ? `<p style="color:var(--muted);font-size:.85rem">Already installed on this device.</p>`
         : deferredInstallPrompt ? `<button class="btn" id="settingsInstallBtn">Install SnapBack</button>`
@@ -8687,11 +8741,18 @@ function wireView(){
     const sel=document.getElementById('cheeseTaskSelect');
     if(sel) sel.addEventListener('change', ()=>{
       state.cheeseTaskId=sel.value;
-      if(sel.value==='__other__') state.biteOtherTitle=(document.getElementById('biteOtherTitle')?.value||'');
+      if(sel.value==='__other__'){
+        state.biteOtherTitle=(document.getElementById('biteOtherTitle')?.value||state.biteOtherTitle||'');
+      }
       persistRender();
     });
     const bot=document.getElementById('biteOtherTitle');
-    if(bot) bot.addEventListener('change', ()=>{ state.biteOtherTitle=bot.value.trim(); });
+    if(bot){
+      bot.addEventListener('input', ()=>{ state.biteOtherTitle=bot.value; });
+      bot.addEventListener('change', ()=>{ state.biteOtherTitle=bot.value.trim(); saveState(); });
+    }
+    const impAi=document.getElementById('importAiBitesBtn');
+    if(impAi) impAi.addEventListener('click', importAiBitesFromPaste);
     const fillPlateBtn=document.getElementById('fillPlateBtn');
     if(fillPlateBtn) fillPlateBtn.addEventListener('click', fillPlateFromTasks);
     const magicBtn=document.getElementById('magicBtn');
