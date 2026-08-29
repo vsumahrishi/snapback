@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="140">
+<meta name="snapback-build" content="150">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1179,7 +1179,7 @@ function testAlarm(){
     beep: 'Beep — sharp pulses',
     digital: 'Digital — fast blips',
     radar: 'Radar — whoops',
-    knock: 'Knock — low thuds'
+    knock: 'Knock — loud wake bursts'
   };
   resumeAudioThen((ctx)=>{
     try{ playDistinctAlarm(ctx, kind, 0.95); }catch(e){ console.warn(e); }
@@ -1226,7 +1226,9 @@ function playDistinctAlarm(ctx, kind, vol){
     tone('sawtooth', 300, now, 0.85, vol*0.4, 1100);
     tone('sawtooth', 300, now+0.95, 0.85, vol*0.4, 1100);
   } else if(kind==='knock'){
-    for(let i=0;i<3;i++) tone('sine', 90, now+i*0.4, 0.25, vol*0.95, 60);
+    // Loud wake-up: repeated mid-high square bursts (more audible than soft thuds)
+    for(let i=0;i<8;i++) tone('square', 880, now+i*0.28, 0.14, vol*0.9);
+    for(let i=0;i<4;i++) tone('square', 1200, now+0.1+i*0.28, 0.1, vol*0.7);
   } else {
     // chime
     [523, 659, 784, 1047].forEach((f,i)=> tone('sine', f, now+i*0.25, 0.5, vol*0.6));
@@ -1266,9 +1268,9 @@ function playAlarmRamp(durationSec){
         osc.connect(g); g.connect(gwrap); osc.start(now); osc.stop(now+0.15);
       } else if(kind==='knock'){
         const osc=ctx.createOscillator(), g=ctx.createGain();
-        osc.type='sine'; osc.frequency.value=100;
-        g.gain.setValueAtTime(0.0001,now); g.gain.linearRampToValueAtTime(0.7,now+0.02); g.gain.exponentialRampToValueAtTime(0.0001,now+0.2);
-        osc.connect(g); g.connect(gwrap); osc.start(now); osc.stop(now+0.22);
+        osc.type='square'; osc.frequency.value=900;
+        g.gain.setValueAtTime(0.0001,now); g.gain.linearRampToValueAtTime(0.85,now+0.02); g.gain.exponentialRampToValueAtTime(0.0001,now+0.15);
+        osc.connect(g); g.connect(gwrap); osc.start(now); osc.stop(now+0.18);
       } else {
         const osc=ctx.createOscillator(), g=ctx.createGain();
         osc.type='sine'; osc.frequency.value=659;
@@ -2746,8 +2748,8 @@ function isInIframe(){
 }
 function requestNotifyPermission(){
   const status=document.getElementById('notifyStatus');
-  state.lastNotifyMsg='Requesting…';
-  if(status) status.textContent='Requesting…';
+  state.lastNotifyMsg='';
+  if(status) status.textContent='Checking…';
   // Phone APK (Capacitor): use Local Notifications
   if(typeof isNativeApp==='function' && isNativeApp()){
     ensureNotifyPermission().then(ok=>{
@@ -3166,7 +3168,7 @@ function renderSidebar(){
       NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('') +
-      `<div class="navfoot">Saved automatically · build 140</div>`;
+      `<div class="navfoot">Saved automatically</div>`;
     el.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.nav)));
     document.getElementById('brandHomeBtn').addEventListener('click', ()=>setView('today'));
     mobileMenuOpen=false;
@@ -3184,7 +3186,7 @@ function renderMobileDrawer(){
       ${NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('')}
-      <div class="navfoot">Saved automatically · build 140</div>
+      <div class="navfoot">Saved automatically</div>
     </div>`;
   root.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{ mobileMenuOpen=false; setView(b.dataset.nav); }));
   document.getElementById('drawerBackdrop').addEventListener('click', ()=>{ mobileMenuOpen=false; renderMobileDrawer(); });
@@ -3756,6 +3758,31 @@ function renderModal(){
   }
 
   // Celebration jig prompt
+  if(state.startToolOpen && state.startToolTaskId!=null){
+    const tid = state.startToolTaskId;
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="text-align:left;max-width:360px">
+      <div class="qeyebrow">Start</div>
+      <div class="qtext" style="font-size:1rem;margin-bottom:12px">Pick a tool</div>
+      <button class="btn" style="width:100%;margin-bottom:8px" id="stFocus">Focus Pod</button>
+      <button class="btn ghost" style="width:100%;margin-bottom:8px" id="stBite">Bite Size</button>
+      <button class="btn ghost" style="width:100%;margin-bottom:8px" id="stEis">This or That</button>
+      <button class="btn ghost" style="width:100%;margin-bottom:8px" id="stPlate">Focus Plate</button>
+      <button class="btn ghost" style="width:100%;margin-bottom:8px" id="stNone">No tool — pin Top of Mind</button>
+      <button class="btn ghost sm" style="width:100%" id="stCancel">Cancel</button>
+    </div></div>`;
+    const go=(nav, extra)=>{
+      state.startToolOpen=false; state.startToolTaskId=null;
+      if(extra) extra();
+      if(nav) navigateTo(nav); else persistRender();
+    };
+    document.getElementById('stFocus').onclick=()=>go('timer', ()=>{ state.topOfMindId=tid; if(state.timer) state.timer.activeTaskId=tid; });
+    document.getElementById('stBite').onclick=()=>go('bitesize', ()=>{ state.cheeseTaskId=tid; });
+    document.getElementById('stEis').onclick=()=>go('eisenhower', ()=>{});
+    document.getElementById('stPlate').onclick=()=>go('rule135', ()=>{});
+    document.getElementById('stNone').onclick=()=>go(null, ()=>{ state.topOfMindId=tid; });
+    document.getElementById('stCancel').onclick=()=>{ state.startToolOpen=false; state.startToolTaskId=null; persistRender(); };
+    return;
+  }
   if(state.jigPromptOpen){
     root.innerHTML=`<div class="overlay" id="jigOverlay">
       <div class="quotecard" style="text-align:center;max-width:360px">
@@ -4201,37 +4228,26 @@ function viewLogin(){
   const la = getLocalAuth();
   const hasLocal = !!(la && la.username);
   return `
-  <div class="pagehead" style="max-width:420px;margin:0 auto;padding:24px 16px">
-    <div style="text-align:center;margin-bottom:20px">
+  <div style="max-width:400px;margin:40px auto;padding:20px">
+    <div style="text-align:center;margin-bottom:28px">
       <div style="font-size:2.5rem">🐿️</div>
-      <h1 style="margin:8px 0 4px">SnapBack</h1>
-      <p style="color:var(--muted);font-size:.95rem;margin:0">Sign in to continue. Students each use their own login on their own device.</p>
-    </div>
-    <div class="card" style="border-color:var(--pine)">
-      <h3 style="margin:0 0 8px">Google</h3>
-      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Best for laptop + phone with the same Gmail (teacher sets Firebase once).</p>
-      <details style="margin-bottom:10px">
-        <summary style="cursor:pointer;font-size:.85rem;font-weight:600">Firebase config (paste once if Google fails)</summary>
-        <textarea id="loginFbConfig" rows="3" placeholder='{ "apiKey": "...", "projectId": "..." }' style="width:100%;font-size:.72rem;margin-top:6px"></textarea>
-        <button type="button" class="btn ghost sm" id="loginSaveFb" style="margin-top:6px">Save config</button>
-      </details>
-      <button type="button" class="btn" id="loginGoogleBtn" style="width:100%">Sign in with Google</button>
-      <p style="font-size:.78rem;color:var(--muted);margin:10px 0 0">If Google is not ready, use the simple account below.</p>
+      <h1 style="margin:10px 0 4px">SnapBack</h1>
+      <p style="color:var(--muted);margin:0">Sign in</p>
     </div>
     <div class="card">
-      <h3 style="margin:0 0 8px">Simple account (this device)</h3>
-      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">${hasLocal ? 'Sign in as <b>'+escapeHtml(la.username)+'</b> or create a new one (overwrites the old local login).' : 'Create a username and password for this phone or laptop.'}</p>
-      <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="e.g. gouri"></div>
-      <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="At least 4 characters"></div>
-      <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin:10px 0"><input type="checkbox" id="loginRemember" checked> Stay signed in on this device</label>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <button type="button" class="btn" id="loginLocalBtn" style="width:100%">${hasLocal?'Sign in':'Create account & sign in'}</button>
-        ${hasLocal?'<button type="button" class="btn ghost" id="loginCreateBtn" style="width:100%">Create new local account</button>':''}
-      </div>
+      <button type="button" class="btn" id="loginGoogleBtn" style="width:100%;margin-bottom:14px">Continue with Google</button>
+      <div style="text-align:center;font-size:.8rem;color:var(--muted);margin:8px 0">or</div>
+      <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="Username" value="${hasLocal?escapeHtml(la.username):''}"></div>
+      <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="Password"></div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin:12px 0"><input type="checkbox" id="loginRemember" checked> Stay signed in</label>
+      <button type="button" class="btn" id="loginLocalBtn" style="width:100%">${hasLocal?'Sign in':'Create account'}</button>
+      ${hasLocal?'<button type="button" class="btn ghost sm" id="loginCreateBtn" style="width:100%;margin-top:8px">Create new account</button>':''}
+      <details style="margin-top:14px"><summary style="font-size:.75rem;color:var(--muted);cursor:pointer">Google setup (school)</summary>
+        <textarea id="loginFbConfig" rows="2" placeholder="Firebase config JSON" style="width:100%;font-size:.7rem;margin-top:6px"></textarea>
+        <button type="button" class="btn ghost sm" id="loginSaveFb" style="margin-top:6px">Save</button>
+      </details>
+      <button type="button" class="btn ghost sm" id="loginGuestBtn" style="width:100%;margin-top:12px">Continue on this device</button>
     </div>
-    <p style="font-size:.78rem;color:var(--muted);text-align:center;margin:16px 0 8px">Already using SnapBack on this device?</p>
-    <button type="button" class="btn ghost sm" id="loginGuestBtn" style="width:100%;max-width:420px;margin:0 auto;display:block">Continue with saved data on this device</button>
-    <p style="font-size:.75rem;color:var(--muted);text-align:center;margin-top:16px">SnapBack · build 140 · Your data stays on this device unless cloud sync is enabled.</p>
   </div>`;
 }
 function wireLoginScreen(){
@@ -4428,7 +4444,7 @@ const CHALLENGES = [
 
 const CHALLENGE_PATHS = {
   cant_start: ['startWizard','biteSize','bugMe','focusPlate','oneAtATime','grabBag'],
-  too_much: ['brainDump','backburner','planAhead','spotlight','smallBatch','oneAtATime','focusPlate','eisenhower'],
+  too_much: ['brainDump','backburner','planAhead','spotlight','oneAtATime','focusPlate','eisenhower'],
   list_freeze: ['popPool','spinPick','tileWall','grabBag','oneAtATime','schedule'],
   bounce: ['topOfMind','timeOnTask','oneAtATime','focusPod','bodyDouble','today'],
   what_next: ['spinPick','grabBag','eisenhower','mustFrog','today','spotlight','startWizard'],
@@ -4442,7 +4458,7 @@ const CHALLENGE_PATHS = {
 function applyChallengeTool(toolId, challengeId){
   const open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
   if(toolId==='spotlight' || toolId==='small-batch'){
-    state.listMode = toolId==='spotlight' ? 'spotlight' : 'batch';
+    state.listMode = 'spotlight';
     state.spotlightLimit = 3;
     showAppMessage('List trimmed', 'Tasks view will show a smaller set. Open Tasks to work.');
     navigateTo('tasks');
@@ -4978,7 +4994,11 @@ function taskCard(t){
     </div>
     ${t.notes?`<div style="font-size:.85rem;color:var(--muted);margin-bottom:10px">${escapeHtml((t.notes||'').slice(0,160))}</div>`:''}
     <div style="display:flex;flex-wrap:wrap;gap:8px">
-      <button type="button" class="btn sm" data-action="start-task-edit" data-id="${t.id}">Edit</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        <button type="button" class="btn sm" data-action="task-start" data-id="${t.id}">Start</button>
+        <button type="button" class="btn sm" data-action="task-complete" data-id="${t.id}">Completed</button>
+        <button type="button" class="btn ghost sm" data-action="start-task-edit" data-id="${t.id}">Edit</button>
+      </div>
       <button type="button" class="btn ghost sm" data-action="quick-done" data-id="${t.id}">${t.done?'Undo done':'Done'}</button>
       <button type="button" class="btn ghost sm" data-action="task-menu" data-id="${t.id}">More</button>
     </div>
@@ -5006,7 +5026,6 @@ function tasksViewToolbar(){
     <div style="display:flex;flex-wrap:wrap;gap:6px">
       <button class="btn ${mode==='all'?'':'ghost'} sm" data-action="list-mode" data-mode="all">Full list</button>
       <button class="btn ${mode==='spotlight'?'':'ghost'} sm" data-action="list-mode" data-mode="spotlight">Spotlight</button>
-      <button class="btn ${mode==='batch'?'':'ghost'} sm" data-action="list-mode" data-mode="batch">Small Batch</button>
       <button class="btn ${mode==='wall'?'':'ghost'} sm" data-action="list-mode" data-mode="wall">Tile Wall</button>
       <button class="btn ${mode==='one'?'':'ghost'} sm" data-action="list-mode" data-mode="one">One at a time</button>
       <button class="btn ${mode==='jar'?'':'ghost'} sm" data-action="list-mode" data-mode="jar">Grab Bag</button>
@@ -5035,8 +5054,14 @@ function viewTasks(){
   if(cf==='school') list=list.filter(t=>(t.context||'school')!=='personal');
   if(cf==='personal') list=list.filter(t=>(t.context||'school')==='personal');
   // List overwhelm modes — must run BEFORE building items
-  const mode = state.listMode || 'all';
+  let mode = state.listMode || 'all'; if(mode==='batch') mode='spotlight';
   let modeBanner = tasksViewToolbar();
+  if((state.listMode||'')==='wall'){
+    modeBanner = `<div class="card" style="padding:10px;margin-bottom:10px;border-left:4px solid var(--pine)"><b>Tile Wall</b> — only tiles below. <button type="button" class="btn ghost sm" data-action="list-mode" data-mode="all">Full list</button></div>`;
+  }
+  if((state.listMode||'')==='jar'){
+    modeBanner = `<div class="card" style="padding:10px;margin-bottom:10px;border-left:4px solid var(--pine)"><b>Grab Bag</b> — list hidden. Pull one task. <button type="button" class="btn ghost sm" data-action="list-mode" data-mode="all">Full list</button></div>`;
+  }
   let modeBody = '';
   if(mode === 'spotlight' || mode === 'batch'){
     const open = list.filter(t=>!t.done);
@@ -7563,7 +7588,7 @@ function viewSettings(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Make it yours · build 140</div><h1>Settings</h1><p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">Profile and Bug Me first. Scroll for sound, notifications, import, and reset.</p>
+    <h1>Settings</h1>
     <p style="margin-top:4px"><button class="btn ghost sm" id="gotoHelpBtn">Help &amp; FAQ</button></p>
     <div class="card">
       <h3 style="margin:0 0 6px">Your profile</h3>
@@ -7599,9 +7624,9 @@ function viewSettings(){
     </div>
 
     <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
-      <h3 style="margin:0 0 6px">Account &amp; cloud</h3>
+      <h3 style="margin:0 0 6px">Account</h3>
       ${authStatusHtml()}
-      <div class="field"><label>Firebase config (paste once from Firebase console)</label>
+      <details style="margin-top:8px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">School setup only</summary><div class="field"><label>Firebase config</label>
         <textarea id="fbConfigInput" rows="4" placeholder='{ "apiKey": "...", "projectId": "...", ... }' style="width:100%;font-size:.75rem"></textarea>
       </div>
       <p style="font-size:.78rem;color:var(--muted);margin:8px 0">One-time setup for the school project. 1) Paste config once → Save. 2) Sign in with Google on laptop and phone. Same Google account = same data. Firebase Console must have Google sign-in enabled.</p>
@@ -7664,7 +7689,7 @@ function viewSettings(){
           <option value="beep" ${s.alarmSound==='beep'?'selected':''}>Beep — sharp digital pulses</option>
           <option value="digital" ${s.alarmSound==='digital'?'selected':''}>Digital — fast arcade blips</option>
           <option value="radar" ${s.alarmSound==='radar'?'selected':''}>Radar — rising whoop</option>
-          <option value="knock" ${s.alarmSound==='knock'?'selected':''}>Knock — low thuds</option>
+          <option value="knock" ${s.alarmSound==='knock'?'selected':''}>Knock — loud wake bursts</option>
         </select></div>
         <div class="field"><label>Volume</label><input class="slider" style="width:100%" type="range" id="setSoundVol" min="0" max="1" step="0.05" value="${s.soundVolume}"></div>
         <div class="field" style="flex:0 0 auto;align-self:flex-end"><button class="btn" id="testSoundBtn" type="button" onclick="try{testAlarm()}catch(e){alert(e)}">Test sound</button></div>
@@ -7676,7 +7701,7 @@ function viewSettings(){
       <p style="color:var(--muted);font-size:.8rem;margin-top:4px">On the website: only while the tab can run. On the phone APK: uses system notifications if you Grant permission (and allow SnapBack notifications in Android settings).</p>
       <button class="btn sm" id="grantNotifyBtn" type="button" onclick="try{requestNotifyPermission()}catch(e){alert(e)}">Grant permission</button>
       <p style="font-size:.78rem;color:var(--muted);margin-top:8px">If Android says <b>restricted</b> or ~1 notification per day: open phone <b>Settings → Apps → SnapBack → Notifications</b> and set to <b>Unrestricted</b> / allow all.</p>
-      <div id="notifyStatus" style="font-size:.85rem;color:var(--pine);margin-top:8px;font-weight:600">${escapeHtml(state.lastNotifyMsg||'Tap Grant permission — result appears here.')}</div>
+      <div id="notifyStatus" style="font-size:.85rem;color:var(--pine);margin-top:8px;font-weight:600">${escapeHtml(state.lastNotifyMsg||'')}</div>
     </div>
     </div></details><details class="setgroup" style="padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:12px"><summary style="font-weight:700;cursor:pointer">Quotes (optional)</summary><div style="margin-top:10px">
       ${toggleRow('setQuoteOnLoad','Show a quote once when I open the app', s.quoteOnLoad)}
@@ -7718,18 +7743,24 @@ function viewSettings(){
       </div>
     </div>
     <div class="setgroup"><h4>Share an Update</h4>
-      <p style="color:var(--muted);font-size:.85rem;margin:0 0 10px">Share done and open tasks in one step.</p>
-      <div class="field"><label>Optional: WhatsApp number (country code, digits only)</label>
-        <input id="shareWaPhone" type="tel" placeholder="e.g. 9198XXXXXXXX" value="${escapeHtml((state.profile&&state.profile.teacherWa)||'')}">
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Pick a range, choose what to include, then share.</p>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <button type="button" class="btn ghost sm" id="shareRangeToday">Today</button>
+        <div class="field" style="flex:1;min-width:120px"><label>From</label><input type="date" id="shareFrom" value=""></div>
+        <div class="field" style="flex:1;min-width:120px"><label>To</label><input type="date" id="shareTo" value=""></div>
       </div>
-      <div class="field" style="margin-top:8px"><label>Optional: email</label>
-        <input id="shareEmail" type="email" placeholder="e.g. teacher@school.edu" value="${escapeHtml((state.profile&&state.profile.teacherEmail)||'')}">
-      </div>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;width:100%">
-        <button type="button" class="btn" id="shareWaBtn" style="width:100%">Share via WhatsApp</button>
-        <button type="button" class="btn ghost" id="shareEmailBtn" style="width:100%">Share via Email</button>
-        <button type="button" class="btn ghost" id="shareDownloadBtn" style="width:100%">Download as file</button>
-        <button type="button" class="btn ghost" id="shareCopyBtn" style="width:100%">Copy text</button>
+      <label style="display:flex;gap:8px;align-items:center;font-size:.9rem;margin:4px 0"><input type="checkbox" id="shareSelDone" checked> Completed tasks</label>
+      <label style="display:flex;gap:8px;align-items:center;font-size:.9rem;margin:4px 0"><input type="checkbox" id="shareSelOpen" checked> Open tasks</label>
+      <label style="display:flex;gap:8px;align-items:center;font-size:.9rem;margin:4px 0"><input type="checkbox" id="shareSelClasses"> Class load summary</label>
+      <div class="field" style="margin-top:8px"><label>Preview</label><textarea id="sharePreview" rows="6" style="width:100%;font-size:.85rem"></textarea></div>
+      <div class="field"><label>WhatsApp number (optional, with country code)</label><input id="shareWaPhone" placeholder="e.g. 9198xxxxxxxx" value="${escapeHtml((state.profile&&state.profile.waPhone)||'')}"></div>
+      <div class="field"><label>Email (optional)</label><input id="shareEmail" type="email" placeholder="teacher@school.edu" value="${escapeHtml((state.profile&&state.profile.teacherEmail)||'')}"></div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+        <button type="button" class="btn" id="shareRefreshPreview">Update preview</button>
+        <button type="button" class="btn" id="shareWaBtn">WhatsApp</button>
+        <button type="button" class="btn ghost" id="shareEmailBtn">Email</button>
+        <button type="button" class="btn ghost" id="shareDownloadBtn">Download</button>
+        <button type="button" class="btn ghost" id="shareCopyBtn">Copy text</button>
       </div>
     </div>
     <div class="savedmsg" id="savedMsg"></div>
@@ -7768,6 +7799,42 @@ function wireView(){
     else if(action==='clear-inline-date') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const t=findTask(id); if(t) t.date=''; persistRender(); });
     else if(action==='toggle-chunk') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const t=findTask(id); if(!t||!t.chunks) return; const idx=Number(el.dataset.chunk); if(t.chunks[idx]) t.chunks[idx].done=!t.chunks[idx].done; persistRender(); });
 
+    else if(action==='task-start') el.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const tools = [
+        {id:'timer', label:'Focus Pod'},
+        {id:'bitesize', label:'Bite Size'},
+        {id:'eisenhower', label:'This or That'},
+        {id:'rule135', label:'Focus Plate'},
+        {id:'challenges', label:'Challenges'}
+      ];
+      state.appMsg = {
+        title: 'Start this task',
+        body: 'Pick a tool to help you begin:',
+        ok: 'Just start',
+        cancel: 'Cancel',
+        tools,
+        taskId: id,
+        onOk: ()=>{ state.topOfMindId=id; state.timer.activeTaskId=id; navigateTo('timer'); }
+      };
+      // custom render for tools in modal - use showAppPrompt style
+      showAppMessage('Start this task', 'Choose a tool:', {
+        ok: 'Focus Pod',
+        cancel: 'Cancel',
+        onOk: ()=>{ state.topOfMindId=id; if(state.timer) state.timer.activeTaskId=id; navigateTo('timer'); }
+      });
+      // second options via another message is weak - use appPrompt with tools HTML in renderModal
+      state.startToolTaskId = id;
+      state.startToolOpen = true;
+      persistRender();
+    });
+    else if(action==='task-complete') el.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const t=findTask(id); if(!t) return;
+      if(!t.done){ t.done=true; offerCelebration(); }
+      else t.done=false;
+      persistRender();
+    });
     else if(action==='start-task-edit') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
       state.editingTaskId=id; state.taskMenuOpen=false; persistRender();
@@ -7949,8 +8016,8 @@ function wireView(){
       if(p.action==='start-wizard') openStartWizard();
       else if(p.action==='plan-ahead'){ state.view='planAhead'; persistRender(); }
       else if(p.action==='mode-spotlight'){ state.listMode='spotlight'; state.spotlightSize=3; state.filter='all'; showAppMessage('Spotlight on', 'Tasks shows only 3 items. Switch to Full list anytime.'); navigateTo('tasks'); }
-      else if(p.action==='mode-batch'){ state.listMode='batch'; state.spotlightSize=3; state.filter='all'; showAppMessage('Small Batch', 'Work a set of 3. Finish them, then take another set.'); navigateTo('tasks'); }
-      else if(p.action==='mode-wall'){ state.listMode='wall'; navigateTo('tasks'); }
+      else if(p.action==='mode-batch'){ state.listMode='spotlight'; state.spotlightSize=3; state.filter='all'; showAppMessage('Spotlight', 'Only a few tasks shown.'); navigateTo('tasks'); }
+      else if(p.action==='mode-wall'){ state.listMode='wall'; state.filter='all'; showAppMessage('Tile Wall', 'Tasks as tiles only — less list pressure.'); navigateTo('tasks'); }
       else if(p.action==='mode-one'){ state.listMode='one'; state.oneAtATimeIndex=0; navigateTo('tasks'); }
       else if(p.action==='mode-jar'){ state.listMode='jar'; state.jarQueue=null; showAppMessage('Grab Bag', 'List is hidden. Pull one task when ready.'); navigateTo('tasks'); }
       else if(p.action==='mode-pool'){ state.listMode='pool'; navigateTo('tasks'); }
@@ -8763,11 +8830,29 @@ function wireView(){
       }});
     });
     const shareWaBtn=document.getElementById('shareWaBtn');
+    const shareRefresh=document.getElementById('shareRefreshPreview');
+    if(shareRefresh) shareRefresh.addEventListener('click', refreshSharePreview);
+    const shareToday=document.getElementById('shareRangeToday');
+    if(shareToday) shareToday.addEventListener('click', ()=>{
+      const d=todayStr();
+      const a=document.getElementById('shareFrom'); const b=document.getElementById('shareTo');
+      if(a) a.value=d; if(b) b.value=d; refreshSharePreview();
+    });
+    if(document.getElementById('shareFrom')){
+      ['shareFrom','shareTo','shareSelDone','shareSelOpen','shareSelClasses'].forEach(id=>{
+        const el=document.getElementById(id);
+        if(el) el.addEventListener('change', refreshSharePreview);
+      });
+      const sf=document.getElementById('shareFrom'); const st=document.getElementById('shareTo');
+      if(sf && !sf.value) sf.value=todayStr();
+      if(st && !st.value) st.value=todayStr();
+      refreshSharePreview();
+    }
     if(shareWaBtn) shareWaBtn.addEventListener('click', ()=>{
-      saveShareContactsFromForm();
-      const msg=buildStatusUpdateText();
-      if(!msg || msg.trim().length<8){
-        showAppMessage('Nothing to share yet', 'Add your name in Profile and complete or schedule something, then try again.');
+      try{ saveShareContactsFromForm(); }catch(e){}
+      const msg=getShareMessage();
+      if(!msg || msg.trim().length<5){
+        showAppMessage('Nothing to share', 'Update preview first, or pick a date range with tasks.');
         return;
       }
       let phone=(document.getElementById('shareWaPhone')?.value||'').replace(/[^0-9]/g,'');
@@ -8778,15 +8863,15 @@ function wireView(){
     });
     const shareEmailBtn=document.getElementById('shareEmailBtn');
     if(shareEmailBtn) shareEmailBtn.addEventListener('click', ()=>{
-      saveShareContactsFromForm();
-      const msg=buildStatusUpdateText();
+      try{ saveShareContactsFromForm(); }catch(e){}
+      const msg=getShareMessage();
       const to=(document.getElementById('shareEmail')?.value||'').trim();
       const sub=encodeURIComponent('SnapBack update — '+((state.profile&&state.profile.name)||'student'));
       window.location.href='mailto:'+encodeURIComponent(to)+'?subject='+sub+'&body='+encodeURIComponent(msg);
     });
     const shareDownloadBtn=document.getElementById('shareDownloadBtn');
     if(shareDownloadBtn) shareDownloadBtn.addEventListener('click', ()=>{
-      const msg=buildStatusUpdateText();
+      const msg=getShareMessage();
       const blob=new Blob([msg],{type:'text/plain'});
       const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
       a.download='snapback-update-'+todayStr()+'.txt'; a.click();
@@ -8794,9 +8879,9 @@ function wireView(){
     });
     const shareCopyBtn=document.getElementById('shareCopyBtn');
     if(shareCopyBtn) shareCopyBtn.addEventListener('click', ()=>{
-      const msg=buildStatusUpdateText();
+      const msg=getShareMessage();
       try{ navigator.clipboard.writeText(msg); showAppMessage('Copied', 'Paste into any chat.'); }
-      catch(e){ showAppMessage('Text', msg.slice(0,180)+'…'); }
+      catch(e){ showAppMessage('Copy', msg.slice(0,200)); }
     });
 
     const ex=document.getElementById('exportBackupBtn'); if(ex) ex.addEventListener('click', exportBackup);
