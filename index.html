@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="83">
+<meta name="snapback-build" content="84">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1134,41 +1134,6 @@ function stopAlarmRamp(){
 /** Short chime (timer / test) */
 
 
-function playBeepFallbackKind(kind, vol){
-  try{
-    const sr=22050;
-    let dur=0.5, freq=880;
-    if(kind==='bell'){ dur=0.9; freq=440; }
-    if(kind==='beep'){ dur=0.35; freq=980; }
-    if(kind==='chime'){ dur=0.55; freq=659; }
-    const n=Math.floor(sr*dur);
-    const data=new Float32Array(n);
-    for(let i=0;i<n;i++){
-      const t=i/sr;
-      let s=Math.sin(2*Math.PI*freq*t);
-      if(kind==='chime') s += 0.5*Math.sin(2*Math.PI*(freq*1.5)*t);
-      if(kind==='beep') s = (s>0?1:-1)*0.5; // square-ish
-      data[i]=s*Math.exp(-t*(kind==='bell'?2:5))*(vol||0.7);
-    }
-    const buf=new ArrayBuffer(44+n*2);
-    const v=new DataView(buf);
-    const w=(o,s)=>{ for(let i=0;i<s.length;i++) v.setUint8(o+i,s.charCodeAt(i)); };
-    w(0,'RIFF'); v.setUint32(4,36+n*2,true); w(8,'WAVE'); w(12,'fmt ');
-    v.setUint32(16,16,true); v.setUint16(20,1,true); v.setUint16(22,1,true);
-    v.setUint32(24,sr,true); v.setUint32(28,sr*2,true); v.setUint16(32,2,true); v.setUint16(34,16,true);
-    w(36,'data'); v.setUint32(40,n*2,true);
-    let o=44;
-    for(let i=0;i<n;i++){ let s=Math.max(-1,Math.min(1,data[i])); v.setInt16(o,s<0?s*0x8000:s*0x7FFF,true); o+=2; }
-    const blob=new Blob([buf],{type:'audio/wav'});
-    const url=URL.createObjectURL(blob);
-    const a=new Audio(url);
-    a.volume=Math.min(1, Math.max(0.3, vol||0.8));
-    const p=a.play();
-    if(p&&p.catch) p.catch(()=>{});
-    setTimeout(()=>URL.revokeObjectURL(url), 2500);
-    return true;
-  }catch(e){ return false; }
-}
 
 function playBeepFallback(){
   // Minimal WAV (short beep) via data URI — works when Web Audio is blocked
@@ -1204,76 +1169,60 @@ function setTestSoundStatus(msg){
   if(el) el.textContent=msg;
 }
 function testAlarm(){
-  // Use the dropdown choice: chime / bell / beep
-  playAlarm(true);
-  try{ if(navigator.vibrate) navigator.vibrate([80,40,80]); }catch(e){}
   const kind = (state.settings && state.settings.alarmSound) || 'chime';
-  setTestSoundStatus('Played “'+kind+'”. Change Sound dropdown and Test again to hear the others.');
-  setTimeout(()=>{
-    try{ showAppMessage('Sound test', 'You should hear the “'+kind+'” sound. Pick Chime, Bell, or Beep above and tap Test sound again.'); }catch(e){}
-  }, 400);
-  try{
-    if(typeof isNativeApp==='function' && isNativeApp() && typeof scheduleNativeNotification==='function'){
-      scheduleNativeNotification({
-        key:'test-sound-'+Date.now(),
-        title:'SnapBack',
-        body:'Sound test ran ('+kind+').',
-        when: new Date(Date.now()+3000)
-      });
-    }
-  }catch(e){}
+  const labels = {chime:'Chime (bright notes)', bell:'Bell (long ring)', beep:'Beep (sharp pulses)', digital:'Digital (fast blips)', radar:'Radar (whoop)', knock:'Knock (low thuds)'};
+  playAlarm(true);
+  try{ if(navigator.vibrate) navigator.vibrate(kind==='beep'?[50,40,50,40,50]:[120]); }catch(e){}
+  const label = labels[kind]||kind;
+  setTestSoundStatus('Now playing: '+label);
+  setTimeout(()=>{ try{ showAppMessage('Sound test', 'Playing: '+label+'\n\nChange the Sound menu and tap Test sound again to compare.'); }catch(e){} }, 350);
 }
 
 function playAlarm(force){
   if(!force && state.settings && state.settings.soundOn===false) return;
   const kind = (state.settings&&state.settings.alarmSound)||'chime';
-  const vol = Math.max(0.2, Math.min(1, Number(state.settings&&state.settings.soundVolume)||0.85));
-  // Always also try a matching short WAV so laptop/phone both get something
-  try{ playBeepFallbackKind(kind, vol); }catch(e){}
+  const vol = Math.max(0.25, Math.min(1, Number(state.settings&&state.settings.soundVolume)||0.9));
   resumeAudioThen((ctx)=>{
-    const now = ctx.currentTime;
-    if(kind==='beep'){
-      // Three sharp square beeps
-      [0,0.22,0.44].forEach((off)=>{
-        const osc=ctx.createOscillator(), g=ctx.createGain();
-        osc.type='square'; osc.frequency.value=980;
-        const start=now+off;
-        g.gain.setValueAtTime(0.0001,start);
-        g.gain.linearRampToValueAtTime(vol*0.55,start+0.01);
-        g.gain.exponentialRampToValueAtTime(0.0001,start+0.12);
-        osc.connect(g); g.connect(ctx.destination);
-        osc.start(start); osc.stop(start+0.14);
-      });
-    } else if(kind==='bell'){
-      // Soft long bell
-      const osc=ctx.createOscillator(), g=ctx.createGain();
-      osc.type='sine'; osc.frequency.value=440;
-      g.gain.setValueAtTime(0.0001,now);
-      g.gain.linearRampToValueAtTime(vol*0.7,now+0.05);
-      g.gain.exponentialRampToValueAtTime(0.0001,now+1.4);
-      osc.connect(g); g.connect(ctx.destination);
-      osc.start(now); osc.stop(now+1.5);
-      const osc2=ctx.createOscillator(), g2=ctx.createGain();
-      osc2.type='sine'; osc2.frequency.value=880;
-      g2.gain.setValueAtTime(0.0001,now);
-      g2.gain.linearRampToValueAtTime(vol*0.25,now+0.05);
-      g2.gain.exponentialRampToValueAtTime(0.0001,now+1.0);
-      osc2.connect(g2); g2.connect(ctx.destination);
-      osc2.start(now); osc2.stop(now+1.1);
-    } else {
-      // Chime: rising notes
-      [523.25,659.25,783.99].forEach((freq,i)=>{
-        const osc=ctx.createOscillator(), g=ctx.createGain();
-        osc.type='sine'; osc.frequency.value=freq;
-        const start=now+i*0.2;
-        g.gain.setValueAtTime(0.0001,start);
-        g.gain.linearRampToValueAtTime(vol*0.65,start+0.03);
-        g.gain.exponentialRampToValueAtTime(0.0001,start+0.45);
-        osc.connect(g); g.connect(ctx.destination);
-        osc.start(start); osc.stop(start+0.5);
-      });
-    }
+    try{ playDistinctAlarm(ctx, kind, vol); }catch(e){ console.warn(e); }
   });
+}
+/** Very different patterns so users can tell them apart */
+function playDistinctAlarm(ctx, kind, vol){
+  const now = ctx.currentTime;
+  const out = ctx.destination;
+  function tone(type, freq, t0, dur, peak, freqEnd){
+    const osc=ctx.createOscillator(), g=ctx.createGain();
+    osc.type=type;
+    osc.frequency.setValueAtTime(freq, t0);
+    if(freqEnd) osc.frequency.linearRampToValueAtTime(freqEnd, t0+dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(peak, t0+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    osc.connect(g); g.connect(out);
+    osc.start(t0); osc.stop(t0+dur+0.02);
+  }
+  if(kind==='beep'){
+    // 4 harsh short digital beeps — unmistakable
+    for(let i=0;i<4;i++) tone('square', 1200, now+i*0.28, 0.12, vol*0.5);
+  } else if(kind==='bell'){
+    // One long low church-like bell with overtone
+    tone('sine', 392, now, 1.8, vol*0.75);
+    tone('sine', 784, now, 1.2, vol*0.28);
+    tone('sine', 1176, now, 0.8, vol*0.12);
+  } else if(kind==='digital'){
+    // Fast ascending arcade blips
+    [600,750,900,1100,1300].forEach((f,i)=> tone('square', f, now+i*0.09, 0.08, vol*0.4));
+  } else if(kind==='radar'){
+    // Slow whoop (siren-ish)
+    tone('sawtooth', 400, now, 0.7, vol*0.35, 900);
+    tone('sawtooth', 400, now+0.75, 0.7, vol*0.35, 900);
+  } else if(kind==='knock'){
+    // Low thuds
+    for(let i=0;i<3;i++) tone('sine', 120, now+i*0.35, 0.2, vol*0.8, 80);
+  } else {
+    // chime — bright rising xylophone-like notes (default)
+    [523.25, 659.25, 783.99, 1046.5].forEach((f,i)=> tone('sine', f, now+i*0.22, 0.4, vol*0.55));
+  }
 }
 /**
  * Bug Me / wake: gradual volume over ~50 seconds, repeating soft pulses.
@@ -3182,7 +3131,7 @@ function renderSidebar(){
       NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('') +
-      `<div class="navfoot">Saved automatically · build 83</div>`;
+      `<div class="navfoot">Saved automatically · build 84</div>`;
     el.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.nav)));
     document.getElementById('brandHomeBtn').addEventListener('click', ()=>setView('today'));
     mobileMenuOpen=false;
@@ -3200,7 +3149,7 @@ function renderMobileDrawer(){
       ${NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
       ).join('')).join('')}
-      <div class="navfoot">Saved automatically · build 83</div>
+      <div class="navfoot">Saved automatically · build 84</div>
     </div>`;
   root.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{ mobileMenuOpen=false; setView(b.dataset.nav); }));
   document.getElementById('drawerBackdrop').addEventListener('click', ()=>{ mobileMenuOpen=false; renderMobileDrawer(); });
@@ -7243,7 +7192,7 @@ function viewSettings(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Make it yours · build 83</div><h1>Settings</h1>
+    <div class="eyebrow">Make it yours · build 84</div><h1>Settings</h1>
     <p style="margin-top:4px"><button class="btn ghost sm" id="gotoHelpBtn">Help &amp; FAQ</button></p>
     <div class="card">
       <h3 style="margin:0 0 6px">Your profile</h3>
@@ -7338,9 +7287,13 @@ function viewSettings(){
       ${toggleRow('setSoundOn','Play a sound when a session ends', s.soundOn)}
       <div class="row" style="margin-top:8px">
         <div class="field"><label>Sound</label><select id="setAlarmSound">
-          <option value="chime" ${s.alarmSound==='chime'?'selected':''}>Chime</option>
-          <option value="bell" ${s.alarmSound==='bell'?'selected':''}>Bell</option>
-          <option value="beep" ${s.alarmSound==='beep'?'selected':''}>Beep</option></select></div>
+          <option value="chime" ${s.alarmSound==='chime'?'selected':''}>Chime — bright rising notes</option>
+          <option value="bell" ${s.alarmSound==='bell'?'selected':''}>Bell — long soft ring</option>
+          <option value="beep" ${s.alarmSound==='beep'?'selected':''}>Beep — sharp digital pulses</option>
+          <option value="digital" ${s.alarmSound==='digital'?'selected':''}>Digital — fast arcade blips</option>
+          <option value="radar" ${s.alarmSound==='radar'?'selected':''}>Radar — rising whoop</option>
+          <option value="knock" ${s.alarmSound==='knock'?'selected':''}>Knock — low thuds</option>
+        </select></div>
         <div class="field"><label>Volume</label><input class="slider" style="width:100%" type="range" id="setSoundVol" min="0" max="1" step="0.05" value="${s.soundVolume}"></div>
         <div class="field" style="flex:0 0 auto;align-self:flex-end"><button class="btn" id="testSoundBtn" type="button" onclick="try{testAlarm()}catch(e){alert(e)}">Test sound</button></div>
       </div>
