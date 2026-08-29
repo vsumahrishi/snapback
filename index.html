@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="150">
+<meta name="snapback-build" content="160">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -281,6 +281,12 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 
 /* Settings */
 .setgroup{margin-bottom:18px}
+details.setgroup{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:14px}
+details.setgroup>summary{list-style:none;font-weight:700;font-size:.95rem;cursor:pointer;color:var(--ink);padding:4px 0}
+details.setgroup>summary::-webkit-details-marker{display:none}
+details.setgroup>summary::before{content:'▸ ';color:var(--muted)}
+details.setgroup[open]>summary::before{content:'▾ '}
+details.setgroup .setgroup-body{margin-top:12px}
 .setgroup h4{font-size:.85rem;margin-bottom:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .toggle{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line)}
 .toggle:last-child{border-bottom:none}
@@ -1179,7 +1185,7 @@ function testAlarm(){
     beep: 'Beep — sharp pulses',
     digital: 'Digital — fast blips',
     radar: 'Radar — whoops',
-    knock: 'Knock — loud wake bursts'
+    knock: 'Wake bursts — sharp alarm pulses'
   };
   resumeAudioThen((ctx)=>{
     try{ playDistinctAlarm(ctx, kind, 0.95); }catch(e){ console.warn(e); }
@@ -1953,14 +1959,55 @@ function suggestTemplateForTitle(title){
   if(/project|presentation|proposal|group work/.test(t)) return 'project';
   return 'generic';
 }
+function runMagicBreakdown(){ smartBreakdown(); }
 function smartBreakdown(){
-  const t=findTask(state.cheeseTaskId); if(!t) return;
   const promptInput=document.getElementById('magicInput');
-  const title=(promptInput ? promptInput.value.trim() : '') || t.title;
+  const otherTitle=(document.getElementById('biteOtherTitle')?.value||'').trim();
+  let t=findTask(state.cheeseTaskId);
+  // Other: create/find a task from typed title
+  if((state.cheeseTaskId==='__other__' || !t) && otherTitle){
+    let existing=(state.tasks||[]).find(x=>!x.done && x.title===otherTitle);
+    if(!existing){
+      existing={id:uid(), title:otherTitle, date:'', time:'', done:false, chunks:[], tier:'could', notes:'', context:'school', created:Date.now()};
+      state.tasks.unshift(existing);
+    }
+    state.cheeseTaskId=existing.id;
+    t=existing;
+  }
+  if(!t){
+    const status=document.getElementById('magicStatus');
+    if(status) status.textContent='Choose a task or pick Other and type a title first.';
+    return;
+  }
+  const title=(promptInput ? promptInput.value.trim() : '') || otherTitle || t.title;
   const status=document.getElementById('magicStatus');
+  // Chapter-style offline steps
+  const ch = title.match(/chapter\s*(\d+)/i) || (document.getElementById('biteChNum')?.value||'').match(/(\d+)/);
+  if(ch || /chapter|ciccarelli|textbook|section/i.test(title)){
+    const n = ch ? ch[1] : (document.getElementById('biteChNum')?.value||'');
+    const book = (document.getElementById('biteBook')?.value||'').trim() || 'the textbook';
+    const steps = [
+      'Skim chapter '+(n||'')+' headings in '+book+' (5–10 min)',
+      'List section titles on paper or Notes',
+      'Read section 1 and write 3 bullet points',
+      'Read next section + 3 bullets',
+      'Do the same for remaining sections (one at a time)',
+      'Review bold terms / glossary for this chapter',
+      'Answer 3 review questions (or make 3 of your own)',
+      'Write a 5-line summary of the whole chapter',
+      'Mark done and schedule a short review tomorrow'
+    ];
+    t.chunks = t.chunks || [];
+    const existing=new Set(t.chunks.map(c=>(c.text||'').toLowerCase()));
+    steps.forEach(s=>{ if(!existing.has(s.toLowerCase())) t.chunks.push({id:uid(), text:s, done:false}); });
+    if(status) status.textContent='Added chapter-style bites offline. Edit or delete any step below. For a book-specific plan, use Ask AI with book + chapter filled in.';
+    persistRender();
+    return;
+  }
   const key=suggestTemplateForTitle(title);
   applyTemplate(key);
-  if(status) status.textContent = `Used the "${key}" breakdown based on what you typed. Add, edit, or delete any step below, or try a different template.`;
+  if(status) status.textContent = 'Used the "'+key+'" breakdown from what you typed. Edit or delete steps below.';
+  persistRender();
 }
 function addHole(){
   const t=findTask(state.cheeseTaskId); if(!t) return;
@@ -2749,7 +2796,7 @@ function isInIframe(){
 function requestNotifyPermission(){
   const status=document.getElementById('notifyStatus');
   state.lastNotifyMsg='';
-  if(status) status.textContent='Checking…';
+  if(status) status.textContent='';
   // Phone APK (Capacitor): use Local Notifications
   if(typeof isNativeApp==='function' && isNativeApp()){
     ensureNotifyPermission().then(ok=>{
@@ -4242,7 +4289,7 @@ function viewLogin(){
       <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin:12px 0"><input type="checkbox" id="loginRemember" checked> Stay signed in</label>
       <button type="button" class="btn" id="loginLocalBtn" style="width:100%">${hasLocal?'Sign in':'Create account'}</button>
       ${hasLocal?'<button type="button" class="btn ghost sm" id="loginCreateBtn" style="width:100%;margin-top:8px">Create new account</button>':''}
-      <details style="margin-top:14px"><summary style="font-size:.75rem;color:var(--muted);cursor:pointer">Google setup (school)</summary>
+      <details style="margin-top:14px"><summary style="font-size:.75rem;color:var(--muted);cursor:pointer">Cloud setup (optional)</summary>
         <textarea id="loginFbConfig" rows="2" placeholder="Firebase config JSON" style="width:100%;font-size:.7rem;margin-top:6px"></textarea>
         <button type="button" class="btn ghost sm" id="loginSaveFb" style="margin-top:6px">Save</button>
       </details>
@@ -4511,7 +4558,7 @@ function viewPlanAhead(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">ADHD-friendly planning</div>
+    <div class="eyebrow">Short list for this week</div>
     <h1>Plan this week</h1>
     <p>Do not plan everything. Move only a few tasks into <b>This week</b>. The rest wait.</p>
     <button class="btn ghost sm" id="planAiBtn" style="margin-top:8px">✨ Ask AI for a week plan</button>
@@ -4613,21 +4660,20 @@ function aiPickerHtml(idPrefix){
   </select>`;
 }
 function promptStudyBreakdown(book, chapterNum, chapterName, taskTitle){
-  return `I am a student (often grades 8–12 or early college) who needs ADHD-friendly help.
+  return `You are helping a student (age ~13–20) plan ADHD-friendly study bites.
 
-Task: ${taskTitle||'Study this chapter'}
-Book / subject: ${book||'(not specified)'}
-Chapter number: ${chapterNum||'(not specified)'}
-Chapter name: ${chapterName||'(not specified)'}
+Subject / book: ${book||'(look up typical TOC if this is a known textbook name)'}
+Chapter number: ${chapterNum||'(unknown)'}
+Chapter title: ${chapterName||taskTitle||'(unknown)'}
+Task note: ${taskTitle||''}
 
-Please break this into a realistic Bite Size plan:
-1) 6–12 small steps I can finish in 10–20 minutes each
-2) Order them so the first step is the easiest start
-3) Mark which steps need deep focus vs light review
-4) Suggest when I might need a break
-5) Keep language simple and encouraging — no long lecture
-
-Return a numbered list I can copy into my study app.`;
+Please:
+1) If you know this book (e.g. Ciccarelli Psychology), use a realistic chapter structure (main sections).
+2) If not sure, assume a standard chapter: intro, 4–7 sections, summary, review questions.
+3) Break study into 8–12 bites of 10–20 minutes each (skimming, one section at a time, terms, questions, summary).
+4) Estimate total time roughly.
+5) Numbered list only — short lines a student can copy into an app.
+6) Encouraging, simple language. No long lecture.`;
 }
 function promptQuizAfterStudy(book, chapterNum, chapterName, taskTitle){
   return `I just finished studying this (student, ADHD-friendly please):
@@ -5964,7 +6010,15 @@ function viewBiteSize(){
   ${guideBanner}
   <div class="card">
     <label>Task</label>
-    <select id="cheeseTaskSelect">${undone.length?undone.map(x=>`<option value="${x.id}" ${t&&t.id===x.id?'selected':''}>${escapeHtml(x.title)}</option>`).join(''):'<option>No tasks yet — add one on the Tasks page</option>'}</select>
+    <select id="cheeseTaskSelect">
+      ${undone.map(x=>`<option value="${x.id}" ${t&&String(t.id)===String(x.id)?'selected':''}>${escapeHtml(x.title)}</option>`).join('')}
+      <option value="__other__" ${state.cheeseTaskId==='__other__'?'selected':''}>Other (type below)</option>
+    </select>
+    <div id="biteOtherWrap" style="margin-top:10px;${state.cheeseTaskId==='__other__'?'':'display:none'}">
+      <div class="field"><label>What are you breaking down?</label>
+        <input id="biteOtherTitle" placeholder="e.g. Ciccarelli Psychology chapter 8" value="${escapeHtml((state.biteOtherTitle||''))}">
+      </div>
+    </div>
   </div>
   ${t?`
   <div class="card" style="background:var(--gold-soft);border-color:var(--gold)">
@@ -5996,9 +6050,10 @@ function viewBiteSize(){
     </div>
     <ul style="list-style:none;padding:0;margin:12px 0 0">
       ${chunks.length?chunks.map((c,i)=>`<li style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)">
-        <input type="checkbox" ${c.done?'checked':''} data-action="toggle-chunk" data-id="${t.id}" data-idx="${i}">
-        <span style="flex:1;${c.done?'text-decoration:line-through;opacity:.6':''}">${escapeHtml(c.text||c.title||'')}</span>
-      </li>`).join(''):'<li class="empty">No bites yet — add some or ask AI.</li>'}
+        <input type="checkbox" ${c.done?'checked':''} data-action="toggle-chunk" data-id="${t.id}" data-chunk="${i}" data-idx="${i}">
+        <input type="text" value="${escapeHtml(c.text||c.title||'')}" data-action="edit-chunk" data-id="${t.id}" data-idx="${i}" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:6px 8px;${c.done?'text-decoration:line-through;opacity:.6':''}">
+        <button type="button" class="btn danger sm" data-action="delete-chunk" data-id="${t.id}" data-idx="${i}">Delete</button>
+      </li>`).join(''):'<li class="empty">No bites yet — add some, use offline breakdown, or ask AI.</li>'}
     </ul>
   </div>
   ${allBitesDone?`
@@ -7626,7 +7681,7 @@ function viewSettings(){
     <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
       <h3 style="margin:0 0 6px">Account</h3>
       ${authStatusHtml()}
-      <details style="margin-top:8px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">School setup only</summary><div class="field"><label>Firebase config</label>
+      <details style="margin-top:8px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Cloud setup (optional)</summary><div class="field"><label>Firebase config</label>
         <textarea id="fbConfigInput" rows="4" placeholder='{ "apiKey": "...", "projectId": "...", ... }' style="width:100%;font-size:.75rem"></textarea>
       </div>
       <p style="font-size:.78rem;color:var(--muted);margin:8px 0">One-time setup for the school project. 1) Paste config once → Save. 2) Sign in with Google on laptop and phone. Same Google account = same data. Firebase Console must have Google sign-in enabled.</p>
@@ -7663,7 +7718,7 @@ function viewSettings(){
     </div><p>Changes apply immediately.</p>
   </div>
   <div class="card">
-    <details class="setgroup" style="padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:12px"><summary style="font-weight:700;cursor:pointer">Appearance &amp; celebrations</summary><div style="margin-top:10px">
+    <details class="setgroup"><summary>Appearance &amp; celebrations</summary><div class="setgroup-body">
       ${toggleRow('setDarkMode','Dark mode', !!s.darkMode)}
     </div>
     
@@ -7671,15 +7726,15 @@ function viewSettings(){
       ${toggleRow('setCelebrateSound','Ask “quick jig?” after confetti (optional sound)', s.celebrateSound !== false)}
       <p style="color:var(--muted);font-size:.78rem;margin-top:4px">The beat is a simple 12-second rhythm made in the browser — not a song. You can turn it off permanently here.</p>
     </div>
-    </div></details><details class="setgroup" style="padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:12px"><summary style="font-weight:700;cursor:pointer">Timer lengths (minutes)</summary><div style="margin-top:10px"><div class="grid4">
+    </div></details><details class="setgroup"><summary>Timer lengths (minutes)</summary><div class="setgroup-body"><div style="margin-top:10px"><div class="grid4">
       ${numField('setWork','Focus session', s.workMin,5,90)}${numField('setShort','Short break', s.shortBreakMin,1,30)}
       ${numField('setLong','Long break', s.longBreakMin,5,60)}${numField('setSessions','Sessions before long break', s.sessionsBeforeLong,2,8)}
     </div></div>
-    </div></details><details class="setgroup" style="padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:12px"><summary style="font-weight:700;cursor:pointer">Auto-start</summary><div style="margin-top:10px">
+    </div></details><details class="setgroup"><summary>Auto-start</summary><div class="setgroup-body">
       ${toggleRow('setAutoBreak','Start breaks automatically', s.autoStartBreaks)}
       ${toggleRow('setAutoWork','Start next focus session automatically', s.autoStartWork)}
     </div>
-    </div></details><details class="setgroup" style="padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:12px"><summary style="font-weight:700;cursor:pointer">Sounds &amp; notifications</summary><div style="margin-top:10px"><h4 style="margin:0 0 8px">Alarm sound</h4>
+    </div></details><details class="setgroup"><summary>Sounds &amp; notifications</summary><div class="setgroup-body"><h4 style="margin:0 0 8px">Alarm sound</h4>
       <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Set how loud Bug Me can get (peak). On a phone, the side volume buttons still control the device volume while this app is open.</p>
       ${toggleRow('setSoundOn','Play a sound when a session ends', s.soundOn)}
       <div class="row" style="margin-top:8px">
@@ -7689,7 +7744,7 @@ function viewSettings(){
           <option value="beep" ${s.alarmSound==='beep'?'selected':''}>Beep — sharp digital pulses</option>
           <option value="digital" ${s.alarmSound==='digital'?'selected':''}>Digital — fast arcade blips</option>
           <option value="radar" ${s.alarmSound==='radar'?'selected':''}>Radar — rising whoop</option>
-          <option value="knock" ${s.alarmSound==='knock'?'selected':''}>Knock — loud wake bursts</option>
+          <option value="knock" ${s.alarmSound==='knock'?'selected':''}>Wake bursts — sharp alarm pulses</option>
         </select></div>
         <div class="field"><label>Volume</label><input class="slider" style="width:100%" type="range" id="setSoundVol" min="0" max="1" step="0.05" value="${s.soundVolume}"></div>
         <div class="field" style="flex:0 0 auto;align-self:flex-end"><button class="btn" id="testSoundBtn" type="button" onclick="try{testAlarm()}catch(e){alert(e)}">Test sound</button></div>
@@ -7700,10 +7755,10 @@ function viewSettings(){
       ${toggleRow('setNotifyBrowser','Notifications for deadlines (browser tab, or phone APK when allowed)', s.notifyBrowser)}
       <p style="color:var(--muted);font-size:.8rem;margin-top:4px">On the website: only while the tab can run. On the phone APK: uses system notifications if you Grant permission (and allow SnapBack notifications in Android settings).</p>
       <button class="btn sm" id="grantNotifyBtn" type="button" onclick="try{requestNotifyPermission()}catch(e){alert(e)}">Grant permission</button>
-      <p style="font-size:.78rem;color:var(--muted);margin-top:8px">If Android says <b>restricted</b> or ~1 notification per day: open phone <b>Settings → Apps → SnapBack → Notifications</b> and set to <b>Unrestricted</b> / allow all.</p>
-      <div id="notifyStatus" style="font-size:.85rem;color:var(--pine);margin-top:8px;font-weight:600">${escapeHtml(state.lastNotifyMsg||'')}</div>
+      <p style="font-size:.78rem;color:var(--muted);margin-top:8px">On Android: phone Settings → Apps → SnapBack → Notifications → allow all (not Restricted). Battery → Unrestricted.</p>
+      <div id="notifyStatus" style="font-size:.85rem;color:var(--pine);margin-top:8px;font-weight:600">${escapeHtml(state.lastNotifyMsg||'Tap Grant permission if alerts are blocked.')}</div>
     </div>
-    </div></details><details class="setgroup" style="padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:12px"><summary style="font-weight:700;cursor:pointer">Quotes (optional)</summary><div style="margin-top:10px">
+    </div></details><details class="setgroup"><summary>Quotes (optional)</summary><div class="setgroup-body">
       ${toggleRow('setQuoteOnLoad','Show a quote once when I open the app', s.quoteOnLoad)}
       <p style="color:var(--muted);font-size:.8rem;margin:6px 0">Add your own favorite lines (lyrics, mantras, anything) — these are yours, stored only in your app.</p>
       <div class="row"><input id="customQuoteInput" placeholder="Add a personal quote or line"><button class="btn sm" id="addQuoteBtn" style="flex:0 0 auto">Add</button></div>
@@ -7797,6 +7852,17 @@ function wireView(){
     else if(action==='save-inline-date') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const t=findTask(id); if(!t) return; const inp=document.getElementById('inlineDate-'+id)||document.getElementById('editDateText-'+id); if(inp) t.date=(inp.value||'').trim(); state.editingTaskId=null; persistRender(); });
     else if(action==='cancel-inline-date') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); state.editingTaskId=null; persistRender(); });
     else if(action==='clear-inline-date') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const t=findTask(id); if(t) t.date=''; persistRender(); });
+    else if(action==='delete-chunk') el.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const t=findTask(id); if(!t||!t.chunks) return;
+      const idx=Number(el.dataset.idx);
+      t.chunks.splice(idx,1); persistRender();
+    });
+    else if(action==='edit-chunk') el.addEventListener('change', (e)=>{
+      const t=findTask(id); if(!t||!t.chunks) return;
+      const idx=Number(el.dataset.idx);
+      if(t.chunks[idx]) t.chunks[idx].text=el.value; saveState();
+    });
     else if(action==='toggle-chunk') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const t=findTask(id); if(!t||!t.chunks) return; const idx=Number(el.dataset.chunk); if(t.chunks[idx]) t.chunks[idx].done=!t.chunks[idx].done; persistRender(); });
 
     else if(action==='task-start') el.addEventListener('click', (e)=>{
@@ -8619,7 +8685,13 @@ function wireView(){
   }
   if(state.view==='bitesize'){
     const sel=document.getElementById('cheeseTaskSelect');
-    if(sel) sel.addEventListener('change', ()=>{ state.cheeseTaskId=sel.value; persistRender(); });
+    if(sel) sel.addEventListener('change', ()=>{
+      state.cheeseTaskId=sel.value;
+      if(sel.value==='__other__') state.biteOtherTitle=(document.getElementById('biteOtherTitle')?.value||'');
+      persistRender();
+    });
+    const bot=document.getElementById('biteOtherTitle');
+    if(bot) bot.addEventListener('change', ()=>{ state.biteOtherTitle=bot.value.trim(); });
     const fillPlateBtn=document.getElementById('fillPlateBtn');
     if(fillPlateBtn) fillPlateBtn.addEventListener('click', fillPlateFromTasks);
     const magicBtn=document.getElementById('magicBtn');
@@ -8632,10 +8704,15 @@ function wireView(){
     });
     const breakBtn=document.getElementById('biteAiBreakBtn');
     if(breakBtn) breakBtn.addEventListener('click', ()=>{
-      const t=findTask(state.cheeseTaskId);
+      let t=findTask(state.cheeseTaskId);
+      const other=(document.getElementById('biteOtherTitle')?.value||'').trim();
+      if((!t || state.cheeseTaskId==='__other__') && other){
+        t={id:uid(), title:other, date:'', done:false, chunks:[], tier:'could', created:Date.now()};
+        state.tasks.unshift(t); state.cheeseTaskId=t.id;
+      }
       const book=document.getElementById('biteBook')?.value||'';
       const chNum=document.getElementById('biteChNum')?.value||'';
-      const chName=document.getElementById('biteChName')?.value||'';
+      const chName=document.getElementById('biteChName')?.value|| other || (t&&t.title)||'';
       if(t){ t.studyMeta={book, chNum, chName}; }
       const ai=document.getElementById('biteAiSelect')?.value||preferredAI();
       setPreferredAI(ai);
