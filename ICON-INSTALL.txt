@@ -1,0 +1,16 @@
+HOME-SCREEN ICON (SnapBack squirrel / logo)
+===========================================
+1. Close Android Studio
+2. In YOUR project, go to:
+   android/app/src/main/res/
+3. Copy folders from this package:
+   android-launcher-icons/mipmap-mdpi
+   android-launcher-icons/mipmap-hdpi
+   android-launcher-icons/mipmap-xhdpi
+   android-launcher-icons/mipmap-xxhdpi
+   android-launcher-icons/mipmap-xxxhdpi
+   into android/app/src/main/res/  (overwrite ic_launcher.png etc.)
+4. Also ensure www/ has icons/ and manifest.json (already in www/)
+5. npx.cmd cap sync android
+6. Build APK → UNINSTALL old SnapBack on phone → install new APK
+7. Home screen should show SnapBack icon (not green Android robot)

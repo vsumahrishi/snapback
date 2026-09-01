@@ -1,16 +1,21 @@
-SnapBack — COMPLETE site package (v14 parser fixes)
+SnapBack — Study Companion (build 188)
 
-Upload ALL files in this folder to the root of:
-  https://github.com/vsumahrishi/snapback
+APP FILES
+  index.html, sw.js, manifest.json, icons/
 
-Required at repo root:
-  index.html
-  sw.js
-  manifest.json
-  icon-192.png
-  icon-512.png
-  icon-maskable-192.png
-  icon-maskable-512.png
-  icons/   (folder with the same icons)
+GUIDES
+  README.txt, README-WEBSITE.txt
+  HOW-TO-INSTALL-ON-PHONE.txt
+  SNAPBACK-STATUS.txt, SNAPBACK-ROADMAP.txt
+  ANDROID-ALARM-NOTES.txt, ICON-INSTALL.txt
 
-Then open: https://vsumahrishi.github.io/snapback/
+WEBSITE: upload whole folder → hard-refresh (Ctrl+Shift+R).
+
+BUILD 188 — Bite Size AI flow
+  1. Ask AI for bites (opens ChatGPT/Claude/etc. with a ready prompt)
+  2. Copy the numbered list from the AI
+  3. Paste in SnapBack (or “Paste from clipboard”)
+  4. Review & choose — tick only the bites you want
+  5. Add selected — saved under the task; edit any bite anytime
+
+Share Update: edit the preview freely; Regenerate from tasks asks before overwriting.

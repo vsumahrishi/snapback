@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="186">
+<meta name="snapback-build" content="188">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1989,56 +1989,135 @@ function ensureTaskForBite(){
     return t;
   }catch(e){ console.warn('ensureTaskForBite', e); return null; }
 }
+function parseBiteLinesFromText(raw){
+  const lines=String(raw||'').split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const bites=[];
+  lines.forEach(l=>{
+    let s=l
+      .replace(/^#{1,6}\s*/,'')
+      .replace(/^\s*[-*•●○▪▸►]+\s*/,'')
+      .replace(/^\s*\d+[.)]\s*/,'')
+      .replace(/^\s*\(\d+\)\s*/,'')
+      .replace(/^\s*\[ \]\s*/,'')
+      .replace(/^\s*\[[xX]\]\s*/,'')
+      .replace(/\*\*/g,'')
+      .replace(/^\s*[–—-]\s*/,'')
+      .trim();
+    // drop pure headings like "Total time:" if very short meta
+    if(s.length>=2) bites.push(s);
+  });
+  if(!bites.length){
+    const parts=String(raw||'').split(/[;|]/).map(p=>p.trim()).filter(p=>p.length>=2);
+    if(parts.length>1) parts.forEach(p=>bites.push(p.slice(0,220)));
+    else if(String(raw||'').trim().length>=2) bites.push(String(raw).trim().slice(0,220));
+  }
+  // de-dupe while preserving order
+  const seen=new Set();
+  return bites.filter(b=>{
+    const k=b.toLowerCase();
+    if(seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+function hideAiBiteReview(){
+  const box=document.getElementById('aiBiteReview');
+  if(box) box.style.display='none';
+  const list=document.getElementById('aiBiteReviewList');
+  if(list) list.innerHTML='';
+}
+function showAiBiteReview(bites){
+  const box=document.getElementById('aiBiteReview');
+  const list=document.getElementById('aiBiteReviewList');
+  if(!box||!list) return;
+  if(!bites || !bites.length){
+    hideAiBiteReview();
+    showAppMessage('Nothing to add', 'Paste a numbered list from the AI first.');
+    return;
+  }
+  list.innerHTML=bites.map((txt,i)=>`
+    <label style="display:grid;grid-template-columns:22px 1fr;gap:10px;align-items:start;padding:8px 4px;border-bottom:1px solid var(--line);margin:0;cursor:pointer;font-size:.9rem;line-height:1.35">
+      <input type="checkbox" class="aiBitePick" data-idx="${i}" checked style="width:18px;height:18px;margin-top:2px">
+      <span>${escapeHtml(txt)}</span>
+    </label>`).join('');
+  box.style.display='block';
+  box.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
 function importAiBitesFromPaste(){
   try{
     const ta=document.getElementById('aiBitesPaste');
     const raw=(ta&&ta.value||'').trim();
-    if(!raw){ showAppMessage('Paste first', 'Paste the AI list, then tap Add as bites.'); return; }
-    // Capture Other title before any re-render
+    if(!raw){ showAppMessage('Paste first', 'Copy the AI numbered list, paste it here, then Review & choose.'); return; }
+    const otherEl=document.getElementById('biteOtherTitle');
+    if(otherEl && otherEl.value.trim()) state.biteOtherTitle=otherEl.value.trim();
+    // ensure a task exists so Add selected has somewhere to go
+    const t=ensureTaskForBite();
+    if(!t){ showAppMessage('No task', 'Choose a task or type a title under Others first.'); return; }
+    const bites=parseBiteLinesFromText(raw);
+    if(!bites.length){ showAppMessage('Could not parse', 'Paste a list with one bite per line.'); return; }
+    showAiBiteReview(bites);
+    showAppMessage('Choose bites', bites.length+' suggestions — untick any you skip, then Add selected.');
+  }catch(e){
+    console.warn(e);
+    showAppMessage('Could not review bites', String(e&&e.message||e));
+  }
+}
+function addSelectedAiBites(){
+  try{
+    const picks=[...document.querySelectorAll('.aiBitePick:checked')];
+    if(!picks.length){ showAppMessage('None selected', 'Tick at least one bite, or Cancel.'); return; }
     const otherEl=document.getElementById('biteOtherTitle');
     if(otherEl && otherEl.value.trim()) state.biteOtherTitle=otherEl.value.trim();
     const t=ensureTaskForBite();
-    if(!t){ showAppMessage('No task', 'Choose a task or type a title under Others, then try again.'); return; }
-    const lines=raw.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-    const bites=[];
-    lines.forEach(l=>{
-      let s=l
-        .replace(/^#{1,6}\s*/,'')
-        .replace(/^\s*[-*•●○▪▸►]+\s*/,'')
-        .replace(/^\s*\d+[.)]\s*/,'')
-        .replace(/^\s*\(\d+\)\s*/,'')
-        .replace(/^\s*\[ \]\s*/,'')
-        .replace(/^\s*\[[xX]\]\s*/,'')
-        .replace(/\*\*/g,'')
-        .replace(/^\s*[–—-]\s*/,'')
-        .trim();
-      if(s.length>=2) bites.push(s);
+    if(!t){ showAppMessage('No task', 'Choose a task or type a title under Others.'); return; }
+    const labels=[...document.querySelectorAll('#aiBiteReviewList label')];
+    const selected=[];
+    picks.forEach(p=>{
+      const idx=Number(p.dataset.idx);
+      const lab=labels[idx];
+      const span=lab && lab.querySelector('span');
+      const tx=(span && span.textContent || '').trim();
+      if(tx) selected.push(tx);
     });
-    if(!bites.length){
-      // whole paste as one bite (or split by semicolon)
-      const parts=raw.split(/[;|]/).map(p=>p.trim()).filter(p=>p.length>=2);
-      if(parts.length>1) parts.forEach(p=>bites.push(p.slice(0,200)));
-      else bites.push(raw.slice(0,200));
-    }
+    if(!selected.length){ showAppMessage('None selected', 'Tick at least one bite.'); return; }
     t.chunks=Array.isArray(t.chunks)?t.chunks:[];
+    const existing=new Set(t.chunks.map(c=>String(c.text||'').toLowerCase()));
     let added=0;
-    bites.forEach(s=>{
-      const tx=String(s||'').trim();
-      if(!tx) return;
+    selected.forEach(tx=>{
+      if(existing.has(tx.toLowerCase())) return;
       t.chunks.push({id:uid(), text:tx, done:false});
+      existing.add(tx.toLowerCase());
       added++;
     });
     normalizeChunks(t);
+    const ta=document.getElementById('aiBitesPaste'); if(ta) ta.value='';
+    hideAiBiteReview();
     state.cheeseTaskId=t.id;
-    // Clear paste only after successful save path
-    if(ta) ta.value='';
     persistRender();
-    showAppMessage('Bites added', added+' bites saved under “'+(t.title||'task')+'”.');
+    showAppMessage(added?'Bites saved':'Already there', added? (added+' bites under “'+(t.title||'task')+'”. Edit them below anytime.') : 'Those bites were already on this task.');
   }catch(e){
-    console.warn('importAiBitesFromPaste', e);
+    console.warn(e);
     showAppMessage('Could not add bites', String(e&&e.message||e));
   }
 }
+function pasteClipboardIntoBites(){
+  const ta=document.getElementById('aiBitesPaste');
+  if(!navigator.clipboard || !navigator.clipboard.readText){
+    showAppMessage('Paste manually', 'Clipboard read not available — paste into the box (Ctrl+V / long-press), then Review & choose.');
+    if(ta) ta.focus();
+    return;
+  }
+  navigator.clipboard.readText().then(txt=>{
+    if(!txt || !txt.trim()){ showAppMessage('Clipboard empty', 'Copy the AI list first, then try again.'); return; }
+    if(ta) ta.value=txt.trim();
+    importAiBitesFromPaste();
+  }).catch(()=>{
+    showAppMessage('Paste manually', 'Allow clipboard access, or paste with Ctrl+V / long-press, then Review & choose.');
+    if(ta) ta.focus();
+  });
+}
+
+
 function runMagicBreakdown(){ try{ smartBreakdown(); }catch(e){ console.warn(e); showAppMessage('Breakdown failed', String(e&&e.message||e)); } }
 function smartBreakdown(){
   const promptInput=document.getElementById('magicInput');
@@ -6133,10 +6212,26 @@ function viewBiteSize(){
     <div id="magicStatus" style="font-size:.8rem;color:var(--muted);margin-top:6px"></div>
   </div>
   <div class="card">
-    <h3 style="margin:0 0 6px">Paste AI breakdown into bites</h3>
-    <p style="font-size:.82rem;color:var(--muted);margin:0 0 8px">After Ask AI, copy the numbered list and paste here. We turn each line into a bite you can edit.</p>
+    <h3 style="margin:0 0 6px">Bring AI bites into SnapBack</h3>
+    <p style="font-size:.82rem;color:var(--muted);margin:0 0 8px">1) Tap <b>Ask AI for bites</b> above → copy the numbered list from the AI tab.<br>
+    2) Paste here → <b>Review &amp; choose</b> → tick what you want → <b>Add selected</b>.<br>
+    3) Edit any bite below anytime. (AI opens in another tab — SnapBack cannot read it automatically.)</p>
     <textarea id="aiBitesPaste" rows="4" placeholder="1) Skim headings&#10;2) Read section 1&#10;3) …" style="width:100%"></textarea>
-    <button type="button" class="btn sm" id="importAiBitesBtn" style="margin-top:8px">Add as bites</button>
+    <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn sm" id="importAiBitesBtn">Review &amp; choose</button>
+      <button type="button" class="btn ghost sm" id="pasteClipboardBitesBtn">Paste from clipboard</button>
+    </div>
+    <div id="aiBiteReview" style="display:none;margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--input-bg)">
+      <div style="font-weight:700;margin-bottom:8px">Choose which bites to keep</div>
+      <p style="font-size:.8rem;color:var(--muted);margin:0 0 10px">Untick anything you don’t want. You can edit text after adding.</p>
+      <div id="aiBiteReviewList" style="max-height:280px;overflow-y:auto;margin-bottom:10px"></div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button type="button" class="btn sm" id="aiBiteAddSelectedBtn">Add selected</button>
+        <button type="button" class="btn ghost sm" id="aiBiteSelectAllBtn">Select all</button>
+        <button type="button" class="btn ghost sm" id="aiBiteSelectNoneBtn">Select none</button>
+        <button type="button" class="btn ghost sm" id="aiBiteCancelReviewBtn">Cancel</button>
+      </div>
+    </div>
   </div>
   <div class="card">
     <h3 style="margin:0 0 8px">Bites for this task</h3>
@@ -7902,7 +7997,7 @@ function viewSettings(){
       </div>
     </div>
     <div class="setgroup"><h4>Share an Update</h4>
-      <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Pick a range, choose what to include, then share.</p>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Pick a range and what to include, then edit the preview if you want. Share buttons send <b>exactly</b> what is in the box.</p>
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <button type="button" class="btn ghost sm" id="shareRangeToday">Today</button>
         <div class="field" style="flex:1;min-width:120px"><label>From</label><input type="date" id="shareFrom" value=""></div>
@@ -7913,11 +8008,12 @@ function viewSettings(){
         <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelOpen" checked style="width:18px;height:18px;flex:0 0 auto"> <span>Open tasks</span></label>
         <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelClasses" style="width:18px;height:18px;flex:0 0 auto"> <span>Class load summary</span></label>
       </div>
-      <div class="field" style="margin-top:8px"><label>Preview</label><textarea id="sharePreview" rows="6" style="width:100%;font-size:.85rem"></textarea></div>
+      <div class="field" style="margin-top:8px"><label>Preview (editable — your edits are kept when you share)</label><textarea id="sharePreview" rows="6" style="width:100%;font-size:.85rem"></textarea>
+        <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">Edit freely. WhatsApp / Email / Download / Copy use this text. “Regenerate from tasks” rebuilds from the date range above (asks first if you edited).</p></div>
       <div class="field"><label>WhatsApp number (optional, with country code)</label><input id="shareWaPhone" placeholder="e.g. 9198xxxxxxxx" value="${escapeHtml((state.profile&&state.profile.waPhone)||'')}"></div>
       <div class="field"><label>Email (optional)</label><input id="shareEmail" type="email" placeholder="teacher@school.edu" value="${escapeHtml((state.profile&&state.profile.teacherEmail)||'')}"></div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
-        <button type="button" class="btn" id="shareRefreshPreview">Update preview</button>
+        <button type="button" class="btn" id="shareRefreshPreview">Regenerate from tasks</button>
         <button type="button" class="btn" id="shareWaBtn">WhatsApp</button>
         <button type="button" class="btn" id="shareEmailBtn">Email</button>
         <button type="button" class="btn" id="shareDownloadBtn">Download</button>
@@ -8024,11 +8120,38 @@ function buildStatusUpdateText(){
     return 'SnapBack update (could not build full text).';
   }
 }
-function refreshSharePreview(){
+function markSharePreviewDirty(){
+  try{
+    const ta=document.getElementById('sharePreview');
+    if(ta) ta.dataset.userEdited='1';
+  }catch(e){}
+}
+function clearSharePreviewDirty(){
+  try{
+    const ta=document.getElementById('sharePreview');
+    if(ta) delete ta.dataset.userEdited;
+  }catch(e){}
+}
+function isSharePreviewDirty(){
+  try{
+    const ta=document.getElementById('sharePreview');
+    return !!(ta && ta.dataset.userEdited==='1');
+  }catch(e){ return false; }
+}
+function refreshSharePreview(force){
   try{
     const ta=document.getElementById('sharePreview');
     if(!ta) return;
+    // force=true from the Regenerate button; otherwise only fill if empty / not edited
+    if(!force && isSharePreviewDirty() && (ta.value||'').trim().length>=5){
+      return; // keep user's edits
+    }
+    if(!force && isSharePreviewDirty()){
+      // still dirty but short — allow regenerate only when forced
+      return;
+    }
     ta.value=buildStatusUpdateText();
+    clearSharePreviewDirty();
   }catch(e){ console.warn('refreshSharePreview', e); }
 }
 function getShareMessage(){
@@ -8037,7 +8160,7 @@ function getShareMessage(){
     let msg=(ta&&ta.value||'').trim();
     if(!msg || msg.length<5){
       msg=buildStatusUpdateText();
-      if(ta) ta.value=msg;
+      if(ta){ ta.value=msg; clearSharePreviewDirty(); }
     }
     return msg||'';
   }catch(e){
@@ -8919,6 +9042,20 @@ function wireView(){
     }
     const impAi=document.getElementById('importAiBitesBtn');
     if(impAi) impAi.addEventListener('click', importAiBitesFromPaste);
+    const clipBtn=document.getElementById('pasteClipboardBitesBtn');
+    if(clipBtn) clipBtn.addEventListener('click', pasteClipboardIntoBites);
+    const addSel=document.getElementById('aiBiteAddSelectedBtn');
+    if(addSel) addSel.addEventListener('click', addSelectedAiBites);
+    const selAll=document.getElementById('aiBiteSelectAllBtn');
+    if(selAll) selAll.addEventListener('click', ()=>{
+      document.querySelectorAll('.aiBitePick').forEach(c=>{ c.checked=true; });
+    });
+    const selNone=document.getElementById('aiBiteSelectNoneBtn');
+    if(selNone) selNone.addEventListener('click', ()=>{
+      document.querySelectorAll('.aiBitePick').forEach(c=>{ c.checked=false; });
+    });
+    const cancelRev=document.getElementById('aiBiteCancelReviewBtn');
+    if(cancelRev) cancelRev.addEventListener('click', hideAiBiteReview);
     const clr=document.getElementById('clearEmptyBitesBtn');
     if(clr) clr.addEventListener('click', ()=>{
       const t=findTask(state.cheeseTaskId);
@@ -9148,28 +9285,44 @@ function wireView(){
     });
     const shareWaBtn=document.getElementById('shareWaBtn');
     const shareRefresh=document.getElementById('shareRefreshPreview');
-    if(shareRefresh) shareRefresh.addEventListener('click', refreshSharePreview);
+    if(shareRefresh) shareRefresh.addEventListener('click', ()=>{
+      if(isSharePreviewDirty()){
+        showAppMessage('Replace your edits?', 'Regenerate will rebuild the text from tasks and dates. Your current edits will be lost.', {
+          ok:'Regenerate', cancel:'Keep my text', onOk:()=>{ refreshSharePreview(true); }
+        });
+      } else {
+        refreshSharePreview(true);
+      }
+    });
+    const sharePrevTa=document.getElementById('sharePreview');
+    if(sharePrevTa){
+      sharePrevTa.addEventListener('input', markSharePreviewDirty);
+      sharePrevTa.addEventListener('change', markSharePreviewDirty);
+    }
     const shareToday=document.getElementById('shareRangeToday');
     if(shareToday) shareToday.addEventListener('click', ()=>{
       const d=todayStr();
       const a=document.getElementById('shareFrom'); const b=document.getElementById('shareTo');
-      if(a) a.value=d; if(b) b.value=d; refreshSharePreview();
+      if(a) a.value=d; if(b) b.value=d;
+      // soft: only fills if user has not edited
+      refreshSharePreview(false);
     });
     if(document.getElementById('shareFrom')){
       ['shareFrom','shareTo','shareSelDone','shareSelOpen','shareSelClasses'].forEach(id=>{
         const el=document.getElementById(id);
-        if(el) el.addEventListener('change', refreshSharePreview);
+        if(el) el.addEventListener('change', ()=>refreshSharePreview(false));
       });
       const sf=document.getElementById('shareFrom'); const st=document.getElementById('shareTo');
       if(sf && !sf.value) sf.value=todayStr();
       if(st && !st.value) st.value=todayStr();
-      refreshSharePreview();
+      // initial fill only if empty
+      refreshSharePreview(false);
     }
     if(shareWaBtn) shareWaBtn.addEventListener('click', ()=>{
       try{ saveShareContactsFromForm(); }catch(e){}
       const msg=getShareMessage();
       if(!msg || msg.trim().length<5){
-        showAppMessage('Nothing to share', 'Update preview first, or pick a date range with tasks.');
+        showAppMessage('Nothing to share', 'Regenerate from tasks, or type a short update in the preview box.');
         return;
       }
       let phone=(document.getElementById('shareWaPhone')?.value||'').replace(/[^0-9]/g,'');

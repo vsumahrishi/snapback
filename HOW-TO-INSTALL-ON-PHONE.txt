@@ -1,0 +1,22 @@
+SNAPBACK-CAPACITOR-FULL — PHONE APK
+===================================
+
+Your project folder must contain both:  www   and   android
+
+Example:  C:\snapback-capacitor
+(or your old path under OneDrive if that still builds)
+
+1. Close Android Studio
+2. Unzip SNAPBACK-CAPACITOR-FULL
+3. Open YOUR project → www folder
+4. Delete everything INSIDE www
+5. Copy everything from this zip's www folder into your www
+6. Open YOUR project folder (parent of www)
+7. Address bar → type cmd → Enter
+8. Type:  npx.cmd cap sync android
+9. Wait for Sync finished
+10. Android Studio → File → Open → your project's android folder
+11. Build → Clean Project
+12. Build → Build APK(s) → locate app-debug.apk
+13. Uninstall SnapBack on phone → install new APK
+14. Settings must show: build 82

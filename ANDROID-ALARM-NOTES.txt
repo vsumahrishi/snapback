@@ -1,0 +1,6 @@
+For stronger closed-app alarms on the final APK:
+1. Phone: Apps → SnapBack → Notifications → Unrestricted
+2. Phone: Apps → SnapBack → Battery → Unrestricted
+3. Some OEMs: Alarms & reminders → allow SnapBack
+4. After installing APK: Settings in app → Grant permission → Save Bug Me again
+5. Optional for developers: SCHEDULE_EXACT_ALARM in AndroidManifest (Capacitor android module)
