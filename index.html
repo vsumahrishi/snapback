@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="188">
+<meta name="snapback-build" content="193">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1238,7 +1238,7 @@ function playDistinctAlarm(ctx, kind, vol){
   }
 }
 /**
- * Bug Me / wake: gradual volume over ~50 seconds, repeating soft pulses.
+ * Nudge / wake: gradual volume over ~50 seconds, repeating soft pulses.
  * Uses settings.soundVolume as the peak (phone volume keys still control the device;
  * the in-app slider sets peak loudness of this alarm).
  */
@@ -1294,17 +1294,35 @@ function playAlarmRamp(durationSec){
       try{ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setValueAtTime(0.0001, ctx.currentTime); }catch(e){}
     }
   };
-}function triggerWakeMath(reason){
-  if(!state.wakeAlarm) state.wakeAlarm={snoozesLeft:2,snoozesMax:2};
-  if(reason==='scheduled'){
+}function setPendingNudge(on){
+  try{
+    if(on) localStorage.setItem('snapback_pending_nudge','1');
+    else localStorage.removeItem('snapback_pending_nudge');
+  }catch(e){}
+}
+function hasPendingNudge(){
+  try{ return localStorage.getItem('snapback_pending_nudge')==='1'; }catch(e){ return false; }
+}
+function triggerWakeMath(reason){
+  if(!state.wakeAlarm) state.wakeAlarm={snoozesLeft:2,snoozesMax:2,time:'07:00',days:[0,1,2,3,4]};
+  if(reason==='scheduled' || reason==='notification'){
     state.wakeAlarm.snoozesLeft = state.wakeAlarm.snoozesMax||2;
+    setPendingNudge(true);
   }
+  // apply preferred nudge sound for ramp
+  if(state.wakeAlarm.sound && state.settings) state.settings.alarmSound = state.wakeAlarm.sound;
   const a=2+Math.floor(Math.random()*8);
   const b=2+Math.floor(Math.random()*8);
   state.wakeMath = { a, b, answer: a+b, reason: reason||'' };
   state.wakeMathOpen = true;
-  playAlarmRamp(55);
+  try{ playAlarmRamp(55); }catch(e){}
+  try{ if(navigator.vibrate) navigator.vibrate([400,200,400,200,400]); }catch(e){}
   persistRender();
+}
+function consumePendingNudge(){
+  if(state.wakeMathOpen) return;
+  if(!hasPendingNudge()) return;
+  triggerWakeMath('notification');
 }
 function wakeDismissMath(val){
   const m=state.wakeMath;
@@ -1313,8 +1331,9 @@ function wakeDismissMath(val){
     stopAlarmRamp();
     state.wakeMathOpen=false;
     state.wakeMath=null;
+    setPendingNudge(false);
     scheduleWakeAlarms();
-    showAppMessage('Stopped', 'Good morning — Bug Me is off.');
+    showAppMessage('Stopped', 'Nudge cleared.');
     persistRender();
   } else {
     showAppMessage('Not quite', 'Try the math again to stop the alarm.');
@@ -2847,7 +2866,7 @@ function addCustomReminder(){
 function toggleReminderDone(id){ const r=state.customReminders.find(x=>x.id===id); if(!r) return; r.done=!r.done; persistRender(); }
 function deleteReminder(id){
   const item=state.customReminders.find(x=>x.id===id);
-  if(item) pushUndo({type:'delete-reminder', item:JSON.parse(JSON.stringify(item)), label:'Bug Me removed — Undo'});
+  if(item) pushUndo({type:'delete-reminder', item:JSON.parse(JSON.stringify(item)), label:'Nudge removed — Undo'});
   state.customReminders=state.customReminders.filter(x=>x.id!==id);
   persistRender();
 }
@@ -3099,7 +3118,7 @@ async function scheduleNativeNotification({key, title, body, when}){
     try {
       await LocalNotifications.createChannel({
         id: 'snapback',
-        name: 'SnapBack Bug Me',
+        name: 'SnapBack Nudge',
         importance: 5,
         visibility: 1,
         sound: 'default',
@@ -3113,55 +3132,246 @@ async function scheduleNativeNotification({key, title, body, when}){
         id,
         title: title || 'SnapBack',
         body: body || '',
-        schedule: { at, allowWhileIdle: true },
+        schedule: { at: at, allowWhileIdle: true },
         channelId: 'snapback',
         sound: 'default',
         smallIcon: 'ic_stat_icon',
+        largeIcon: 'ic_launcher',
         actionTypeId: 'OPEN',
-        extra: { key },
-        ongoing: false
+        extra: { key: key || '' },
+        ongoing: false,
+        autoCancel: true
       }]
     });
     return true;
   }catch(e){ console.warn('schedule notify', e); return false; }
 }
 
-async function scheduleNativeWakeAlarms(){
-  if(!isNativeApp()) return;
-  const wa = state.wakeAlarm;
-  if(!wa || !wa.enabled || !wa.time) return;
-  const ok = await ensureNotifyPermission();
-  if(!ok) return;
-  const { LocalNotifications } = window.Capacitor.Plugins;
+
+// ---- Nudge (wake alarm): save form, in-app timer, native schedule ----
+var _wakeCheckTimer = (typeof _wakeCheckTimer !== 'undefined') ? _wakeCheckTimer : null;
+
+function saveWakeAlarmFromForm(){
   try{
-    // cancel previous wake ids 900001-900014
-    const cancelIds = [];
-    for(let i=0;i<14;i++) cancelIds.push({id: 900001+i});
+    if(!state.wakeAlarm) state.wakeAlarm={snoozesMax:2,snoozesLeft:2,days:[0,1,2,3,4],time:'07:00',enabled:false};
+    const tm = document.getElementById('wakeTime');
+    const snd = document.getElementById('wakeSoundSelect');
+    state.wakeAlarm.enabled = true; // Save always turns Nudge on
+    state.wakeAlarm.time = (tm && tm.value) ? tm.value : (state.wakeAlarm.time || '07:00');
+    if(snd && snd.value){
+      state.wakeAlarm.sound = snd.value;
+      if(!state.settings) state.settings={};
+      state.settings.alarmSound = snd.value; // used by playAlarmRamp
+    }
+    const days=[];
+    for(let i=0;i<7;i++){
+      const el=document.getElementById('wakeDay'+i);
+      if(el && el.checked) days.push(i);
+    }
+    state.wakeAlarm.days = days.length ? days : [0,1,2,3,4];
+    if(state.wakeAlarm.snoozesMax==null) state.wakeAlarm.snoozesMax=2;
+    state.wakeAlarm.snoozesLeft = state.wakeAlarm.snoozesMax;
+    persistRender();
+    // schedule after persist
+    try{ scheduleWakeAlarms(); }catch(e){ console.warn(e); }
+    try{
+      if(typeof isNativeApp==='function' && isNativeApp()){
+        scheduleNativeWakeAlarms().then(function(n){
+          const hasNative = !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm);
+          const msg = state.wakeAlarm.enabled
+            ? (hasNative
+                ? ('Native alarm set for '+state.wakeAlarm.time+(n?(' · '+n+' upcoming.'):' · allow Alarms & reminders for SnapBack.'))
+                : ('Nudge set for '+state.wakeAlarm.time+(n?(' · '+n+' notifications.'):' · install native Nudge plugin for real alarms.')))
+            : 'Nudge is off.';
+          showAppMessage(state.wakeAlarm.enabled?'Nudge saved':'Nudge off', msg);
+        }).catch(function(e){
+          showAppMessage('Nudge saved on device', 'Could not schedule phone alerts: '+String(e&&e.message||e)+'. Allow Notifications for SnapBack.');
+        });
+      } else {
+        showAppMessage(
+          state.wakeAlarm.enabled?'Nudge saved':'Nudge off',
+          state.wakeAlarm.enabled
+            ? ('Will try to alert at '+state.wakeAlarm.time+' while this tab is open. For alarms when closed, use the phone APK.')
+            : 'Nudge is off.'
+        );
+      }
+    }catch(e){
+      showAppMessage(state.wakeAlarm.enabled?'Nudge saved':'Nudge off', state.wakeAlarm.enabled?('Time: '+state.wakeAlarm.time):'Nudge is off.');
+    }
+  }catch(e){
+    console.warn('saveWakeAlarmFromForm', e);
+    showAppMessage('Could not save Nudge', String(e&&e.message||e));
+  }
+}
+
+function nextWakeDate(){
+  const wa=state.wakeAlarm;
+  if(!wa || !wa.enabled || !wa.time) return null;
+  const parts=(wa.time||'07:00').split(':');
+  const hh=parseInt(parts[0],10)||0, mm=parseInt(parts[1],10)||0;
+  const days = Array.isArray(wa.days) && wa.days.length ? wa.days : [0,1,2,3,4];
+  for(let offset=0; offset<16; offset++){
+    const d=new Date();
+    d.setSeconds(0,0); d.setMilliseconds(0);
+    d.setDate(d.getDate()+offset);
+    d.setHours(hh, mm, 0, 0);
+    if(d.getTime() <= Date.now()+2000) continue;
+    const uiDay=(d.getDay()+6)%7; // Mon=0
+    if(days.indexOf(uiDay)<0) continue;
+    return d;
+  }
+  return null;
+}
+
+function scheduleWakeAlarms(){
+  try{
+    if(_wakeCheckTimer){ clearTimeout(_wakeCheckTimer); _wakeCheckTimer=null; }
+  }catch(e){}
+  const next=nextWakeDate();
+  if(!next) return;
+  const ms = next.getTime() - Date.now();
+  if(ms<1000 || ms>14*24*3600*1000) return;
+  _wakeCheckTimer = setTimeout(function(){
+    _wakeCheckTimer=null;
+    try{ triggerWakeMath('scheduled'); }catch(e){ console.warn(e); }
+    try{ scheduleWakeAlarms(); }catch(e){}
+  }, ms);
+}
+
+async function ensureNativeNotifListeners(){
+  if(!isNativeApp()) return;
+  if(window.__snapbackNotifListeners) return;
+  try{
+    const { LocalNotifications } = window.Capacitor.Plugins;
+    if(!LocalNotifications || !LocalNotifications.addListener) return;
+    window.__snapbackNotifListeners = true;
+    function isWakeNotif(n){
+      try{
+        const note = (n && n.notification) || n || {};
+        const key = (note.extra && note.extra.key) || (n && n.extra && n.extra.key) || '';
+        const title = note.title || '';
+        return String(key).indexOf('wake')===0 || /Nudge/i.test(title);
+      }catch(e){ return false; }
+    }
+    await LocalNotifications.addListener('localNotificationReceived', function(n){
+      try{
+        if(isWakeNotif(n)){
+          setPendingNudge(true);
+          triggerWakeMath('notification');
+        }
+      }catch(e){ console.warn(e); }
+    });
+    await LocalNotifications.addListener('localNotificationActionPerformed', function(n){
+      try{
+        if(isWakeNotif(n)){
+          setPendingNudge(true);
+          triggerWakeMath('notification');
+        } else {
+          try{ persistRender(); }catch(e){}
+        }
+      }catch(e){ console.warn(e); }
+    });
+  }catch(e){ console.warn('notif listeners', e); }
+}
+function wireNudgeForegroundHooks(){
+  if(window.__snapbackNudgeHooks) return;
+  window.__snapbackNudgeHooks = true;
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState==='visible'){
+      try{ consumePendingNudge(); }catch(e){}
+    }
+  });
+  window.addEventListener('focus', function(){
+    try{ consumePendingNudge(); }catch(e){}
+  });
+  // Capacitor App plugin if present
+  try{
+    const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+    if(App && App.addListener){
+      App.addListener('appStateChange', function(s){
+        if(s && s.isActive){ try{ consumePendingNudge(); }catch(e){} }
+      });
+    }
+  }catch(e){}
+}
+
+async function scheduleNativeWakeAlarms(){
+  if(!isNativeApp()) return 0;
+  try{ await ensureNativeNotifListeners(); }catch(e){}
+  const wa = state.wakeAlarm;
+  // Prefer real AlarmManager plugin (rings when app is closed)
+  try{
+    const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+    if(plug && typeof plug.schedule === 'function'){
+      if(!wa || !wa.enabled || !wa.time){
+        if(typeof plug.cancel === 'function') await plug.cancel();
+        return 0;
+      }
+      const days = Array.isArray(wa.days) ? wa.days : [0,1,2,3,4];
+      const res = await plug.schedule({
+        enabled: true,
+        time: wa.time || '07:00',
+        days: days
+      });
+      const n = (res && (res.scheduled!=null)) ? res.scheduled : 0;
+      if(res && res.canScheduleExactAlarms === false){
+        try{
+          showAppMessage('Allow exact alarms', 'Phone Settings → Alarms & reminders → allow SnapBack. Then Save Nudge again.');
+          if(typeof plug.openExactAlarmSettings === 'function') await plug.openExactAlarmSettings();
+        }catch(e){}
+      }
+      return n;
+    }
+  }catch(e){ console.warn('NudgeAlarm plugin', e); }
+
+  // Fallback: Local Notifications (weaker — may only show a banner)
+  let LocalNotifications;
+  try{ LocalNotifications = window.Capacitor.Plugins.LocalNotifications; }catch(e){ return 0; }
+  if(!LocalNotifications) return 0;
+  try{
+    const cancelIds=[];
+    for(let i=0;i<14;i++) cancelIds.push({id:900001+i});
     await LocalNotifications.cancel({ notifications: cancelIds });
   }catch(e){}
-  const [hh,mm] = (wa.time||'07:00').split(':').map(Number);
-  const days = wa.days || [0,1,2,3,4];
-  let scheduled = 0;
+  if(!wa || !wa.enabled || !wa.time) return 0;
+  const ok = await ensureNotifyPermission();
+  if(!ok) return 0;
+  try{
+    await LocalNotifications.createChannel({
+      id:'snapback_nudge_v2', name:'SnapBack Nudge Alarm', importance:5, visibility:1, sound:'default', vibration:true, lights:true
+    });
+  }catch(e){}
+  const [hh,mm]=(wa.time||'07:00').split(':').map(Number);
+  const days=wa.days||[0,1,2,3,4];
+  let scheduled=0;
+  const list=[];
   for(let offset=0; offset<14; offset++){
-    const d = new Date();
-    d.setSeconds(0,0);
+    const d=new Date();
+    d.setSeconds(0,0); d.setMilliseconds(0);
     d.setDate(d.getDate()+offset);
     d.setHours(hh||0, mm||0, 0, 0);
-    if(d.getTime() <= Date.now()+5000) continue;
-    const uiDay = (d.getDay()+6)%7; // Mon=0
+    if(d.getTime()<=Date.now()+5000) continue;
+    const uiDay=(d.getDay()+6)%7;
     if(days.indexOf(uiDay)<0) continue;
-    try{
-      await scheduleNativeNotification({
-        key: 'wake-'+toDateStr(d),
-        title: '🐛 Bug Me',
-        body: 'Open SnapBack — time to get up. Solve the math to stop.',
-        when: d
-      });
-      scheduled++;
-    }catch(e){}
+    list.push({
+      id:900001+offset,
+      title:'⏰ Nudge — open SnapBack',
+      body:'Tap to stop with math.',
+      schedule:{ at:d, allowWhileIdle:true },
+      channelId:'snapback_nudge_v2',
+      sound:'default',
+      smallIcon:'ic_stat_icon',
+      extra:{ key:'wake-'+toDateStr(d) },
+      autoCancel:false,
+      ongoing:true
+    });
+    scheduled++;
   }
+  if(!list.length) return 0;
+  try{ await LocalNotifications.schedule({ notifications: list }); }catch(e){ return 0; }
   return scheduled;
 }
+
 async function syncNativeClassReminders(){
   if(!isNativeApp()) return;
   const ok = await ensureNotifyPermission();
@@ -3762,9 +3972,9 @@ function renderModal(){
     const snoozes=(state.wakeAlarm&&state.wakeAlarm.snoozesLeft)||0;
     root.innerHTML=`<div class="overlay" style="background:rgba(0,0,0,.85)">
       <div class="quotecard" style="max-width:360px;text-align:center">
-        <div class="qeyebrow">Bug Me</div>
-        <div style="font-size:2.5rem;line-height:1;margin:8px 0">🐛</div>
-        <div style="font-size:1.4rem;font-weight:800;margin:4px 0">Bug Me</div>
+        <div class="qeyebrow">Nudge</div>
+        <div style="font-size:2.5rem;line-height:1;margin:8px 0">⏰</div>
+        <div style="font-size:1.4rem;font-weight:800;margin:4px 0">Nudge</div>
         <p style="color:var(--muted);font-size:.9rem">Solve to stop the alarm</p>
         <div style="font-size:2rem;font-weight:800;margin:16px 0">${m.a} + ${m.b} = ?</div>
         <input type="number" id="wakeAnswer" inputmode="numeric" style="font-size:1.4rem;text-align:center;width:120px;padding:12px;border-radius:12px;border:2px solid var(--pine)" />
@@ -3801,7 +4011,7 @@ function renderModal(){
             <div style="display:flex;flex-direction:column;gap:8px">
               <button class="btn" id="tmDone">${t.done?'Mark as not done':'Mark as done'}</button>
               <button class="btn ghost" id="tmResched">Reschedule…</button>
-              <button class="btn ghost" id="tmRemind">Bug Me…</button>
+              <button class="btn ghost" id="tmRemind">Nudge…</button>
               <button class="btn ghost" id="tmAskAi">✨ Ask AI — I am stuck</button>
               <button class="btn ghost" id="tmPin">📌 Top of Mind</button>
               <button class="btn ghost" id="tmBurn">${t.backburner?'↩️ Bring back from Backburner':'🔥 Send to Backburner'}</button>
@@ -3872,9 +4082,9 @@ function renderModal(){
       };
       document.getElementById('tmRemind').onclick=()=>{
         const box=document.getElementById('tmExtra');
-        box.innerHTML=`<div class="field"><label>Bug Me at</label><input type="time" id="tmRemTime" value="${t.reminderTime||'09:00'}"></div>
+        box.innerHTML=`<div class="field"><label>Nudge at</label><input type="time" id="tmRemTime" value="${t.reminderTime||'09:00'}"></div>
           <label style="font-size:.85rem"><input type="checkbox" id="tmLead0" ${(t.reminderLeads||[]).includes(0)?'checked':''}> On the day</label>
-          <button class="btn sm" id="tmSaveRem" style="margin-top:8px">Save Bug Me</button>`;
+          <button class="btn sm" id="tmSaveRem" style="margin-top:8px">Save Nudge</button>`;
         document.getElementById('tmSaveRem').onclick=()=>{
           t.reminderTime=document.getElementById('tmRemTime').value;
           t.reminderLeads = document.getElementById('tmLead0').checked ? [0] : [];
@@ -3957,7 +4167,7 @@ function renderModal(){
   if(state.reminderModalOpen && state.reminderBanner){
     root.innerHTML=`<div class="overlay" id="reminderOverlay">
       <div class="quotecard" style="text-align:center;max-width:360px">
-        <div class="qeyebrow">Bug Me</div>
+        <div class="qeyebrow">Nudge</div>
         <div class="qtext" style="font-size:1.1rem">${escapeHtml(state.reminderBanner)}</div>
         <div class="qactions" style="margin-top:14px">
           <button class="btn sm" id="reminderOk">Got it</button>
@@ -4349,7 +4559,7 @@ function authStatusHtml(){
   }
 }
 
-function persistRender(){ saveState(); render(); try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} try{ scheduleNativeWakeAlarms(); }catch(e){} }
+function persistRender(){ saveState(); render(); try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ wireNudgeForegroundHooks(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} try{ if(typeof isNativeApp==='function'&&isNativeApp()){ ensureNativeNotifListeners(); scheduleNativeWakeAlarms(); } }catch(e){} try{ consumePendingNudge(); }catch(e){} }
 
 /* ============================================================
    First-launch login gate (Google and/or simple local account)
@@ -4612,7 +4822,7 @@ function hubPage(title, sub, cards){
 const SB_TOOLS = {
   focusPlate: {title:'Focus Plate', desc:'Cap today: 1 big, 3 medium, 5 small. When the plate is full, you are done.', ico:'🍽', nav:'rule135'},
   biteSize: {title:'Bite Size', desc:'Cut one scary task into tiny steps you can finish in a few minutes.', ico:'🍽', nav:'bitesize'},
-  bugMe: {title:'Bug Me', desc:'A nudge that keeps coming until that task is done.', ico:'🐛', nav:'settings'},
+  bugMe: {title:'Nudge', desc:'A nudge that keeps coming until that task is done.', ico:'🐛', nav:'settings'},
   startWizard: {title:'Start Wizard', desc:'Three quick questions to unstick “I do not know how to begin.”', ico:'🪄', action:'start-wizard'},
   spotlight: {title:'Spotlight', desc:'Opens Tasks and hides everything except 3 open tasks until you finish them.', ico:'🔦', action:'mode-spotlight'},
   smallBatch: {title:'Small Batch', desc:'Opens Tasks with only a set of 3. Finish them, then take the next set.', ico:'📦', action:'mode-batch'},
@@ -4702,7 +4912,7 @@ function applyChallengeTool(toolId, challengeId){
   }
   if(toolId==='eisenhower'){ navigateTo('eisenhower'); return; }
   if(toolId==='plan-ahead'){ navigateTo('planAhead'); return; }
-  if(toolId==='bugme'){ navigateTo('settings'); showAppMessage('Bug Me', 'Scroll to Bug Me, set time, Save.'); return; }
+  if(toolId==='bugme'){ navigateTo('settings'); showAppMessage('Nudge', 'Scroll to Nudge, set time, Save.'); return; }
   if(toolId==='journal'){ navigateTo('journal'); return; }
   showAppMessage('Tool', 'Opening Tasks.');
   navigateTo('tasks');
@@ -4775,7 +4985,7 @@ function viewChallenges(){
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">What feels hard right now?</div>
     <h1>Challenges</h1>
-    <p>Pick one struggle. SnapBack shows a few tools that fit — same toolbox, different door in.</p>
+    <p>Pick one struggle. SnapBack opens a short path of tools (Bite Size, Focus Plate, Journal, timer). You only need one path — not all of them.</p>
   </div>
   <div style="display:grid;gap:10px">
     ${CHALLENGES.map(c=>`
@@ -4962,7 +5172,7 @@ function wizardPickWhy(code){
     big: { title:'It feels too big', body:'Shrink it. Open Bite Size and cut this into pieces under 15 minutes. You only need the first piece.', nav:'bitesize', prep:()=>{ state.cheeseTaskId=t.id; } },
     boring: { title:'It feels boring', body:'Do one short Focus Pod block on this task, then stop. A timer makes “just start” easier.', nav:'timer', prep:()=>{ state.timer.activeTaskId=t.id; } },
     scary: { title:'It feels unclear or scary', body:'On the task, write one line: “First step is…” Then do only that step. Nothing else.', nav:'tasks', prep:null },
-    other: { title:'Something else is in the way', body:'Energy and mood count. Do one tiny step only: open Focus Pod for 10 minutes on this task, or write one line in Journal about what is blocking you. Bug Me is optional if you want a later nudge.', nav:'timer', prep:()=>{ state.timer.activeTaskId=t.id; } }
+    other: { title:'Something else is in the way', body:'Energy and mood count. Do one tiny step only: open Focus Pod for 10 minutes on this task, or write one line in Journal about what is blocking you. Nudge is optional if you want a later nudge.', nav:'timer', prep:()=>{ state.timer.activeTaskId=t.id; } }
   };
   const tip = tips[code] || tips.other;
   if(tip.prep) tip.prep();
@@ -5388,7 +5598,7 @@ function viewTasks(){
     <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
       <div style="font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px">BUG ME</div>
       <div class="row">
-        <div class="field"><label>Bug Me at</label><input id="newReminderTime" type="time" value="" placeholder="Same as due time"></div>
+        <div class="field"><label>Nudge at</label><input id="newReminderTime" type="time" value="" placeholder="Same as due time"></div>
         <div class="field"><label>Also alert</label>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
             <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead7"> 7 days before</label>
@@ -7403,10 +7613,10 @@ const TECH_CARDS=[
 const FAQ_ITEMS=[
   {q:'Where do I start?', a:'Open Today. It shows your non-negotiable, what is due, and a short list for now. Add tasks under Tasks. Use Challenges if you feel stuck.'},
   {q:'How do I break a big assignment into steps?', a:'Open Techniques → Bite Size (or Challenges → overwhelmed). Pick the task, add small steps yourself, or use Smart Breakdown. Keep steps under about 15 minutes.'},
-  {q:'How do I set Bug Me (alarm)?', a:'Settings → Bug Me → turn on → set time and days → Save. When it rings, sound gets louder for about 55 seconds, then a simple math problem stops it. You can snooze 5 or 10 minutes (limited snoozes).'},
+  {q:'How do I set Nudge (alarm)?', a:'Settings → Nudge → turn on → set time and days → Save. When it rings, sound gets louder for about 55 seconds, then a simple math problem stops it. You can snooze 5 or 10 minutes (limited snoozes).'},
   {q:'Why no notification when the app is closed?', a:'On the website: browsers only remind you while the tab can run. On the Android APK: allow Notifications and set SnapBack to Unrestricted battery; then Local Notifications can fire. For class times, also Export calendar to Google/Apple Calendar for system alarms.'},
   {q:'How do I allow notifications on Android?', a:'In SnapBack: Settings → Grant permission. On the phone: Settings → Apps → SnapBack → Notifications → On (not Restricted), and Battery → Unrestricted / allow background.'},
-  {q:'Alarms still quiet on Android?', a:'1) Notifications unrestricted. 2) Battery unrestricted. 3) On some phones: Settings → Alarms & reminders → allow SnapBack. 4) Save Bug Me again after granting permission. 5) Volume on media, not silent. The website cannot match the Clock app; the APK is closer.'},
+  {q:'Alarms still quiet on Android?', a:'1) Notifications unrestricted. 2) Battery unrestricted. 3) On some phones: Settings → Alarms & reminders → allow SnapBack. 4) Save Nudge again after granting permission. 5) Volume on media, not silent. The website cannot match the Clock app; the APK is closer.'},
   {q:'How do I get classes onto my phone calendar?', a:'Calendar → export calendar file (.ics). Open the file on the phone and add to Google or Apple Calendar.'},
   {q:'How do laptop and phone stay in sync?', a:'Settings → Account: sign in with the same Google account on both (after Firebase is set up), or use the advanced private sync code on both devices. Same account/code = same data.'},
   {q:'Does this need internet?', a:'Most features work offline on this device. Cloud sync, Google sign-in, and some exports need internet.'},
@@ -7855,21 +8065,27 @@ function viewSettings(){
 
     
     <div class="card" style="border-color:var(--gold)">
-      <h3 style="margin:0 0 6px;display:flex;align-items:center;gap:8px"><span style="font-size:1.5rem">🐛</span> Bug Me</h3>
-      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">A simple alarm that bugs you at the time you set. On the phone app it can ring when SnapBack is closed. Stop it with a small math problem (2 snoozes, 5 minutes each).</p>
-      <label style="display:inline-flex;align-items:center;gap:10px;font-weight:600;margin-bottom:10px;width:auto">
-        <input type="checkbox" id="wakeEnabled" ${(state.wakeAlarm&&state.wakeAlarm.enabled)?'checked':''} style="width:18px;height:18px;flex-shrink:0">
-        <span>🐛 Bug Me</span>
-      </label>
+      <h3 style="margin:0 0 4px;display:flex;align-items:center;gap:8px"><span style="font-size:1.35rem">⏰</span> Nudge</h3>
+      <p style="font-size:.84rem;color:var(--muted);margin:0 0 14px">Daily alarm. Opens a math stop-screen so it is harder to dismiss by accident.</p>
       <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${(state.wakeAlarm&&state.wakeAlarm.time)||'07:00'}"></div>
-      <div style="margin-top:8px;font-size:.8rem;color:var(--muted)">Days</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
-        ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label style="font-size:.8rem"><input type="checkbox" id="wakeDay${i}" ${(state.wakeAlarm&&state.wakeAlarm.days&&state.wakeAlarm.days.indexOf(i)>=0)?'checked':(i<5&&!(state.wakeAlarm&&state.wakeAlarm.days)?'checked':'')}> ${d}</label>`).join('')}
+      <div class="field" style="margin-top:8px"><label>Sound</label>
+        <select id="wakeSoundSelect">
+          ${['chime','bell','beep','digital','radar','knock'].map(v=>{
+            const labels={chime:'Chime',bell:'Bell',beep:'Beep',digital:'Digital',radar:'Radar',knock:'Wake burst'};
+            const cur=(state.wakeAlarm&&state.wakeAlarm.sound)||(state.settings&&state.settings.alarmSound)||'chime';
+            return `<option value="${v}" ${cur===v?'selected':''}>${labels[v]||v}</option>`;
+          }).join('')}
+        </select>
       </div>
-      <p style="font-size:.82rem;color:var(--muted);margin:10px 0 0">When it fires, sound rises gradually for about 55 seconds, then you solve a short math problem to stop (or snooze 5 / 10 minutes). Solve the math to stop. Snooze 5 or 10 minutes (2 snoozes). Use the Alarm sound volume slider below — your phone volume keys also control how loud it is.</p>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;max-width:280px">
-        <button class="btn" id="saveWakeBtn">Save Bug Me</button>
-        <button class="btn ghost sm" id="testWakeBtn" type="button">Preview Bug Me screen</button>
+      <div style="margin-top:10px;font-size:.8rem;color:var(--muted);font-weight:600">Days</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
+        ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label style="font-size:.82rem;display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:var(--input-bg)"><input type="checkbox" id="wakeDay${i}" ${(state.wakeAlarm&&state.wakeAlarm.days&&state.wakeAlarm.days.indexOf(i)>=0)?'checked':(i<5&&!(state.wakeAlarm&&state.wakeAlarm.days)?'checked':'')}> ${d}</label>`).join('')}
+      </div>
+      <p id="wakeStatusLine" style="font-size:.84rem;margin:12px 0 0;color:${(state.wakeAlarm&&state.wakeAlarm.enabled)?'var(--pine)':'var(--muted)'}">${(state.wakeAlarm&&state.wakeAlarm.enabled)?('On · '+(state.wakeAlarm.time||'')+' · math to stop, 2 snoozes'):'Off — set time and tap Save'}</p>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;max-width:300px">
+        <button class="btn" id="saveWakeBtn" type="button">Save Nudge</button>
+        <button class="btn ghost" id="testWakeBtn" type="button">Preview</button>
+        ${(state.wakeAlarm&&state.wakeAlarm.enabled)?`<button class="btn ghost" id="turnOffWakeBtn" type="button">Turn off</button>`:''}
       </div>
     </div>
 
@@ -9375,9 +9591,40 @@ function wireView(){
     const sc=document.getElementById('syncCodeInput'); if(sc) sc.value=getSyncCode();
     const fb=document.getElementById('fbConfigInput'); if(fb){ const c=getFirebaseConfig(); if(c) fb.value=JSON.stringify(c,null,2); }
     const saveWake=document.getElementById('saveWakeBtn');
-    if(saveWake) saveWake.addEventListener('click', saveWakeAlarmFromForm);
+    if(saveWake) saveWake.addEventListener('click', function(e){
+      e.preventDefault(); e.stopPropagation();
+      try{ saveWakeAlarmFromForm(); }catch(err){ showAppMessage('Save failed', String(err&&err.message||err)); }
+    });
     const testWake=document.getElementById('testWakeBtn');
-    if(testWake) testWake.addEventListener('click', ()=>triggerWakeMath('test'));
+    if(testWake) testWake.addEventListener('click', function(e){
+      e.preventDefault(); e.stopPropagation();
+      try{
+        const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+        if(plug && typeof plug.preview === 'function'){
+          plug.preview().catch(function(){ triggerWakeMath('test'); });
+        } else {
+          triggerWakeMath('test');
+        }
+      }catch(err){ showAppMessage('Preview failed', String(err&&err.message||err)); }
+    });
+    const offWake=document.getElementById('turnOffWakeBtn');
+    if(offWake) offWake.addEventListener('click', function(e){
+      e.preventDefault();
+      if(!state.wakeAlarm) state.wakeAlarm={};
+      state.wakeAlarm.enabled=false;
+      setPendingNudge(false);
+      persistRender();
+      try{ scheduleWakeAlarms(); }catch(err){}
+      try{ if(isNativeApp()) scheduleNativeWakeAlarms(); }catch(err){}
+      try{
+        const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+        if(plug && plug.cancel) plug.cancel();
+      }catch(err){}
+      showAppMessage('Nudge off', 'No more daily Nudge until you Save again.');
+    });
+    try{ wireNudgeForegroundHooks(); }catch(e){}
+    try{ if(typeof isNativeApp==='function' && isNativeApp()) ensureNativeNotifListeners(); }catch(e){}
+    try{ consumePendingNudge(); }catch(e){}
     const logoutBtn=document.getElementById('logoutBtn');
     if(logoutBtn) logoutBtn.addEventListener('click', ()=>{
       showAppMessage('Log out?', 'You will need to sign in again to use SnapBack on this device.', {
