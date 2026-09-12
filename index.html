@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="193">
+<meta name="snapback-build" content="196">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1134,8 +1134,9 @@ function resumeAudioThen(fn){
 }
 let _alarmRamp = null; // { stop: fn }
 function stopAlarmRamp(){
-  if(_alarmRamp && _alarmRamp.stop){ try{ _alarmRamp.stop(); }catch(e){} }
+  try{ if(_alarmRamp && _alarmRamp.stop) _alarmRamp.stop(); }catch(e){}
   _alarmRamp = null;
+  try{ if(navigator.vibrate) navigator.vibrate(0); }catch(e){}
 }
 /** Short chime (timer / test) */
 
@@ -1246,55 +1247,76 @@ function playAlarmRamp(durationSec){
   stopAlarmRamp();
   if(state.settings && state.settings.soundOn===false) return;
   const ctx = ensureAudio(); if(!ctx) return;
+  try{ if(ctx.state==='suspended') ctx.resume(); }catch(e){}
   const total = durationSec || 55;
-  const peak = Math.max(0.15, Math.min(1, Number(state.settings&&state.settings.soundVolume)||0.9));
-  const kind = (state.settings&&state.settings.alarmSound)||'chime';
+  const peak = Math.max(0.2, Math.min(1, Number(state.settings&&state.settings.soundVolume)||0.95));
+  const kind = (state.wakeAlarm&&state.wakeAlarm.sound) || (state.settings&&state.settings.alarmSound) || 'chime';
   const master = ctx.createGain();
-  master.gain.setValueAtTime(0.02, ctx.currentTime);
-  master.gain.linearRampToValueAtTime(peak, ctx.currentTime + total);
+  master.gain.setValueAtTime(0.05, ctx.currentTime);
+  master.gain.linearRampToValueAtTime(peak, ctx.currentTime + Math.min(8, total));
   master.connect(ctx.destination);
   let stopped = false;
   const timers = [];
+  function tone(type, freq, at, dur, vol){
+    try{
+      const osc=ctx.createOscillator(), g=ctx.createGain();
+      osc.type=type; osc.frequency.value=freq;
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.linearRampToValueAtTime(vol, at+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, at+dur);
+      osc.connect(g); g.connect(master);
+      osc.start(at); osc.stop(at+dur+0.02);
+    }catch(e){}
+  }
   function pulse(){
     if(stopped) return;
+    const now = ctx.currentTime;
     try{
-      // route distinct pattern through ramping master
-      const now = ctx.currentTime;
-      const gwrap = ctx.createGain();
-      gwrap.gain.value = 1;
-      gwrap.connect(master);
-      // mini pattern each pulse
       if(kind==='beep'){
-        const osc=ctx.createOscillator(), g=ctx.createGain();
-        osc.type='square'; osc.frequency.value=1200;
-        g.gain.setValueAtTime(0.0001,now); g.gain.linearRampToValueAtTime(0.5,now+0.02); g.gain.exponentialRampToValueAtTime(0.0001,now+0.12);
-        osc.connect(g); g.connect(gwrap); osc.start(now); osc.stop(now+0.15);
+        tone('square', 1400, now, 0.1, 0.55);
+        tone('square', 1400, now+0.15, 0.1, 0.55);
+        tone('square', 1400, now+0.3, 0.1, 0.55);
+      } else if(kind==='bell'){
+        tone('sine', 880, now, 0.9, 0.5);
+        tone('sine', 1320, now, 0.7, 0.25);
+        tone('sine', 1760, now, 0.5, 0.12);
+      } else if(kind==='digital'){
+        tone('square', 880, now, 0.08, 0.45);
+        tone('square', 1174, now+0.1, 0.08, 0.45);
+        tone('square', 1318, now+0.2, 0.12, 0.5);
+      } else if(kind==='radar'){
+        tone('sawtooth', 400, now, 0.35, 0.35);
+        tone('sawtooth', 600, now+0.2, 0.35, 0.3);
+        tone('sawtooth', 900, now+0.4, 0.25, 0.25);
       } else if(kind==='knock'){
-        const osc=ctx.createOscillator(), g=ctx.createGain();
-        osc.type='square'; osc.frequency.value=900;
-        g.gain.setValueAtTime(0.0001,now); g.gain.linearRampToValueAtTime(0.85,now+0.02); g.gain.exponentialRampToValueAtTime(0.0001,now+0.15);
-        osc.connect(g); g.connect(gwrap); osc.start(now); osc.stop(now+0.18);
+        tone('square', 180, now, 0.12, 0.7);
+        tone('square', 150, now+0.18, 0.12, 0.7);
+        tone('square', 120, now+0.36, 0.18, 0.8);
       } else {
-        const osc=ctx.createOscillator(), g=ctx.createGain();
-        osc.type='sine'; osc.frequency.value=659;
-        g.gain.setValueAtTime(0.0001,now); g.gain.linearRampToValueAtTime(0.45,now+0.03); g.gain.exponentialRampToValueAtTime(0.0001,now+0.35);
-        osc.connect(g); g.connect(gwrap); osc.start(now); osc.stop(now+0.4);
+        tone('sine', 523, now, 0.35, 0.4);
+        tone('sine', 659, now+0.12, 0.35, 0.4);
+        tone('sine', 784, now+0.24, 0.5, 0.45);
       }
     }catch(e){}
   }
   pulse();
-  for(let ms=1200; ms < total*1000; ms+=1200){
-    timers.push(setTimeout(()=>{ if(!stopped) pulse(); }, ms));
+  for(let ms=1100; ms < total*1000; ms+=1100){
+    timers.push(setTimeout(function(){ if(!stopped) pulse(); }, ms));
   }
-  timers.push(setTimeout(()=>{ stopAlarmRamp(); }, total*1000+300));
+  timers.push(setTimeout(function(){ stopAlarmRamp(); }, total*1000+400));
   _alarmRamp = {
-    stop(){
+    stop: function(){
       stopped = true;
-      timers.forEach(clearTimeout);
-      try{ master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setValueAtTime(0.0001, ctx.currentTime); }catch(e){}
+      timers.forEach(function(id){ try{ clearTimeout(id); }catch(e){} });
+      try{
+        master.gain.cancelScheduledValues(ctx.currentTime);
+        master.gain.setValueAtTime(0.0001, ctx.currentTime);
+        master.disconnect();
+      }catch(e){}
     }
   };
-}function setPendingNudge(on){
+}
+function setPendingNudge(on){
   try{
     if(on) localStorage.setItem('snapback_pending_nudge','1');
     else localStorage.removeItem('snapback_pending_nudge');
@@ -1346,14 +1368,17 @@ function wakeSnooze(minutes){
     showAppMessage('No snoozes left', 'Solve the math to stop.');
     return;
   }
+  // Stop sound immediately before anything else
+  try{ stopAlarmRamp(); }catch(e){}
+  try{ if(navigator.vibrate) navigator.vibrate(0); }catch(e){}
   state.wakeAlarm.snoozesLeft = (state.wakeAlarm.snoozesLeft||0) - 1;
-  stopAlarmRamp();
   state.wakeMathOpen=false;
   state.wakeMath=null;
+  try{ setPendingNudge(false); }catch(e){}
+  try{ clearTimeout(_wakeCheckTimer); }catch(e){}
+  _wakeCheckTimer = setTimeout(function(){ try{ triggerWakeMath('snooze'); }catch(e){} }, mins*60*1000);
   persistRender();
-  clearTimeout(_wakeCheckTimer);
-  _wakeCheckTimer = setTimeout(()=>triggerWakeMath('snooze'), mins*60*1000);
-  showAppMessage('Snoozed', mins+' minutes. Snoozes left: '+state.wakeAlarm.snoozesLeft);
+  showAppMessage('Snoozed', mins+' minutes.');
 }
 
 function pickAdaptiveColor(){
@@ -3177,26 +3202,23 @@ function saveWakeAlarmFromForm(){
     try{
       if(typeof isNativeApp==='function' && isNativeApp()){
         scheduleNativeWakeAlarms().then(function(n){
-          const hasNative = !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm);
-          const msg = state.wakeAlarm.enabled
-            ? (hasNative
-                ? ('Native alarm set for '+state.wakeAlarm.time+(n?(' · '+n+' upcoming.'):' · allow Alarms & reminders for SnapBack.'))
-                : ('Nudge set for '+state.wakeAlarm.time+(n?(' · '+n+' notifications.'):' · install native Nudge plugin for real alarms.')))
-            : 'Nudge is off.';
-          showAppMessage(state.wakeAlarm.enabled?'Nudge saved':'Nudge off', msg);
+          const timeLabel = (state.wakeAlarm && state.wakeAlarm.time) ? state.wakeAlarm.time : '';
+          if(state.wakeAlarm && state.wakeAlarm.enabled){
+            showAppMessage('Saved', 'Nudge is set for '+timeLabel+'.');
+          } else {
+            showAppMessage('Nudge off', 'No Nudge until you save again.');
+          }
         }).catch(function(e){
-          showAppMessage('Nudge saved on device', 'Could not schedule phone alerts: '+String(e&&e.message||e)+'. Allow Notifications for SnapBack.');
+          showAppMessage('Saved', 'Nudge is set for '+((state.wakeAlarm&&state.wakeAlarm.time)||'')+'.');
         });
       } else {
         showAppMessage(
-          state.wakeAlarm.enabled?'Nudge saved':'Nudge off',
-          state.wakeAlarm.enabled
-            ? ('Will try to alert at '+state.wakeAlarm.time+' while this tab is open. For alarms when closed, use the phone APK.')
-            : 'Nudge is off.'
+          state.wakeAlarm.enabled?'Saved':'Nudge off',
+          state.wakeAlarm.enabled ? ('Nudge is set for '+state.wakeAlarm.time+'.') : 'No Nudge until you save again.'
         );
       }
     }catch(e){
-      showAppMessage(state.wakeAlarm.enabled?'Nudge saved':'Nudge off', state.wakeAlarm.enabled?('Time: '+state.wakeAlarm.time):'Nudge is off.');
+      showAppMessage(state.wakeAlarm.enabled?'Saved':'Nudge off', state.wakeAlarm.enabled?('Nudge is set for '+state.wakeAlarm.time+'.'):'No Nudge until you save again.');
     }
   }catch(e){
     console.warn('saveWakeAlarmFromForm', e);
@@ -8081,7 +8103,6 @@ function viewSettings(){
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
         ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label style="font-size:.82rem;display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:var(--input-bg)"><input type="checkbox" id="wakeDay${i}" ${(state.wakeAlarm&&state.wakeAlarm.days&&state.wakeAlarm.days.indexOf(i)>=0)?'checked':(i<5&&!(state.wakeAlarm&&state.wakeAlarm.days)?'checked':'')}> ${d}</label>`).join('')}
       </div>
-      <p id="wakeStatusLine" style="font-size:.84rem;margin:12px 0 0;color:${(state.wakeAlarm&&state.wakeAlarm.enabled)?'var(--pine)':'var(--muted)'}">${(state.wakeAlarm&&state.wakeAlarm.enabled)?('On · '+(state.wakeAlarm.time||'')+' · math to stop, 2 snoozes'):'Off — set time and tap Save'}</p>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;max-width:300px">
         <button class="btn" id="saveWakeBtn" type="button">Save Nudge</button>
         <button class="btn ghost" id="testWakeBtn" type="button">Preview</button>
@@ -9590,6 +9611,15 @@ function wireView(){
 
     const sc=document.getElementById('syncCodeInput'); if(sc) sc.value=getSyncCode();
     const fb=document.getElementById('fbConfigInput'); if(fb){ const c=getFirebaseConfig(); if(c) fb.value=JSON.stringify(c,null,2); }
+    const wakeSnd=document.getElementById('wakeSoundSelect');
+    if(wakeSnd) wakeSnd.addEventListener('change', function(){
+      if(!state.wakeAlarm) state.wakeAlarm={};
+      state.wakeAlarm.sound = wakeSnd.value;
+      if(!state.settings) state.settings={};
+      state.settings.alarmSound = wakeSnd.value;
+      try{ saveState(); }catch(e){}
+      try{ playAlarmRamp(3); }catch(e){}
+    });
     const saveWake=document.getElementById('saveWakeBtn');
     if(saveWake) saveWake.addEventListener('click', function(e){
       e.preventDefault(); e.stopPropagation();
