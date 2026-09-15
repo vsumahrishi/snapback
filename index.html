@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="196">
+<meta name="snapback-build" content="197">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -225,7 +225,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 .faqitem p{font-size:.85rem;color:var(--muted);margin:0 0 12px}
 
 /* Calendar */
-.calnav{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.calnav{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}.calnav-title{font-weight:700;flex:1 1 auto;text-align:center;min-width:160px;line-height:1.3;padding:4px 6px}
 .calnav .spacer{flex:1}
 .monthgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
 .dowhead{font-size:.68rem;text-transform:uppercase;color:var(--muted);text-align:center;font-weight:700;padding-bottom:3px}
@@ -480,6 +480,13 @@ function readDateSelects(prefix){
   return {date: y+'-'+m+'-'+String(day).padStart(2,'0'), time};
 }
 
+function formatWeekOf(iso){
+  try{
+    const d=new Date(String(iso).slice(0,10)+'T12:00:00');
+    if(isNaN(d.getTime())) return String(iso||'');
+    return d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric'});
+  }catch(e){ return String(iso||''); }
+}
 function todayStr(){ return toDateStr(new Date()); }
 function tomorrowStr(){
   const d=new Date(); d.setDate(d.getDate()+1);
@@ -5480,8 +5487,9 @@ function tasksViewToolbar(){
 }
 
 function viewTasks(){
-  let list=state.tasks;
-  const f=state.filter;
+  let list=state.tasks||[];
+  const f=state.filter||'all';
+  const q=(state.taskSearch||'').trim().toLowerCase();
   if(f==='today') list=list.filter(t=>t.date===todayStr() && !t.done);
   else if(f==='tomorrow') list=list.filter(t=>t.date===tomorrowStr() && !t.done);
   else if(f==='week') list=list.filter(t=>isThisWeek(t.date) && !t.done);
@@ -5490,9 +5498,24 @@ function viewTasks(){
   else if(f==='undated') list=list.filter(t=>!t.date && !t.done);
   else if(f==='must') list=list.filter(t=>t.tier==='must' && !t.done);
   else if(f==='frog') list=list.filter(t=>t.frog && !t.done);
+  else if(f==='all' || !f) list=list.filter(t=>!t.done); // completed hidden by default
   // hide backburner from main list unless filter says so
   if(f!=='backburner') list=list.filter(t=>!t.backburner);
   else list=(state.tasks||[]).filter(t=>t.backburner && !t.done);
+  // Completed date range (only when viewing completed)
+  if(f==='done'){
+    const from=state.completedFrom||'';
+    const to=state.completedTo||'';
+    if(from) list=list.filter(t=>!t.date || String(t.date)>=from);
+    if(to) list=list.filter(t=>!t.date || String(t.date)<=to);
+  }
+  // Search title / notes
+  if(q){
+    list=list.filter(t=>{
+      const hay=((t.title||'')+' '+(t.notes||'')+' '+(t.subject||'')).toLowerCase();
+      return hay.indexOf(q)>=0;
+    });
+  }
   // Study vs Personal global filter
   const cf = state.contextFilter || 'all';
   if(cf==='school') list=list.filter(t=>(t.context||'school')!=='personal');
@@ -5647,8 +5670,13 @@ function viewTasks(){
     </div>
     <button class="btn" id="addTaskBtn" style="margin-top:14px;width:100%">Add task</button>
   </div>
+  <div class="card" style="padding:10px 12px;margin-bottom:10px">
+    <div class="field" style="margin:0"><label>Search tasks</label>
+      <input type="search" id="taskSearchInput" placeholder="Type a word from the task…" value="${escapeHtml(state.taskSearch||'')}" style="width:100%">
+    </div>
+  </div>
   <div class="filters">
-    <button data-filter="all" class="${f==='all'?'active':''}">All (${state.tasks.length})</button>
+    <button data-filter="all" class="${f==='all'?'active':''}">Open (${(state.tasks||[]).filter(t=>!t.done).length})</button>
     <button data-filter="today" class="${f==='today'?'active':''}">Today</button>
     <button data-filter="tomorrow" class="${f==='tomorrow'?'active':''}">Tomorrow</button>
     <button data-filter="week" class="${f==='week'?'active':''}">This week</button>
@@ -5656,9 +5684,19 @@ function viewTasks(){
     <button data-filter="undated" class="${f==='undated'?'active':''}">No date</button>
     <button data-filter="must" class="${f==='must'?'active':''}">Must-do</button>
     <button data-filter="frog" class="${f==='frog'?'active':''}">&#128007; Frogs</button>
-    <button data-filter="done" class="${f==='done'?'active':''}">Completed</button>
     <button data-filter="backburner" class="${f==='backburner'?'active':''}">🔥 Backburner</button>
   </div>
+  <div style="margin:8px 0 10px">
+    <button type="button" class="btn ${f==='done'?'':'ghost'} sm" data-filter="done">Show completed tasks (${(state.tasks||[]).filter(t=>t.done).length})</button>
+  </div>
+  ${f==='done' ? `<div class="card" style="padding:10px 12px;margin-bottom:10px">
+    <div style="font-size:.85rem;font-weight:600;margin-bottom:8px">Completed — date range (optional)</div>
+    <div class="row">
+      <div class="field"><label>From</label><input type="date" id="completedFrom" value="${state.completedFrom||''}"></div>
+      <div class="field"><label>To</label><input type="date" id="completedTo" value="${state.completedTo||''}"></div>
+    </div>
+    <button type="button" class="btn sm" id="applyCompletedRange" style="margin-top:8px">Apply dates</button>
+  </div>` : ''}
   <div class="filters" style="margin-top:6px">
     <span style="font-size:.75rem;color:var(--muted);align-self:center">Show:</span>
     <button type="button" data-action="ctx-filter" data-ctx="all" class="${(state.contextFilter||'all')==='all'?'active':''}">All</button>
@@ -8090,7 +8128,7 @@ function viewSettings(){
       <h3 style="margin:0 0 4px;display:flex;align-items:center;gap:8px"><span style="font-size:1.35rem">⏰</span> Nudge</h3>
       <p style="font-size:.84rem;color:var(--muted);margin:0 0 14px">Daily alarm. Opens a math stop-screen so it is harder to dismiss by accident.</p>
       <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${(state.wakeAlarm&&state.wakeAlarm.time)||'07:00'}"></div>
-      <div class="field" style="margin-top:8px"><label>Sound</label>
+      <div class="field" style="margin-top:8px"><label>Sound (in the app)</label>
         <select id="wakeSoundSelect">
           ${['chime','bell','beep','digital','radar','knock'].map(v=>{
             const labels={chime:'Chime',bell:'Bell',beep:'Beep',digital:'Digital',radar:'Radar',knock:'Wake burst'};
@@ -8848,6 +8886,26 @@ function wireView(){
       openAIWithPrompt(title ? promptStuckTask({title, notes:'', date:document.getElementById('newDate')?.value||''}) : 'Help me plan a realistic study task for today. I am a student with ADHD. Keep steps small.', ai);
     });
     main.querySelectorAll('[data-filter]').forEach(b=>b.addEventListener('click',()=>{state.filter=b.dataset.filter; persistRender();}));
+    const tsi=document.getElementById('taskSearchInput');
+    if(tsi){
+      tsi.addEventListener('input',()=>{ state.taskSearch=tsi.value||''; });
+      tsi.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ state.taskSearch=tsi.value||''; persistRender(); }});
+      tsi.addEventListener('search',()=>{ state.taskSearch=tsi.value||''; persistRender(); });
+      // live filter after short pause
+      let _st=null;
+      tsi.addEventListener('input',()=>{
+        clearTimeout(_st);
+        _st=setTimeout(()=>{ state.taskSearch=tsi.value||''; persistRender(); }, 280);
+      });
+    }
+    const cf=document.getElementById('completedFrom');
+    const ct=document.getElementById('completedTo');
+    const cab=document.getElementById('applyCompletedRange');
+    if(cab) cab.addEventListener('click',()=>{
+      state.completedFrom=cf?cf.value:'';
+      state.completedTo=ct?ct.value:'';
+      persistRender();
+    });
   }
 
   if(state.view==='calendar'){

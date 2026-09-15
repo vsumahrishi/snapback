@@ -1,8 +1,2 @@
-SnapBack WEB package — build 196
-================================
-USE THIS FOLDER ONLY for the website / laptop.
-Upload or replace your whole web host folder with these files.
-Then hard-refresh: Ctrl+Shift+R
-
-Nudge on the website only works while the browser tab is open.
-Closed-phone alarms need the PHONE package (SNAPBACK-PHONE-v196).
+SnapBack WEB — build 197
+Replace your whole GitHub/web folder with these files. Then Ctrl+Shift+R.
