@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="197">
+<meta name="snapback-build" content="203">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1353,10 +1353,26 @@ function consumePendingNudge(){
   if(!hasPendingNudge()) return;
   triggerWakeMath('notification');
 }
+
+function stopNativeNudgeAlarm(){
+  try{
+    const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+    if(plug && typeof plug.stopAlarm === 'function'){
+      plug.stopAlarm().catch(function(){});
+    }
+    if(plug && typeof plug.cancel === 'function'){
+      // do not cancel schedule — only stop ringing
+    }
+  }catch(e){}
+  try{ stopAlarmRamp(); }catch(e){}
+  try{ if(navigator.vibrate) navigator.vibrate(0); }catch(e){}
+}
+
 function wakeDismissMath(val){
   const m=state.wakeMath;
   if(!m){ state.wakeMathOpen=false; stopAlarmRamp(); persistRender(); return; }
   if(String(val).trim()===String(m.answer)){
+    stopNativeNudgeAlarm();
     stopAlarmRamp();
     state.wakeMathOpen=false;
     state.wakeMath=null;
@@ -1375,7 +1391,7 @@ function wakeSnooze(minutes){
     showAppMessage('No snoozes left', 'Solve the math to stop.');
     return;
   }
-  // Stop sound immediately before anything else
+  try{ stopNativeNudgeAlarm(); }catch(e){}
   try{ stopAlarmRamp(); }catch(e){}
   try{ if(navigator.vibrate) navigator.vibrate(0); }catch(e){}
   state.wakeAlarm.snoozesLeft = (state.wakeAlarm.snoozesLeft||0) - 1;
@@ -1769,7 +1785,8 @@ function addTask(){
   if(document.getElementById('newLead0')?.checked) leads.push(0);
   if(!leads.length) leads.push(0);
   const id=uid();
-  state.tasks.unshift({id,title,notes:'',date,time,priority,urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{}});
+  const taskContext=(document.getElementById('newContext')&&document.getElementById('newContext').value)||'school';
+  state.tasks.unshift({id,title,notes:'',date,time,priority,urgent:false,important:false,tier:'could',frog:false,context:taskContext,meetingUrl:'',reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{}});
   state.pendingStrategyTaskId = id;
   pushUndo({type:'add-task', id, label:'Task added — Undo'});
   try{
@@ -3188,19 +3205,26 @@ function saveWakeAlarmFromForm(){
     if(!state.wakeAlarm) state.wakeAlarm={snoozesMax:2,snoozesLeft:2,days:[0,1,2,3,4],time:'07:00',enabled:false};
     const tm = document.getElementById('wakeTime');
     const snd = document.getElementById('wakeSoundSelect');
-    state.wakeAlarm.enabled = true; // Save always turns Nudge on
+    const once = document.getElementById('wakeOnceDate');
+    state.wakeAlarm.enabled = true;
     state.wakeAlarm.time = (tm && tm.value) ? tm.value : (state.wakeAlarm.time || '07:00');
+    state.wakeAlarm.onceDate = (once && once.value) ? once.value : '';
     if(snd && snd.value){
       state.wakeAlarm.sound = snd.value;
       if(!state.settings) state.settings={};
-      state.settings.alarmSound = snd.value; // used by playAlarmRamp
+      state.settings.alarmSound = snd.value;
     }
     const days=[];
     for(let i=0;i<7;i++){
       const el=document.getElementById('wakeDay'+i);
       if(el && el.checked) days.push(i);
     }
-    state.wakeAlarm.days = days.length ? days : [0,1,2,3,4];
+    // One-time date OR at least one weekday
+    if(!state.wakeAlarm.onceDate && !days.length){
+      showAppMessage('Pick a date or a day', 'Choose a one-time date, or tick at least one weekday.');
+      return;
+    }
+    state.wakeAlarm.days = days;
     if(state.wakeAlarm.snoozesMax==null) state.wakeAlarm.snoozesMax=2;
     state.wakeAlarm.snoozesLeft = state.wakeAlarm.snoozesMax;
     persistRender();
@@ -3238,14 +3262,24 @@ function nextWakeDate(){
   if(!wa || !wa.enabled || !wa.time) return null;
   const parts=(wa.time||'07:00').split(':');
   const hh=parseInt(parts[0],10)||0, mm=parseInt(parts[1],10)||0;
-  const days = Array.isArray(wa.days) && wa.days.length ? wa.days : [0,1,2,3,4];
+  // One-time date
+  if(wa.onceDate){
+    const d=new Date(wa.onceDate+'T12:00:00');
+    if(!isNaN(d.getTime())){
+      d.setHours(hh, mm, 0, 0);
+      if(d.getTime() > Date.now()+2000) return d;
+      return null; // past
+    }
+  }
+  const days = Array.isArray(wa.days) ? wa.days : [];
+  if(!days.length) return null;
   for(let offset=0; offset<16; offset++){
     const d=new Date();
     d.setSeconds(0,0); d.setMilliseconds(0);
     d.setDate(d.getDate()+offset);
     d.setHours(hh, mm, 0, 0);
     if(d.getTime() <= Date.now()+2000) continue;
-    const uiDay=(d.getDay()+6)%7; // Mon=0
+    const uiDay=(d.getDay()+6)%7;
     if(days.indexOf(uiDay)<0) continue;
     return d;
   }
@@ -3336,11 +3370,13 @@ async function scheduleNativeWakeAlarms(){
         if(typeof plug.cancel === 'function') await plug.cancel();
         return 0;
       }
-      const days = Array.isArray(wa.days) ? wa.days : [0,1,2,3,4];
+      const days = Array.isArray(wa.days) ? wa.days : []; if(!days.length){ if(typeof plug.cancel==='function') await plug.cancel(); return 0; }
       const res = await plug.schedule({
         enabled: true,
         time: wa.time || '07:00',
-        days: days
+        days: days,
+        sound: wa.sound || (state.settings && state.settings.alarmSound) || 'chime',
+        onceDate: wa.onceDate || ''
       });
       const n = (res && (res.scheduled!=null)) ? res.scheduled : 0;
       if(res && res.canScheduleExactAlarms === false){
@@ -3371,7 +3407,7 @@ async function scheduleNativeWakeAlarms(){
     });
   }catch(e){}
   const [hh,mm]=(wa.time||'07:00').split(':').map(Number);
-  const days=wa.days||[0,1,2,3,4];
+  const days=Array.isArray(wa.days)?wa.days:[]; if(!days.length) return 0;
   let scheduled=0;
   const list=[];
   for(let offset=0; offset<14; offset++){
@@ -4755,6 +4791,7 @@ function wireLoginScreen(){
 
 
 function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
+  try{ consumePendingNudge(); }catch(e){}
   document.querySelectorAll('#main [data-nav]').forEach(b=>{
     b.addEventListener('click', ()=> setView(b.dataset.nav));
   });
@@ -5640,8 +5677,14 @@ function viewTasks(){
       <div class="field"><label>Due time</label><input id="newTime" type="time"></div>
       <div class="field"><label>Priority</label><select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
     </div>
+    <div class="field" style="margin-top:10px"><label>Type</label>
+      <select id="newContext">
+        <option value="school" selected>School / College</option>
+        <option value="personal">Personal</option>
+      </select>
+    </div>
     <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
-      <div style="font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px">BUG ME</div>
+      <div style="font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px">NUDGE</div>
       <div class="row">
         <div class="field"><label>Nudge at</label><input id="newReminderTime" type="time" value="" placeholder="Same as due time"></div>
         <div class="field"><label>Also alert</label>
@@ -5695,7 +5738,10 @@ function viewTasks(){
       <div class="field"><label>From</label><input type="date" id="completedFrom" value="${state.completedFrom||''}"></div>
       <div class="field"><label>To</label><input type="date" id="completedTo" value="${state.completedTo||''}"></div>
     </div>
-    <button type="button" class="btn sm" id="applyCompletedRange" style="margin-top:8px">Apply dates</button>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <button type="button" class="btn sm" id="applyCompletedRange">Apply dates</button>
+      <button type="button" class="btn ghost sm" id="clearCompletedRange">Clear dates</button>
+    </div>
   </div>` : ''}
   <div class="filters" style="margin-top:6px">
     <span style="font-size:.75rem;color:var(--muted);align-self:center">Show:</span>
@@ -8128,7 +8174,11 @@ function viewSettings(){
       <h3 style="margin:0 0 4px;display:flex;align-items:center;gap:8px"><span style="font-size:1.35rem">⏰</span> Nudge</h3>
       <p style="font-size:.84rem;color:var(--muted);margin:0 0 14px">Daily alarm. Opens a math stop-screen so it is harder to dismiss by accident.</p>
       <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${(state.wakeAlarm&&state.wakeAlarm.time)||'07:00'}"></div>
-      <div class="field" style="margin-top:8px"><label>Sound (in the app)</label>
+      <div class="field" style="margin-top:8px"><label>One-time date (optional)</label>
+        <input type="date" id="wakeOnceDate" value="${(state.wakeAlarm&&state.wakeAlarm.onceDate)||''}" min="2020-01-01" max="2035-12-31">
+        <div style="font-size:.78rem;color:var(--muted);margin-top:4px">If set, Nudge rings only on this date (at the time above). Leave blank to use weekly days instead.</div>
+      </div>
+      <div class="field" style="margin-top:8px"><label>Alarm sound</label>
         <select id="wakeSoundSelect">
           ${['chime','bell','beep','digital','radar','knock'].map(v=>{
             const labels={chime:'Chime',bell:'Bell',beep:'Beep',digital:'Digital',radar:'Radar',knock:'Wake burst'};
@@ -8136,10 +8186,14 @@ function viewSettings(){
             return `<option value="${v}" ${cur===v?'selected':''}>${labels[v]||v}</option>`;
           }).join('')}
         </select>
+        <div style="font-size:.78rem;color:var(--muted);margin-top:4px">This sound is used for the phone alarm (and a short sample plays when you change it).</div>
       </div>
-      <div style="margin-top:10px;font-size:.8rem;color:var(--muted);font-weight:600">Days</div>
+      <div style="margin-top:10px;font-size:.8rem;color:var(--muted);font-weight:600">Repeat on days (if no one-time date)</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
-        ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label style="font-size:.82rem;display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:var(--input-bg)"><input type="checkbox" id="wakeDay${i}" ${(state.wakeAlarm&&state.wakeAlarm.days&&state.wakeAlarm.days.indexOf(i)>=0)?'checked':(i<5&&!(state.wakeAlarm&&state.wakeAlarm.days)?'checked':'')}> ${d}</label>`).join('')}
+        ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>{
+          const selected = state.wakeAlarm && Array.isArray(state.wakeAlarm.days) && state.wakeAlarm.days.indexOf(i)>=0;
+          return `<label style="font-size:.82rem;display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:var(--input-bg)"><input type="checkbox" id="wakeDay${i}" ${selected?'checked':''}> ${d}</label>`;
+        }).join('')}
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;max-width:300px">
         <button class="btn" id="saveWakeBtn" type="button">Save Nudge</button>
@@ -8446,6 +8500,7 @@ function getShareMessage(){
 
 
 function wireView(){
+  try{ consumePendingNudge(); }catch(e){}
   const main=document.getElementById('main');
   if(!main) return;
   main.querySelectorAll('[data-action]').forEach(el=>{
@@ -8888,22 +8943,48 @@ function wireView(){
     main.querySelectorAll('[data-filter]').forEach(b=>b.addEventListener('click',()=>{state.filter=b.dataset.filter; persistRender();}));
     const tsi=document.getElementById('taskSearchInput');
     if(tsi){
-      tsi.addEventListener('input',()=>{ state.taskSearch=tsi.value||''; });
-      tsi.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ state.taskSearch=tsi.value||''; persistRender(); }});
-      tsi.addEventListener('search',()=>{ state.taskSearch=tsi.value||''; persistRender(); });
-      // live filter after short pause
+      if(state._taskSearchFocus){
+        try{
+          tsi.focus();
+          const pos = (state._taskSearchPos!=null) ? state._taskSearchPos : (tsi.value||'').length;
+          tsi.setSelectionRange(pos, pos);
+        }catch(e){}
+        state._taskSearchFocus = false;
+      }
       let _st=null;
       tsi.addEventListener('input',()=>{
+        state.taskSearch = tsi.value||'';
+        state._taskSearchPos = tsi.selectionStart;
         clearTimeout(_st);
-        _st=setTimeout(()=>{ state.taskSearch=tsi.value||''; persistRender(); }, 280);
+        _st=setTimeout(()=>{
+          state.taskSearch = tsi.value||'';
+          state._taskSearchPos = tsi.selectionStart;
+          state._taskSearchFocus = true;
+          persistRender();
+        }, 450);
+      });
+      tsi.addEventListener('keydown',(e)=>{
+        if(e.key==='Enter'){
+          clearTimeout(_st);
+          state.taskSearch=tsi.value||'';
+          state._taskSearchFocus=true;
+          state._taskSearchPos=tsi.selectionStart;
+          persistRender();
+        }
       });
     }
     const cf=document.getElementById('completedFrom');
     const ct=document.getElementById('completedTo');
     const cab=document.getElementById('applyCompletedRange');
     if(cab) cab.addEventListener('click',()=>{
-      state.completedFrom=cf?cf.value:'';
-      state.completedTo=ct?ct.value:'';
+      state.completedFrom=(cf && cf.value) ? cf.value : '';
+      state.completedTo=(ct && ct.value) ? ct.value : '';
+      persistRender();
+    });
+    const clearDates=document.getElementById('clearCompletedRange');
+    if(clearDates) clearDates.addEventListener('click',()=>{
+      state.completedFrom='';
+      state.completedTo='';
       persistRender();
     });
   }
@@ -9676,7 +9757,9 @@ function wireView(){
       if(!state.settings) state.settings={};
       state.settings.alarmSound = wakeSnd.value;
       try{ saveState(); }catch(e){}
-      try{ playAlarmRamp(3); }catch(e){}
+      // Short preview only — does not set the alarm
+      try{ stopAlarmRamp(); }catch(e){}
+      try{ playAlarmRamp(1.2); }catch(e){}
     });
     const saveWake=document.getElementById('saveWakeBtn');
     if(saveWake) saveWake.addEventListener('click', function(e){
