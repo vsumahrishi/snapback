@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="206">
+<meta name="snapback-build" content="208">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4831,34 +4831,81 @@ const TOUR_STEPS = [
   {
     view: 'today',
     title: 'Welcome to SnapBack',
-    body: 'This short tour shows the main places you’ll use every day. Use <b>Next</b> and <b>Back</b> anytime. Tap <b>Skip</b> to exit.'
+    body: 'A calmer way through school and life tasks. Use <b>Next</b> / <b>Back</b> / <b>Skip</b>. Replay anytime: <b>Settings → Take a tour</b>.'
   },
   {
     view: 'tasks',
-    title: 'Tasks',
-    body: 'Add work here with a due date and time. Use <b>Search</b> to find something. Open tasks stay on the list; tap <b>Show completed tasks</b> only when you need them. Mark a task <b>Personal</b> or <b>School</b> when you add it or from the task menu.'
+    title: 'Tasks — your list',
+    body: 'Add work with a due date and time. Search to find something. Completed items stay hidden until <b>Show completed tasks</b>. Mark <b>School</b> or <b>Personal</b> when you add a task.<br><br><b>Tie a technique to a task:</b> open the task’s menu (⋯) and pick a tool (e.g. Bite Size or Focus Pod), or open <b>Techniques</b> first and choose a tool — some tools ask which task to use.'
+  },
+  {
+    view: 'journal',
+    title: 'Journal',
+    body: 'Sticky notes for thoughts and worries — not a second to-do list. Park it here, then return when you have energy.'
+  },
+  {
+    view: 'plan',
+    title: 'Plan',
+    body: 'Hub for <b>Your Schedule</b>, class timetable, projects, and week planning. Use this when you need a map of the week, not only a list of tasks.'
   },
   {
     view: 'calendar',
     title: 'Your Schedule',
-    body: 'See the week or month at a glance — classes, deadlines, and study blocks. You can export a calendar file (.ics) for Google or Outlook. Live Google sync can be connected later in Settings when your school sets it up.'
+    body: 'Week or month view: classes, deadlines, free time. Export a calendar file (.ics) for Google/Outlook if you want it outside SnapBack.'
   },
   {
-    view: 'settings',
-    title: 'Nudge (alarm)',
-    body: 'Scroll to <b>Nudge</b> in Settings. Set a <b>time</b>, either a <b>one-time date</b> or <b>days of the week</b>, pick a <b>sound</b>, then <b>Save Nudge</b>. On the phone it can ring when the app is closed — allow Alarms & reminders and Full screen notifications for SnapBack.'
+    view: 'techniques',
+    title: 'Techniques — what they are for',
+    body: 'Tools for when starting is hard. You can open a tool here, or attach one from a task.<br><br>• <b>This or That</b> — sort tasks into Do first / Schedule / Quick / Later<br>• <b>Bite Size</b> — one task → tiny steps (+ optional AI bites)<br>• <b>Focus Pod</b> — timed work/break sprints<br>• <b>Focus Plate</b> — limit today to 1 big, 3 medium, 5 small<br>• <b>Time Blocking</b> — put work on the clock for a day<br>• <b>Body Doubling</b> — structured “work with” ritual<br>• <b>Plan this week</b> — short list for this week only'
+  },
+  {
+    view: 'bitesize',
+    title: 'Bite Size — how to use it',
+    body: 'Pick a heavy task and break it into small bites you can finish soon. You can ask AI for chapter-style bites, keep the ones you want, then do <b>one bite</b> at a time. Best when the whole task feels too big to start.'
+  },
+  {
+    view: 'eisenhower',
+    title: 'This or That grid',
+    body: 'Put tasks into four boxes: do first, schedule, quick wins, or later. Helps when everything feels urgent. Add tasks into the boxes from this screen.'
+  },
+  {
+    view: 'rule135',
+    title: 'Focus Plate',
+    body: 'Cap today: <b>1</b> big, <b>3</b> medium, <b>5</b> small. When the plate is full, you stop adding. Reduces “I’ll just do one more thing” overload.'
   },
   {
     view: 'timer',
-    title: 'Focus timer',
-    body: 'Use the timer for work sprints and breaks. It helps you start small instead of staring at a long list.'
+    title: 'Focus Pod (timer)',
+    body: 'Start a short timed sprint with breaks. Use alone or after you pick a task — so work has a clear start and end.'
+  },
+  {
+    view: 'bodydouble',
+    title: 'Body Doubling',
+    body: 'A simple ritual for working “with” structure (even solo): set up, work a stretch, check in. Use when you need company-style accountability without a real person in the room.'
+  },
+  {
+    view: 'studytools',
+    title: 'Study Tools',
+    body: 'Extra study supports beyond the main techniques. Open when you need a method for reading, revision, or staying with the material.'
+  },
+  {
+    view: 'challenges',
+    title: 'Challenges',
+    body: 'Optional guided paths that combine tools into small steps. Use when you want a ready-made structure, not only a blank list.'
+  },
+  {
+    view: 'settings',
+    title: 'Nudge & Settings',
+    body: 'Set your name and preferences. <b>Nudge</b> is the alarm: time, one-time date or weekdays, sound, then <b>Save Nudge</b>. On the phone, allow Alarms & reminders so it can ring when the app is closed.'
   },
   {
     view: 'today',
     title: 'You’re ready',
-    body: 'You can replay this tour anytime: <b>Settings → Take a tour</b>. Add one task, set a Nudge if you need a wake-up, and check Schedule for the week. You’ve got this.'
+    body: 'You do not need every technique every day. Typical path: add a <b>Task</b> → if stuck, open <b>Techniques</b> (or the task menu) → use <b>Bite Size</b> or <b>Focus Pod</b> → check <b>Schedule</b> for the week. Replay: <b>Settings → Take a tour</b>.'
   }
 ];
+
+
 
 
 function maybeOfferTour(){
