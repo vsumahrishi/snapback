@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="203">
+<meta name="snapback-build" content="204">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -358,6 +358,22 @@ details.setgroup .setgroup-body{margin-top:12px}
   .quotecard{max-height:88vh;overflow-y:auto;margin-bottom:env(safe-area-inset-bottom, 0px)}
   .strategy-box input{margin-bottom:6px}
 }
+
+/* ---- In-app guided tour ---- */
+.tour-overlay{position:fixed;inset:0;z-index:10050;pointer-events:none}
+.tour-dim{position:absolute;inset:0;background:rgba(20,24,22,.55);pointer-events:auto}
+.tour-card{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);width:min(420px,calc(100% - 24px));
+  background:var(--card,#1e2420);color:var(--text,#e8e6e0);border:1px solid var(--line,#3a433c);
+  border-radius:16px;padding:16px 18px;box-shadow:0 12px 40px rgba(0,0,0,.45);pointer-events:auto;z-index:10051}
+.tour-card h3{margin:0 0 8px;font-size:1.1rem}
+.tour-card p{margin:0 0 12px;font-size:.9rem;line-height:1.45;color:var(--muted,#9aa39c)}
+.tour-card p b{color:var(--text,#e8e6e0)}
+.tour-progress{font-size:.75rem;color:var(--muted);margin-bottom:10px}
+.tour-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tour-actions .spacer{flex:1}
+.tour-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--line);margin-right:4px}
+.tour-dot.on{background:var(--pine,#2f6f5e)}
+
 </style>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
@@ -4790,6 +4806,143 @@ function wireLoginScreen(){
 }
 
 
+
+/* ============================================================
+   Guided tour (Next / Back / Skip)
+   ============================================================ */
+const TOUR_STEPS = [
+  {
+    view: 'today',
+    title: 'Welcome to SnapBack',
+    body: 'This short tour shows the main places you’ll use every day. Use <b>Next</b> and <b>Back</b> anytime. Tap <b>Skip</b> to exit.'
+  },
+  {
+    view: 'tasks',
+    title: 'Tasks',
+    body: 'Add work here with a due date and time. Use <b>Search</b> to find something. Open tasks stay on the list; tap <b>Show completed tasks</b> only when you need them. Mark a task <b>Personal</b> or <b>School</b> when you add it or from the task menu.'
+  },
+  {
+    view: 'calendar',
+    title: 'Your Schedule',
+    body: 'See the week or month at a glance — classes, deadlines, and study blocks. You can export a calendar file (.ics) for Google or Outlook. Live Google sync can be connected later in Settings when your school sets it up.'
+  },
+  {
+    view: 'settings',
+    title: 'Nudge (alarm)',
+    body: 'Scroll to <b>Nudge</b> in Settings. Set a <b>time</b>, either a <b>one-time date</b> or <b>days of the week</b>, pick a <b>sound</b>, then <b>Save Nudge</b>. On the phone it can ring when the app is closed — allow Alarms & reminders and Full screen notifications for SnapBack.'
+  },
+  {
+    view: 'timer',
+    title: 'Focus timer',
+    body: 'Use the timer for work sprints and breaks. It helps you start small instead of staring at a long list.'
+  },
+  {
+    view: 'today',
+    title: 'You’re ready',
+    body: 'You can replay this tour anytime: <b>Settings → Take a tour</b>. Add one task, set a Nudge if you need a wake-up, and check Schedule for the week. You’ve got this.'
+  }
+];
+
+
+function maybeOfferTour(){
+  try{
+    if(!state.tour) state.tour={};
+    if(state.tour.completed || state.tour.declinedOffer) return;
+    if(state.tour.offerShown) return;
+    state.tour.offerShown = true;
+    // mild prompt only once per session
+    setTimeout(function(){
+      if(state.tour && state.tour.open) return;
+      if(state.tour && state.tour.completed) return;
+      showAppMessage('Take a quick tour?', 'Settings → Take a tour walks you through Tasks, Schedule, and Nudge. You can skip anytime.');
+    }, 1200);
+  }catch(e){}
+}
+
+function startTour(fromStep){
+  try{
+    if(!state.tour) state.tour={};
+    state.tour.open = true;
+    state.tour.step = Math.max(0, Math.min(TOUR_STEPS.length-1, fromStep||0));
+    const step = TOUR_STEPS[state.tour.step];
+    if(step && step.view) navigateTo(step.view);
+    else persistRender();
+  }catch(e){
+    console.warn(e);
+    showAppMessage('Tour', 'Could not start tour.');
+  }
+}
+function endTour(markDone){
+  if(!state.tour) state.tour={};
+  state.tour.open = false;
+  if(markDone){
+    state.tour.completed = true;
+    state.tour.completedAt = new Date().toISOString();
+  }
+  try{ saveState(); }catch(e){}
+  persistRender();
+}
+function tourNext(){
+  if(!state.tour) return;
+  if(state.tour.step >= TOUR_STEPS.length-1){
+    endTour(true);
+    showAppMessage('Tour finished', 'Replay anytime from Settings → Take a tour.');
+    return;
+  }
+  state.tour.step++;
+  const step = TOUR_STEPS[state.tour.step];
+  if(step && step.view) navigateTo(step.view);
+  else persistRender();
+}
+function tourBack(){
+  if(!state.tour || state.tour.step<=0) return;
+  state.tour.step--;
+  const step = TOUR_STEPS[state.tour.step];
+  if(step && step.view) navigateTo(step.view);
+  else persistRender();
+}
+function renderTourOverlay(){
+  try{
+    let el = document.getElementById('tourRoot');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'tourRoot';
+      document.body.appendChild(el);
+    }
+    if(!state.tour || !state.tour.open){
+      el.innerHTML = '';
+      return;
+    }
+    const i = state.tour.step||0;
+    const step = TOUR_STEPS[i] || TOUR_STEPS[0];
+    const dots = TOUR_STEPS.map((_,di)=>`<span class="tour-dot ${di===i?'on':''}"></span>`).join('');
+    const isLast = i >= TOUR_STEPS.length-1;
+    el.innerHTML = `<div class="tour-overlay" aria-live="polite">
+      <div class="tour-dim" id="tourDim"></div>
+      <div class="tour-card" role="dialog" aria-label="App tour">
+        <div class="tour-progress">Step ${i+1} of ${TOUR_STEPS.length} · ${dots}</div>
+        <h3>${step.title}</h3>
+        <p>${step.body}</p>
+        <div class="tour-actions">
+          <button type="button" class="btn ghost sm" id="tourSkip">Skip</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn ghost sm" id="tourBack" ${i===0?'disabled':''}>Back</button>
+          <button type="button" class="btn sm" id="tourNext">${isLast?'Finish':'Next'}</button>
+        </div>
+      </div>
+    </div>`;
+    const skip=document.getElementById('tourSkip');
+    const back=document.getElementById('tourBack');
+    const next=document.getElementById('tourNext');
+    const dim=document.getElementById('tourDim');
+    if(skip) skip.onclick=()=>endTour(false);
+    if(back) back.onclick=()=>tourBack();
+    if(next) next.onclick=()=>tourNext();
+    if(dim) dim.onclick=()=>{}; // don't close on dim — avoid accidents
+  }catch(e){ console.warn('tour render', e); }
+}
+
+
 function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
   try{ consumePendingNudge(); }catch(e){}
   document.querySelectorAll('#main [data-nav]').forEach(b=>{
@@ -8155,7 +8308,10 @@ function viewSettings(){
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <h1>Settings</h1>
-    <p style="margin-top:4px"><button class="btn ghost sm" id="gotoHelpBtn">Help &amp; FAQ</button></p>
+    <p style="margin-top:4px;display:flex;flex-wrap:wrap;gap:8px">
+      <button class="btn sm" id="startTourBtn" type="button">Take a tour</button>
+      <button class="btn ghost sm" id="gotoHelpBtn" type="button">Help &amp; FAQ</button>
+    </p>
     <div class="card">
       <h3 style="margin:0 0 6px">Your profile</h3>
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Each student personalises their own copy: enter <b>their name</b> here. On the phone APK they do the same. Their schedule, journal, and sync code are private to them — not shared with other students.</p>
@@ -9567,6 +9723,7 @@ function wireView(){
 
   if(state.view==='settings'){
     const gh=document.getElementById('gotoHelpBtn'); if(gh) gh.addEventListener('click', ()=>navigateTo('help'));
+    const stBtn=document.getElementById('startTourBtn'); if(stBtn) stBtn.addEventListener('click', ()=>startTour(0));
 
     
     const csvIn=document.getElementById('taskCsvInput');

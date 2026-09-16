@@ -1,2 +1,1 @@
-SnapBack WEB — build 197
-Replace your whole GitHub/web folder with these files. Then Ctrl+Shift+R.
+Build 204 — in-app tour: Settings → Take a tour. Replace www (and web files on GitHub).
