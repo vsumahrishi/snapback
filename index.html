@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="204">
+<meta name="snapback-build" content="205">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -360,19 +360,21 @@ details.setgroup .setgroup-body{margin-top:12px}
 }
 
 /* ---- In-app guided tour ---- */
-.tour-overlay{position:fixed;inset:0;z-index:10050;pointer-events:none}
-.tour-dim{position:absolute;inset:0;background:rgba(20,24,22,.55);pointer-events:auto}
-.tour-card{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);width:min(420px,calc(100% - 24px));
-  background:var(--card,#1e2420);color:var(--text,#e8e6e0);border:1px solid var(--line,#3a433c);
-  border-radius:16px;padding:16px 18px;box-shadow:0 12px 40px rgba(0,0,0,.45);pointer-events:auto;z-index:10051}
-.tour-card h3{margin:0 0 8px;font-size:1.1rem}
-.tour-card p{margin:0 0 12px;font-size:.9rem;line-height:1.45;color:var(--muted,#9aa39c)}
-.tour-card p b{color:var(--text,#e8e6e0)}
-.tour-progress{font-size:.75rem;color:var(--muted);margin-bottom:10px}
+#tourRoot{position:relative;z-index:2147483000}
+.tour-overlay{position:fixed;inset:0;z-index:2147483000;pointer-events:none}
+.tour-dim{position:absolute;inset:0;background:rgba(0,0,0,.45);pointer-events:auto}
+.tour-card{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);width:min(440px,calc(100% - 20px));
+  background:#1a221e;color:#f2f0ea;border:2px solid #3d9b7a;
+  border-radius:16px;padding:18px 18px 16px;box-shadow:0 16px 48px rgba(0,0,0,.55);pointer-events:auto;z-index:2147483001}
+.tour-card h3{margin:0 0 8px;font-size:1.15rem;color:#fff}
+.tour-card p{margin:0 0 14px;font-size:.92rem;line-height:1.5;color:#c5cdc8}
+.tour-card p b{color:#fff}
+.tour-progress{font-size:.78rem;color:#8a968f;margin-bottom:10px}
 .tour-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .tour-actions .spacer{flex:1}
-.tour-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--line);margin-right:4px}
-.tour-dot.on{background:var(--pine,#2f6f5e)}
+.tour-actions .btn{pointer-events:auto;cursor:pointer}
+.tour-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#4a5550;margin-right:4px}
+.tour-dot.on{background:#3d9b7a}
 
 </style>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
@@ -4640,7 +4642,7 @@ function authStatusHtml(){
   }
 }
 
-function persistRender(){ saveState(); render(); try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ wireNudgeForegroundHooks(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} try{ if(typeof isNativeApp==='function'&&isNativeApp()){ ensureNativeNotifListeners(); scheduleNativeWakeAlarms(); } }catch(e){} try{ consumePendingNudge(); }catch(e){} }
+function persistRender(){ saveState(); render(); try{ renderTourOverlay(); }catch(e){} try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ wireNudgeForegroundHooks(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} try{ if(typeof isNativeApp==='function'&&isNativeApp()){ ensureNativeNotifListeners(); scheduleNativeWakeAlarms(); } }catch(e){} try{ consumePendingNudge(); }catch(e){} }
 
 /* ============================================================
    First-launch login gate (Google and/or simple local account)
@@ -4864,12 +4866,21 @@ function startTour(fromStep){
     if(!state.tour) state.tour={};
     state.tour.open = true;
     state.tour.step = Math.max(0, Math.min(TOUR_STEPS.length-1, fromStep||0));
+    try{ saveState(); }catch(e){}
     const step = TOUR_STEPS[state.tour.step];
-    if(step && step.view) navigateTo(step.view);
-    else persistRender();
+    if(step && step.view){
+      // set view without relying only on navigateTo path
+      state.view = step.view;
+      try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+    } else {
+      try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+    }
+    // force overlay after paint
+    setTimeout(function(){ try{ renderTourOverlay(); }catch(e){} }, 0);
+    setTimeout(function(){ try{ renderTourOverlay(); }catch(e){} }, 150);
   }catch(e){
     console.warn(e);
-    showAppMessage('Tour', 'Could not start tour.');
+    try{ showAppMessage('Tour', 'Could not start tour: '+String(e&&e.message||e)); }catch(e2){}
   }
 }
 function endTour(markDone){
@@ -4891,15 +4902,19 @@ function tourNext(){
   }
   state.tour.step++;
   const step = TOUR_STEPS[state.tour.step];
-  if(step && step.view) navigateTo(step.view);
-  else persistRender();
+  if(step && step.view) state.view = step.view;
+  try{ persistRender(); }catch(e){}
+  setTimeout(function(){ try{ renderTourOverlay(); }catch(e){} }, 0);
+  setTimeout(function(){ try{ renderTourOverlay(); }catch(e){} }, 150);
 }
 function tourBack(){
   if(!state.tour || state.tour.step<=0) return;
   state.tour.step--;
   const step = TOUR_STEPS[state.tour.step];
-  if(step && step.view) navigateTo(step.view);
-  else persistRender();
+  if(step && step.view) state.view = step.view;
+  try{ persistRender(); }catch(e){}
+  setTimeout(function(){ try{ renderTourOverlay(); }catch(e){} }, 0);
+  setTimeout(function(){ try{ renderTourOverlay(); }catch(e){} }, 150);
 }
 function renderTourOverlay(){
   try{
@@ -4908,37 +4923,38 @@ function renderTourOverlay(){
       el = document.createElement('div');
       el.id = 'tourRoot';
       document.body.appendChild(el);
+    } else {
+      // keep on top of DOM
+      document.body.appendChild(el);
     }
     if(!state.tour || !state.tour.open){
       el.innerHTML = '';
+      el.style.display = 'none';
       return;
     }
+    el.style.display = 'block';
     const i = state.tour.step||0;
     const step = TOUR_STEPS[i] || TOUR_STEPS[0];
-    const dots = TOUR_STEPS.map((_,di)=>`<span class="tour-dot ${di===i?'on':''}"></span>`).join('');
+    const dots = TOUR_STEPS.map((_,di)=>'<span class="tour-dot '+(di===i?'on':'')+'"></span>').join('');
     const isLast = i >= TOUR_STEPS.length-1;
-    el.innerHTML = `<div class="tour-overlay" aria-live="polite">
-      <div class="tour-dim" id="tourDim"></div>
-      <div class="tour-card" role="dialog" aria-label="App tour">
-        <div class="tour-progress">Step ${i+1} of ${TOUR_STEPS.length} · ${dots}</div>
-        <h3>${step.title}</h3>
-        <p>${step.body}</p>
-        <div class="tour-actions">
-          <button type="button" class="btn ghost sm" id="tourSkip">Skip</button>
-          <span class="spacer"></span>
-          <button type="button" class="btn ghost sm" id="tourBack" ${i===0?'disabled':''}>Back</button>
-          <button type="button" class="btn sm" id="tourNext">${isLast?'Finish':'Next'}</button>
-        </div>
-      </div>
-    </div>`;
+    el.innerHTML = '<div class="tour-overlay" aria-live="polite">'
+      +'<div class="tour-dim" id="tourDim"></div>'
+      +'<div class="tour-card" role="dialog" aria-label="App tour">'
+      +'<div class="tour-progress">Step '+(i+1)+' of '+TOUR_STEPS.length+' · '+dots+'</div>'
+      +'<h3>'+step.title+'</h3>'
+      +'<p>'+step.body+'</p>'
+      +'<div class="tour-actions">'
+      +'<button type="button" class="btn ghost sm" id="tourSkip">Skip</button>'
+      +'<span class="spacer"></span>'
+      +'<button type="button" class="btn ghost sm" id="tourBack"'+(i===0?' disabled':'')+'>Back</button>'
+      +'<button type="button" class="btn sm" id="tourNext">'+(isLast?'Finish':'Next')+'</button>'
+      +'</div></div></div>';
     const skip=document.getElementById('tourSkip');
     const back=document.getElementById('tourBack');
     const next=document.getElementById('tourNext');
-    const dim=document.getElementById('tourDim');
-    if(skip) skip.onclick=()=>endTour(false);
-    if(back) back.onclick=()=>tourBack();
-    if(next) next.onclick=()=>tourNext();
-    if(dim) dim.onclick=()=>{}; // don't close on dim — avoid accidents
+    if(skip) skip.onclick=function(e){ e.preventDefault(); endTour(false); };
+    if(back) back.onclick=function(e){ e.preventDefault(); tourBack(); };
+    if(next) next.onclick=function(e){ e.preventDefault(); tourNext(); };
   }catch(e){ console.warn('tour render', e); }
 }
 
