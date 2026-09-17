@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="210">
+<meta name="snapback-build" content="211">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -6435,35 +6435,96 @@ function buildWeekBusyData(weekStart){
 }
 function buildShareWeekLink(weekStart){
   const data = buildWeekBusyData(weekStart);
-  const payload = b64urlEncode(JSON.stringify(data));
+  // Compact payload (shorter link): minimal keys
+  const compact = {
+    v:1,
+    n: data.name||'',
+    w: data.weekStart||'',
+    d: (data.days||[]).map(function(day){
+      return {
+        a: day.date,
+        b: (day.busy||[]).map(function(x){
+          return [x.start||'', x.end||'', x.title||'', x.place||''];
+        })
+      };
+    })
+  };
+  const payload = b64urlEncode(JSON.stringify(compact));
   const base = (typeof location!=='undefined' && location.origin && location.pathname)
-    ? (location.origin + location.pathname.split('?')[0])
+    ? (location.origin + location.pathname.split('#')[0].split('?')[0])
     : '';
-  // Hash route so GitHub Pages static host works without server
-  return base + '#/freebusy/' + payload;
+  // Query param (not hash) so short-link services preserve the data
+  return base + '?fb=' + payload;
+}
+/** Expand compact or legacy free/busy payload */
+function expandFreeBusyPayload(data){
+  if(!data) return null;
+  if(data.days) return data; // legacy full shape
+  if(data.d){
+    const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    return {
+      v: data.v||1,
+      name: data.n||'SnapBack user',
+      weekStart: data.w||'',
+      days: (data.d||[]).map(function(day,i){
+        return {
+          name: dayNames[i]||'',
+          date: day.a||'',
+          busy: (day.b||[]).map(function(row){
+            return { start:row[0]||'', end:row[1]||'', title:row[2]||'', place:row[3]||'' };
+          })
+        };
+      })
+    };
+  }
+  return null;
+}
+async function shortenUrl(longUrl){
+  // Free public shortener (no API key). Falls back to long URL on failure.
+  try{
+    const api = 'https://is.gd/create.php?format=json&url=' + encodeURIComponent(longUrl);
+    const res = await fetch(api);
+    if(!res.ok) return longUrl;
+    const j = await res.json();
+    if(j && j.shorturl) return j.shorturl;
+  }catch(e){}
+  try{
+    const api2 = 'https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl);
+    const res2 = await fetch(api2);
+    if(res2.ok){
+      const text = (await res2.text()).trim();
+      if(text && text.indexOf('http')===0) return text;
+    }
+  }catch(e){}
+  return longUrl;
 }
 function shareWeekFreeBusy(){
   try{
     const ref = state.calRef ? new Date(state.calRef+'T12:00:00') : new Date();
-    const link = buildShareWeekLink(ref);
-    state.shareWeekLink = link;
+    const longLink = buildShareWeekLink(ref);
+    state.shareWeekLink = longLink;
     state.shareWeekData = buildWeekBusyData(ref);
+    state.shareWeekShortening = true;
     state.view = 'freebusyPreview';
-    try{ persistRender(); }catch(e){ try{ render(); }catch(e2){ console.warn(e2); } }
-    // Copy in background (don't block UI)
-    try{
+    try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+    showAppMessage('Share Calendar', 'Preparing a short link…');
+    shortenUrl(longLink).then(function(shortLink){
+      state.shareWeekLink = shortLink || longLink;
+      state.shareWeekLongLink = longLink;
+      state.shareWeekShortening = false;
+      try{ persistRender(); }catch(e){}
+      const toCopy = state.shareWeekLink;
       if(navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(link).then(function(){
-          showAppMessage('Share Calendar', 'Link copied. Send it to anyone — they can see your busy/free week.');
+        navigator.clipboard.writeText(toCopy).then(function(){
+          showAppMessage('Share Calendar', 'Short link copied. Send it to anyone.');
         }).catch(function(){
-          showAppMessage('Share Calendar', 'Copy the link on this screen and send it to anyone.');
+          showAppMessage('Share Calendar', 'Copy the link on this screen.');
         });
-      } else {
-        showAppMessage('Share Calendar', 'Copy the link on this screen and send it to anyone.');
       }
-    }catch(e){
-      showAppMessage('Share Calendar', 'Copy the link on this screen and send it to anyone.');
-    }
+    }).catch(function(){
+      state.shareWeekShortening = false;
+      try{ persistRender(); }catch(e){}
+    });
   }catch(e){
     console.warn(e);
     showAppMessage('Share failed', String(e&&e.message||e));
@@ -6472,12 +6533,17 @@ function shareWeekFreeBusy(){
 
 function parseFreeBusyFromHash(){
   try{
-    const h = String(location.hash||'');
-    const m = h.match(/#\/freebusy\/([A-Za-z0-9_-]+)/);
+    // Prefer ?fb= (short-link friendly)
+    const q = String(location.search||'');
+    let m = q.match(/[?&]fb=([A-Za-z0-9_-]+)/);
+    if(!m){
+      const h = String(location.hash||'');
+      m = h.match(/#\/freebusy\/([A-Za-z0-9_-]+)/);
+    }
     if(!m) return null;
     const json = b64urlDecode(m[1]);
     if(!json) return null;
-    return JSON.parse(json);
+    return expandFreeBusyPayload(JSON.parse(json));
   }catch(e){ return null; }
 }
 function viewFreeBusyPublic(data){
@@ -6516,8 +6582,9 @@ function viewFreeBusyPreview(){
     <p>Send this link to anyone (chat, email, WhatsApp). They open it and see your <b>busy</b> times and free gaps for the week — no SnapBack login needed.</p>
   </div>
   <div class="card">
-    <label style="font-size:.8rem;font-weight:600">Your link</label>
-    <textarea id="shareWeekLinkBox" readonly style="width:100%;min-height:72px;margin-top:6px;font-size:.8rem">${escapeHtml(link)}</textarea>
+    <label style="font-size:.8rem;font-weight:600">Your link ${(state.shareWeekShortening)?'(shortening…)':(state.shareWeekLongLink && state.shareWeekLink!==state.shareWeekLongLink)?'(short)':''}</label>
+    <textarea id="shareWeekLinkBox" readonly style="width:100%;min-height:56px;margin-top:6px;font-size:.85rem;word-break:break-all">${escapeHtml(link)}</textarea>
+    <div style="font-size:.78rem;color:var(--muted);margin-top:6px">A short link is created when online. If shortening fails, the full link still works.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
       <button type="button" class="btn" id="copyShareWeekBtn">Copy link</button>
       <button type="button" class="btn ghost" id="nativeShareWeekBtn">Share…</button>
