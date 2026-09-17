@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="208">
+<meta name="snapback-build" content="209">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -391,6 +391,12 @@ details.setgroup .setgroup-body{margin-top:12px}
 .tour-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#4a5550;margin-right:4px}
 .tour-dot.on{background:#3d9b7a}
 
+
+.share-week-day{margin-bottom:14px}
+.share-week-day h4{margin:0 0 6px;padding:8px 12px;background:var(--pine-soft,#e8f2ee);border-radius:8px;font-size:.95rem}
+.share-busy{padding:6px 12px;font-size:.88rem;border-left:3px solid #c45c4a;margin:4px 0;background:var(--card)}
+.share-free{padding:6px 12px;font-size:.88rem;border-left:3px solid #3d9b7a;margin:4px 0;color:var(--muted)}
+.share-busy .room{font-size:.8rem;color:var(--muted);font-style:italic}
 </style>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
@@ -3732,6 +3738,10 @@ function topOfMindBanner(){
 function renderMain(){
   const el=document.getElementById('main');
   if(!el) return;
+  try{
+    const fb = (typeof parseFreeBusyFromHash==='function') ? parseFreeBusyFromHash() : null;
+    if(fb){ state.freeBusyPublic = fb; state.view = 'freebusy'; }
+  }catch(e){}
   if(typeof needsLoginScreen==='function' && needsLoginScreen()){
     el.innerHTML = viewLogin();
     try{ wireLoginScreen(); }catch(e){ console.warn(e); }
@@ -3740,7 +3750,10 @@ function renderMain(){
   const views={today:viewToday,tasks:viewTasks,challenges:viewChallenges,planAhead:viewPlanAhead,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
     eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,
     bodydouble:viewBodyDouble,settings:viewSettings,
-    habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp};
+    habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp,
+    freebusyPreview:viewFreeBusyPreview,
+    freebusy:function(){ return viewFreeBusyPublic(state.freeBusyPublic||parseFreeBusyFromHash()); }
+  };
   try{
     let html=(views[state.view]||viewToday)();
     if(state.view!=='challenges'){
@@ -4701,6 +4714,11 @@ function isLoggedIn(){
   return false;
 }
 function needsLoginScreen(){
+  // Shared free/busy links are public — no login required to view
+  try{
+    if(state.view==='freebusy') return false;
+    if(typeof parseFreeBusyFromHash==='function' && parseFreeBusyFromHash()) return false;
+  }catch(e){}
   return !isLoggedIn();
 }
 function completeLocalLogin(username, remember){
@@ -6335,6 +6353,180 @@ function freeSlotsForDate(dateStr){
   return merged;
 }
 
+
+/* ============================================================
+   Share free/busy week (link anyone can open)
+   ============================================================ */
+function b64urlEncode(str){
+  try{
+    const b = btoa(unescape(encodeURIComponent(str)));
+    return b.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  }catch(e){ return ''; }
+}
+function b64urlDecode(str){
+  try{
+    let s = String(str||'').replace(/-/g,'+').replace(/_/g,'/');
+    while(s.length % 4) s += '=';
+    return decodeURIComponent(escape(atob(s)));
+  }catch(e){ return ''; }
+}
+function mondayOf(dateObj){
+  const d = new Date(dateObj); d.setHours(12,0,0,0);
+  const day = (d.getDay()+6)%7; // Mon=0
+  d.setDate(d.getDate()-day);
+  return d;
+}
+function isoDate(d){
+  const x=new Date(d);
+  return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+}
+/** Busy blocks for a week starting Monday (from classes + timed tasks) */
+function buildWeekBusyData(weekStart){
+  const mon = mondayOf(weekStart||new Date());
+  const days = [];
+  const dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  for(let i=0;i<7;i++){
+    const d = new Date(mon); d.setDate(mon.getDate()+i);
+    const ds = isoDate(d);
+    const busy = [];
+    // Classes: day index Mon=0
+    (state.classes||[]).forEach(c=>{
+      if(c.day!=null && Number(c.day)===i){
+        busy.push({
+          start: c.start||'',
+          end: c.end||'',
+          title: c.title||c.name||'Class',
+          place: c.room||c.place||''
+        });
+      }
+      // session-scoped on this date
+      if(c.scope==='session' && c.date===ds){
+        busy.push({
+          start: c.start||'',
+          end: c.end||'',
+          title: c.title||c.name||'Class',
+          place: c.room||c.place||''
+        });
+      }
+    });
+    // Tasks with date+time count as busy ~1h if no end
+    (state.tasks||[]).forEach(task=>{
+      if(task.done) return;
+      if(task.date!==ds || !task.time) return;
+      const start = task.time;
+      let end = '';
+      try{
+        const [hh,mm] = start.split(':').map(Number);
+        const m = (hh*60+(mm||0)+60);
+        end = String(Math.floor(m/60)%24).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+      }catch(e){ end = ''; }
+      busy.push({ start, end, title: task.title||'Task', place: '' });
+    });
+    busy.sort((a,b)=>String(a.start).localeCompare(String(b.start)));
+    days.push({ name: dayNames[i], date: ds, busy });
+  }
+  const name = (state.settings && (state.settings.displayName||state.settings.name)) || (state.profile && state.profile.name) || 'SnapBack user';
+  return {
+    v: 1,
+    name: String(name).slice(0,40),
+    weekStart: isoDate(mon),
+    days
+  };
+}
+function buildShareWeekLink(weekStart){
+  const data = buildWeekBusyData(weekStart);
+  const payload = b64urlEncode(JSON.stringify(data));
+  const base = (typeof location!=='undefined' && location.origin && location.pathname)
+    ? (location.origin + location.pathname.split('?')[0])
+    : '';
+  // Hash route so GitHub Pages static host works without server
+  return base + '#/freebusy/' + payload;
+}
+async function shareWeekFreeBusy(){
+  try{
+    const ref = state.calRef ? new Date(state.calRef+'T12:00:00') : new Date();
+    const link = buildShareWeekLink(ref);
+    state.shareWeekLink = link;
+    state.shareWeekData = buildWeekBusyData(ref);
+    // Prefer native share
+    if(navigator.share){
+      try{
+        await navigator.share({
+          title: 'My busy / free week',
+          text: 'When I am busy this week (SnapBack):',
+          url: link
+        });
+        showAppMessage('Shared', 'Your free/busy week link was shared.');
+        return;
+      }catch(e){
+        if(e && e.name==='AbortError') return;
+      }
+    }
+    try{ await navigator.clipboard.writeText(link); }catch(e){}
+    state.view = 'freebusyPreview';
+    persistRender();
+    showAppMessage('Share link ready', 'Copy or share the link. Anyone can open it without logging in.');
+  }catch(e){
+    showAppMessage('Share failed', String(e&&e.message||e));
+  }
+}
+function parseFreeBusyFromHash(){
+  try{
+    const h = String(location.hash||'');
+    const m = h.match(/#\/freebusy\/([A-Za-z0-9_-]+)/);
+    if(!m) return null;
+    const json = b64urlDecode(m[1]);
+    if(!json) return null;
+    return JSON.parse(json);
+  }catch(e){ return null; }
+}
+function viewFreeBusyPublic(data){
+  if(!data || !data.days){
+    return `<div class="pagehead"><h1>Schedule link</h1><p class="empty">This link is missing or invalid.</p></div>`;
+  }
+  const name = escapeHtml(data.name||'Someone');
+  const week = escapeHtml(data.weekStart||'');
+  const body = data.days.map(day=>{
+    const busy = (day.busy||[]);
+    const items = busy.length
+      ? busy.map(b=>{
+          const t = escapeHtml((b.start||'')+(b.end?(' – '+b.end):'')+': '+(b.title||''));
+          const room = b.place ? `<div class="room">${escapeHtml(b.place)}</div>` : '';
+          return `<div class="share-busy">${t}${room}</div>`;
+        }).join('')
+      : `<div class="share-free">Free / nothing listed</div>`;
+    return `<div class="share-week-day"><h4>${escapeHtml(day.name||'')} · ${escapeHtml(day.date||'')}</h4>${items}</div>`;
+  }).join('');
+  return `
+  <div class="pagehead">
+    <div class="eyebrow">Shared free / busy week</div>
+    <h1>${name}</h1>
+    <p style="color:var(--muted)">Week of ${week}. Busy times are listed; empty days are free. No account needed to view.</p>
+  </div>
+  <div class="card">${body}</div>
+  <p style="font-size:.8rem;color:var(--muted);margin-top:12px">Powered by SnapBack — only busy blocks were shared, not private notes.</p>`;
+}
+function viewFreeBusyPreview(){
+  const link = state.shareWeekLink || buildShareWeekLink(state.calRef?new Date(state.calRef+'T12:00:00'):new Date());
+  const data = state.shareWeekData || buildWeekBusyData(state.calRef?new Date(state.calRef+'T12:00:00'):new Date());
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+    <h1>Share this week</h1>
+    <p>Send this link to anyone. They see when you are <b>busy</b> (classes & timed tasks) and which days look free — like a timetable snapshot.</p>
+  </div>
+  <div class="card">
+    <label style="font-size:.8rem;font-weight:600">Your link</label>
+    <textarea id="shareWeekLinkBox" readonly style="width:100%;min-height:72px;margin-top:6px;font-size:.8rem">${escapeHtml(link)}</textarea>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button type="button" class="btn" id="copyShareWeekBtn">Copy link</button>
+      <button type="button" class="btn ghost" id="nativeShareWeekBtn">Share…</button>
+    </div>
+  </div>
+  <div style="margin-top:14px">${viewFreeBusyPublic(data)}</div>`;
+}
+
+
 function viewCalendar(){
   const mode=state.calMode||'list';
   const ref=new Date(state.calRef+'T00:00:00');
@@ -6461,6 +6653,7 @@ function viewCalendar(){
     <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">Download SnapBack’s calendar as .ics and open it in Google/Apple/Outlook so it syncs to your watch.</p>
     <button class="btn" id="exportIcsBtn2">Export calendar file ↓</button>
     <button class="btn ghost sm" id="exportWeekGridBtn" style="margin-left:8px">Week grid ↓</button>
+    <button class="btn" id="shareFreeBusyBtn" style="margin-left:8px">Share free/busy link</button>
   </div>
 
   `;
@@ -7312,6 +7505,7 @@ function parseTimetableText(raw){
 
 function viewSemester(){
   const days=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  /* share btn injected in template below */
   const classesByDay = days.map((d,i)=>({
     name:d,
     items: state.classes.filter(c=>c.day===i).sort((a,b)=>a.start.localeCompare(b.start))
@@ -7320,6 +7514,7 @@ function viewSemester(){
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Your class timetable</div>
+    <p style="margin-top:8px"><button type="button" class="btn sm" id="shareFreeBusyBtn2">Share free/busy week link</button></p>
     <h1>Calendar</h1>
     <p>Your master schedule — classes, study, workouts, appointments. Everything appears on Your Schedule. Use Quick add for several items, or Add to schedule for one item with more detail.</p>
   </div>
@@ -9223,6 +9418,8 @@ function wireView(){
     });
   }
 
+  if(state.view==='freebusyPreview') return viewFreeBusyPreview();
+  if(state.view==='freebusy') return viewFreeBusyPublic(state.freeBusyPublic||parseFreeBusyFromHash());
   if(state.view==='calendar'){
     document.getElementById('calPrev').addEventListener('click', ()=>{
       const d=new Date(state.calRef+'T00:00:00');
@@ -9436,6 +9633,20 @@ function wireView(){
       catch(e){ const st=document.getElementById('ttOcrStatus'); if(st) st.textContent='OCR failed: '+(e.message||e)+'. Paste text instead if needed.'; }
       ttOcrBtn.disabled=false;
     });
+    const shareFb=document.getElementById('shareFreeBusyBtn');
+    if(shareFb) shareFb.addEventListener('click', ()=>shareWeekFreeBusy());
+    const shareFb2=document.getElementById('shareFreeBusyBtn2');
+    if(shareFb2) shareFb2.addEventListener('click', ()=>shareWeekFreeBusy());
+    const copySw=document.getElementById('copyShareWeekBtn');
+    if(copySw) copySw.addEventListener('click', async()=>{
+      const box=document.getElementById('shareWeekLinkBox');
+      const val=box?box.value:(state.shareWeekLink||'');
+      try{ await navigator.clipboard.writeText(val); showAppMessage('Copied','Link copied.'); }
+      catch(e){ if(box) box.select(); }
+    });
+    const natSw=document.getElementById('nativeShareWeekBtn');
+    if(natSw) natSw.addEventListener('click', ()=>shareWeekFreeBusy());
+
     const ttParseBtn=document.getElementById('ttParseBtn');
     if(ttParseBtn) ttParseBtn.addEventListener('click', ()=>{
       const raw=document.getElementById('ttPaste')?.value||'';
