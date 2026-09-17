@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="216">
+<meta name="snapback-build" content="219">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1086,16 +1086,8 @@ function defaultState(){
     moneyMonth: todayStr().slice(0,7),
     selectedDay: todayStr(),
     cheeseTaskId:null,
-    tasks:[
-      {id:1,title:'Read chapter 3 & take notes',notes:'',date:todayStr(),time:'18:00',priority:'medium',urgent:true,important:true,tier:'must',frog:false,chunks:[],pomodoros:0,done:false},
-      {id:2,title:'Start research paper outline',notes:'',date:'',time:'',priority:'high',urgent:false,important:true,tier:'could',frog:false,chunks:[
-        {id:1,text:'Pick a topic',done:true},{id:2,text:'Find 3 sources',done:false},{id:3,text:'Write thesis sentence',done:false}
-      ],pomodoros:0,done:false}
-    ],
-    classes:[
-      {id:1,title:'Intro Psychology',scope:'semester',format:'in-person',day:0,start:'09:00',end:'10:15',room:'Hall B'},
-      {id:2,title:'Statistics Lab',scope:'semester',format:'in-person',day:2,start:'13:00',end:'15:00',room:'Lab 2'}
-    ],
+    tasks:[],
+    classes:[],
     studyBlocks:[],
     money:[],
     playlist:[],
@@ -4728,10 +4720,14 @@ function authStatusHtml(){
       return '<div style="padding:12px;border-radius:12px;background:var(--pine-soft);margin-bottom:12px">'
         +'<div style="font-weight:700">Signed in locally</div>'
         +'<div style="font-size:.85rem">'+escapeHtml(la.username)+'</div>'
-        +'<div style="font-size:.78rem;color:var(--muted);margin-top:4px">Simple account on this device. Log out from Profile to switch user.</div></div>';
+        +'<div style="font-size:.78rem;color:var(--muted);margin-top:4px">Simple account on this device only.</div>'
+        +'<p style="font-size:.85rem;color:var(--muted);margin:12px 0 8px">For private cloud sync across devices, sign in with Google:</p>'
+        +'<button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google</button>'
+        +'<button type="button" class="btn ghost sm" id="localSignOutBtn" style="width:100%;margin-top:8px">Log out local account</button>'
+        +'</div>';
     }
     if(_currentUser){
-      const name = escapeHtml(_currentUser.displayName||'Student');
+      const name = escapeHtml(_currentUser.displayName||'User');
       const email = escapeHtml(_currentUser.email||'');
       return '<div style="padding:12px;border-radius:12px;background:var(--pine-soft);margin-bottom:12px">'
         + '<div style="font-weight:700">Signed in</div>'
@@ -4909,7 +4905,7 @@ function wireLoginScreen(){
   const createBtn = document.getElementById('loginCreateBtn');
   const guest=document.getElementById('loginGuestBtn');
   if(guest) guest.addEventListener('click', ()=>{
-    const name=(state.profile&&state.profile.name)||'Student';
+    const name=(state.profile&&state.profile.name)||'';
     if(!getLocalAuth()){
       setLocalAuth({ username: name, passHash: simpleHash('device:'+name.toLowerCase()), created: Date.now(), deviceOnly:true });
     }
@@ -5643,7 +5639,7 @@ function viewToday(){
   ${installBannerHtml()}
   <div class="pagehead">
     <div class="eyebrow">${new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</div>
-    <h1>${state.profile&&state.profile.name ? escapeHtml(state.profile.name)+"\u2019s day" : "Today"}</h1>
+    <h1>${(function(){ const n=(state.profile&&state.profile.name||'').trim(); if(!n||n.toLowerCase()==='student') return 'Today'; return escapeHtml(n)+'\u2019s day'; })()}</h1>
     <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px">
       <button class="btn ghost sm" id="todayAiPrioritize">✨ Ask AI what matters today</button>
     </div>
@@ -9070,7 +9066,7 @@ function buildStatusUpdateText(){
     const wantDone=!(document.getElementById('shareSelDone')) || document.getElementById('shareSelDone').checked;
     const wantOpen=!(document.getElementById('shareSelOpen')) || document.getElementById('shareSelOpen').checked;
     const wantClasses=document.getElementById('shareSelClasses') && document.getElementById('shareSelClasses').checked;
-    const name=(state.profile&&state.profile.name)||'Student';
+    const name=(state.profile&&state.profile.name)||'';
     const lines=[];
     lines.push('SnapBack update — '+name);
     lines.push('Range: '+from+' to '+to);
@@ -10522,6 +10518,13 @@ function wireView(){
       try{ stopAlarmRamp(); }catch(e){}
       try{ playAlarmRamp(1.2); }catch(e){}
     });
+    const localOut=document.getElementById('localSignOutBtn');
+    if(localOut) localOut.addEventListener('click', function(){
+      try{ setSessionLoggedIn(false, false); }catch(e){}
+      try{ showAppMessage('Logged out', 'You can sign in with Google or create a local account.'); }catch(e){}
+      try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+    });
+
     const saveWake=document.getElementById('saveWakeBtn');
     if(saveWake) saveWake.addEventListener('click', function(e){
       e.preventDefault(); e.stopPropagation();
