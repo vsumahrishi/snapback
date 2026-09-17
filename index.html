@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="209">
+<meta name="snapback-build" content="210">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -6442,34 +6442,34 @@ function buildShareWeekLink(weekStart){
   // Hash route so GitHub Pages static host works without server
   return base + '#/freebusy/' + payload;
 }
-async function shareWeekFreeBusy(){
+function shareWeekFreeBusy(){
   try{
     const ref = state.calRef ? new Date(state.calRef+'T12:00:00') : new Date();
     const link = buildShareWeekLink(ref);
     state.shareWeekLink = link;
     state.shareWeekData = buildWeekBusyData(ref);
-    // Prefer native share
-    if(navigator.share){
-      try{
-        await navigator.share({
-          title: 'My busy / free week',
-          text: 'When I am busy this week (SnapBack):',
-          url: link
-        });
-        showAppMessage('Shared', 'Your free/busy week link was shared.');
-        return;
-      }catch(e){
-        if(e && e.name==='AbortError') return;
-      }
-    }
-    try{ await navigator.clipboard.writeText(link); }catch(e){}
     state.view = 'freebusyPreview';
-    persistRender();
-    showAppMessage('Share link ready', 'Copy or share the link. Anyone can open it without logging in.');
+    try{ persistRender(); }catch(e){ try{ render(); }catch(e2){ console.warn(e2); } }
+    // Copy in background (don't block UI)
+    try{
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(link).then(function(){
+          showAppMessage('Share Calendar', 'Link copied. Send it to anyone — they can see your busy/free week.');
+        }).catch(function(){
+          showAppMessage('Share Calendar', 'Copy the link on this screen and send it to anyone.');
+        });
+      } else {
+        showAppMessage('Share Calendar', 'Copy the link on this screen and send it to anyone.');
+      }
+    }catch(e){
+      showAppMessage('Share Calendar', 'Copy the link on this screen and send it to anyone.');
+    }
   }catch(e){
+    console.warn(e);
     showAppMessage('Share failed', String(e&&e.message||e));
   }
 }
+
 function parseFreeBusyFromHash(){
   try{
     const h = String(location.hash||'');
@@ -6512,8 +6512,8 @@ function viewFreeBusyPreview(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <h1>Share this week</h1>
-    <p>Send this link to anyone. They see when you are <b>busy</b> (classes & timed tasks) and which days look free — like a timetable snapshot.</p>
+    <h1>Share Calendar</h1>
+    <p>Send this link to anyone (chat, email, WhatsApp). They open it and see your <b>busy</b> times and free gaps for the week — no SnapBack login needed.</p>
   </div>
   <div class="card">
     <label style="font-size:.8rem;font-weight:600">Your link</label>
@@ -6653,7 +6653,7 @@ function viewCalendar(){
     <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">Download SnapBack’s calendar as .ics and open it in Google/Apple/Outlook so it syncs to your watch.</p>
     <button class="btn" id="exportIcsBtn2">Export calendar file ↓</button>
     <button class="btn ghost sm" id="exportWeekGridBtn" style="margin-left:8px">Week grid ↓</button>
-    <button class="btn" id="shareFreeBusyBtn" style="margin-left:8px">Share free/busy link</button>
+    <button class="btn" id="shareFreeBusyBtn" data-share-calendar="1" style="margin-left:8px">Share Calendar</button>
   </div>
 
   `;
@@ -7514,7 +7514,7 @@ function viewSemester(){
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Your class timetable</div>
-    <p style="margin-top:8px"><button type="button" class="btn sm" id="shareFreeBusyBtn2">Share free/busy week link</button></p>
+    <p style="margin-top:8px"><button type="button" class="btn sm" id="shareFreeBusyBtn2" data-share-calendar="1">Share Calendar</button></p>
     <h1>Calendar</h1>
     <p>Your master schedule — classes, study, workouts, appointments. Everything appears on Your Schedule. Use Quick add for several items, or Add to schedule for one item with more detail.</p>
   </div>
@@ -8930,6 +8930,16 @@ function getShareMessage(){
 
 function wireView(){
   try{ consumePendingNudge(); }catch(e){}
+  // Share Calendar — delegated so it always works
+  if(!window._shareCalDelegated){
+    window._shareCalDelegated = true;
+    document.addEventListener('click', function(ev){
+      const t = ev.target && ev.target.closest && ev.target.closest('[data-share-calendar],#shareFreeBusyBtn,#shareFreeBusyBtn2');
+      if(!t) return;
+      ev.preventDefault();
+      try{ shareWeekFreeBusy(); }catch(err){ console.warn(err); }
+    });
+  }
   const main=document.getElementById('main');
   if(!main) return;
   main.querySelectorAll('[data-action]').forEach(el=>{
