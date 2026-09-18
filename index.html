@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="219">
+<meta name="snapback-build" content="222">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4656,7 +4656,7 @@ function startAuthListener(){
         photoURL: user.photoURL||''
       };
       if(!state.profile) state.profile={};
-      if(_currentUser.displayName && !state.profile.name) state.profile.name = _currentUser.displayName;
+      // Do not overwrite profile.name — person enters their preferred name in Settings
       if(_currentUser.email) state.profile.email = _currentUser.email;
       setSessionLoggedIn(true, true);
       saveState();
@@ -4669,27 +4669,65 @@ function startAuthListener(){
     try{ if(state.view==='settings') persistRender(); else render(); }catch(e){}
   });
 }
+let _googleSignInBusy=false;
 async function signInWithGoogle(){
+  if(_googleSignInBusy) return;
   initFirebase();
   if(!_auth){
-    showAppMessage('Firebase not ready', 'Paste your Firebase config in Settings first (same as before), then try Sign in again.');
+    showAppMessage('Firebase not ready', 'Paste your Firebase config in Settings first, then try Sign in again.');
     return;
   }
+  _googleSignInBusy=true;
   try{
     const provider = new firebase.auth.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
-    // popup works on desktop; redirect is safer on some mobile browsers
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'');
+    let result=null;
     if(isMobile){
       await _auth.signInWithRedirect(provider);
     } else {
-      await _auth.signInWithPopup(provider);
+      result = await _auth.signInWithPopup(provider);
     }
-    setSessionLoggedIn(true, true);
+    const user = (result && result.user) || (_auth && _auth.currentUser);
+    if(user){
+      _currentUser = {
+        uid: user.uid,
+        email: user.email||'',
+        displayName: user.displayName||'',
+        photoURL: user.photoURL||''
+      };
+      if(!state.profile) state.profile={};
+      // Keep name for the person to enter; only store email for account status
+      if(_currentUser.email) state.profile.email = _currentUser.email;
+      setSessionLoggedIn(true, true);
+      try{ saveState(); }catch(e){}
+      showAppMessage('Signed in with Google', (_currentUser.email||'Google account')+' connected. Enter your name under Your profile if you like.');
+      try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+    }
   }catch(e){
     console.warn(e);
-    showAppMessage('Sign-in failed', (e && e.message) ? e.message : 'Enable Google sign-in in Firebase Console and add this site to Authorized domains.');
-    throw e;
+    const code = e && e.code;
+    // Conflicting popup: if already signed in, treat as OK
+    if(code==='auth/cancelled-popup-request' || code==='auth/popup-closed-by-user'){
+      const user = _auth && _auth.currentUser;
+      if(user){
+        _currentUser = { uid:user.uid, email:user.email||'', displayName:user.displayName||'', photoURL:user.photoURL||'' };
+        if(!state.profile) state.profile={};
+        if(_currentUser.email) state.profile.email = _currentUser.email;
+        setSessionLoggedIn(true, true);
+        try{ saveState(); }catch(err){}
+        try{ persistRender(); }catch(err){}
+        showAppMessage('Signed in with Google', _currentUser.email||'Google account');
+        return;
+      }
+      if(code==='auth/popup-closed-by-user'){
+        showAppMessage('Sign-in cancelled', 'The Google window was closed. Tap Sign in with Google again.');
+        return;
+      }
+    }
+    showAppMessage('Sign-in failed', (e && e.message) ? e.message : 'Check Google sign-in is enabled and this site is an Authorized domain.');
+  }finally{
+    _googleSignInBusy=false;
   }
 }
 async function completeRedirectSignIn(){
@@ -4715,32 +4753,34 @@ async function signOutUser(){
 }
 function authStatusHtml(){
   try {
+    // Prefer live Firebase user
+    try{
+      if(!_currentUser && typeof _auth!=='undefined' && _auth && _auth.currentUser){
+        const u=_auth.currentUser;
+        _currentUser={ uid:u.uid, email:u.email||'', displayName:u.displayName||'', photoURL:u.photoURL||'' };
+      }
+    }catch(e){}
     const la = getLocalAuth();
     if(!_currentUser && la && la.username && getSessionLoggedIn()){
       return '<div style="padding:12px;border-radius:12px;background:var(--pine-soft);margin-bottom:12px">'
-        +'<div style="font-weight:700">Signed in locally</div>'
-        +'<div style="font-size:.85rem">'+escapeHtml(la.username)+'</div>'
-        +'<div style="font-size:.78rem;color:var(--muted);margin-top:4px">Simple account on this device only.</div>'
-        +'<p style="font-size:.85rem;color:var(--muted);margin:12px 0 8px">For private cloud sync across devices, sign in with Google:</p>'
-        +'<button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google</button>'
-        +'<button type="button" class="btn ghost sm" id="localSignOutBtn" style="width:100%;margin-top:8px">Log out local account</button>'
+        +'<div style="font-weight:700">Signed in on this device only</div>'
+        +'<div style="font-size:.85rem;margin-top:4px">Local login: <b>'+escapeHtml(la.username)+'</b></div>'
+        +'<div style="font-size:.78rem;color:var(--muted);margin-top:4px">Not using Google. Use Sign in with Google below for Gmail login.</div>'
+        +'<button type="button" class="btn ghost sm" id="localSignOutBtn" style="width:100%;margin-top:10px">Log out local account</button>'
         +'</div>';
     }
     if(_currentUser){
-      const name = escapeHtml(_currentUser.displayName||'User');
-      const email = escapeHtml(_currentUser.email||'');
+      const email = escapeHtml(_currentUser.email||state.profile&&state.profile.email||'');
       return '<div style="padding:12px;border-radius:12px;background:var(--pine-soft);margin-bottom:12px">'
-        + '<div style="font-weight:700">Signed in</div>'
-        + '<div style="font-size:.9rem;margin-top:4px">' + name + '</div>'
-        + '<div style="font-size:.8rem;color:var(--muted)">' + email + '</div>'
-        + '<p style="font-size:.8rem;color:var(--muted);margin:8px 0 0">Your data is private to this Google account.</p>'
-        + '<button type="button" class="btn ghost sm" id="googleSignOutBtn" style="margin-top:10px;width:100%">Sign out</button>'
+        + '<div style="font-weight:700;font-size:1rem">Signed in with Google</div>'
+        + (email ? '<div style="font-size:.9rem;margin-top:6px">Gmail: <b>' + email + '</b></div>' : '<div style="font-size:.85rem;margin-top:6px">Google account connected</div>')
+        + '<p style="font-size:.8rem;color:var(--muted);margin:8px 0 0">Your name is set under Your profile below — not from Google.</p>'
+        + '<button type="button" class="btn ghost sm" id="googleSignOutBtn" style="margin-top:10px;width:100%">Sign out of Google</button>'
         + '</div>';
     }
     return '<div style="padding:12px;border-radius:12px;border:1px solid var(--line);margin-bottom:12px">'
-      + '<div style="font-weight:700;margin-bottom:6px">Account (recommended)</div>'
-      + '<p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Sign in with Google so only you can open your tasks — even if someone else installs the APK.</p>'
-      + '<button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google</button>'
+      + '<div style="font-weight:700;margin-bottom:6px">Not signed in with Google</div>'
+      + '<p style="font-size:.85rem;color:var(--muted);margin:0">Use the button below to sign in with Google.</p>'
       + '</div>';
   } catch(e){
     return '<div class="card"><p>Account section unavailable.</p></div>';
@@ -8841,6 +8881,7 @@ function viewSettings(){
         <div style="font-size:.78rem;color:var(--muted);margin-top:6px">${L('audienceHint')}</div>
       </div>
       <div class="field" style="margin-top:10px"><label>Your name</label><input id="profileName" placeholder="Your name" value="${escapeHtml((state.profile&&state.profile.name)||'')}"></div>
+      ${(state.profile&&state.profile.email)?`<p style="font-size:.85rem;color:var(--muted);margin:6px 0 0">Google: <b>${escapeHtml(state.profile.email)}</b></p>`:''}
       <div class="row" style="margin-top:8px">
         <div class="field"><label>${L('grade')}</label><input id="profileGrade" placeholder="${L('gradePh')}" value="${escapeHtml((state.profile&&state.profile.grade)||'')}"></div>
         <div class="field"><label>School / college</label><input id="profileSchool" placeholder="Optional" value="${escapeHtml((state.profile&&state.profile.school)||'')}"></div>
@@ -8886,10 +8927,14 @@ function viewSettings(){
     <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
       <h3 style="margin:0 0 6px">Account</h3>
       ${authStatusHtml()}
-      <details style="margin-top:8px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Advanced: Google sign-in</summary><div class="field"><label>Firebase config</label>
+      <div style="margin-top:12px">
+        <button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google</button>
+        <p style="font-size:.78rem;color:var(--muted);margin:8px 0 0">Use the same Gmail on laptop and phone so your data stays private to you.</p>
+      </div>
+      <details style="margin-top:12px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Advanced: Firebase config</summary><div class="field"><label>Firebase config</label>
         <textarea id="fbConfigInput" rows="4" placeholder='{ "apiKey": "...", "projectId": "...", ... }' style="width:100%;font-size:.75rem"></textarea>
       </div>
-      <p style="font-size:.78rem;color:var(--muted);margin:8px 0">One-time setup for the school project. 1) Paste config once → Save. 2) Sign in with Google on laptop and phone. Same Google account = same data. Firebase Console must have Google sign-in enabled.</p>
+      <p style="font-size:.78rem;color:var(--muted);margin:8px 0">Paste config once → Save &amp; start live sync. Firebase Console must have Google sign-in enabled.</p>
       <details style="margin-top:10px">
         <summary style="cursor:pointer;font-weight:700;font-size:.9rem">Advanced: private sync code (only if not using Google sign-in)</summary>
         <p style="font-size:.8rem;color:var(--muted)">Prefer Sign in with Google above. Use a private code only if Google sign-in is not available — same code on laptop and phone.</p>
@@ -10491,17 +10536,19 @@ function wireView(){
     const imp=document.getElementById('importBackupInput'); if(imp) imp.addEventListener('change', e=>{ if(e.target.files[0]) importBackupFile(e.target.files[0]); });
     
     const gIn=document.getElementById('googleSignInBtn');
-    if(gIn) gIn.addEventListener('click', ()=>{
-      const raw=(document.getElementById('fbConfigInput')?.value||'').trim();
-      if(raw){
-        try{ setFirebaseConfig(parseFirebaseConfigText(raw)); }catch(e){}
-      }
-      if(!getFirebaseConfig()){
-        showAppMessage('Config needed once', 'Paste Firebase config above, then tap Sign in with Google.');
-        return;
-      }
-      signInWithGoogle();
-    });
+    if(gIn){
+      gIn.onclick = function(){
+        const raw=(document.getElementById('fbConfigInput')?.value||'').trim();
+        if(raw){
+          try{ setFirebaseConfig(parseFirebaseConfigText(raw)); }catch(e){}
+        }
+        if(!getFirebaseConfig()){
+          showAppMessage('Config needed once', 'Paste Firebase config above, then tap Sign in with Google.');
+          return;
+        }
+        signInWithGoogle();
+      };
+    }
     const gOut=document.getElementById('googleSignOutBtn');
     if(gOut) gOut.addEventListener('click', ()=>signOutUser());
 
