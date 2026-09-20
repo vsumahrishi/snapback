@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="223">
+<meta name="snapback-build" content="224">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4551,20 +4551,13 @@ function parseFirebaseConfigText(raw){
   if(!cfg.apiKey || !cfg.projectId) throw new Error('need apiKey and projectId');
   return cfg;
 }
-/** Built-in Firebase project for SnapBack (developer project). Users do not need to paste config. */
-const DEFAULT_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyCkgor8Rx3aXGQVBvJfoHOBf2OhSihatA",
-  authDomain: "snapback-2697b.firebaseapp.com",
-  projectId: "snapback-2697b",
-  storageBucket: "snapback-2697b.firebasestorage.app",
-  messagingSenderId: "108000000000",
-  appId: "1:108000000000:web:default"
-};
+/** Set this once when deploying (full Firebase web config) so students never paste. Until then null. */
+let DEFAULT_FIREBASE_CONFIG = null;
 function seedFirebaseConfigIfNeeded(){
   try{
-    const raw = localStorage.getItem('snapback_fb_config');
-    if(!raw){
-      localStorage.setItem('snapback_fb_config', JSON.stringify(DEFAULT_FIREBASE_CONFIG));
+    if(DEFAULT_FIREBASE_CONFIG && DEFAULT_FIREBASE_CONFIG.apiKey){
+      if(!localStorage.getItem('snapback_fb_config'))
+        localStorage.setItem('snapback_fb_config', JSON.stringify(DEFAULT_FIREBASE_CONFIG));
     }
   }catch(e){}
 }
@@ -4574,13 +4567,16 @@ function getFirebaseConfig(){
     const raw = localStorage.getItem('snapback_fb_config');
     if(raw){
       const parsed = JSON.parse(raw);
-      if(parsed && parsed.apiKey && parsed.projectId) return parsed;
+      if(parsed && parsed.apiKey && parsed.projectId && String(parsed.apiKey).length>20) return parsed;
     }
   } catch(e){}
-  return DEFAULT_FIREBASE_CONFIG;
+  if(DEFAULT_FIREBASE_CONFIG && DEFAULT_FIREBASE_CONFIG.apiKey) return DEFAULT_FIREBASE_CONFIG;
+  return null;
 }
 function setFirebaseConfig(cfg){
-  if(cfg && cfg.apiKey) localStorage.setItem('snapback_fb_config', JSON.stringify(cfg));
+  if(cfg && cfg.apiKey && cfg.projectId){
+    localStorage.setItem('snapback_fb_config', JSON.stringify(cfg));
+  }
 }
 function getSyncCode(){
   return (localStorage.getItem('snapback_sync_code')||'').trim().toUpperCase();
@@ -4870,6 +4866,29 @@ function needsLoginScreen(){
   if(typeof isPublicShareView==='function' && isPublicShareView()) return false;
   return !isLoggedIn();
 }
+function resetLocalPassword(username, recoveryPin, newPassword){
+  username = String(username||'').trim();
+  recoveryPin = String(recoveryPin||'').trim();
+  newPassword = String(newPassword||'');
+  const la = getLocalAuth();
+  if(!la || !la.username || la.username.toLowerCase()!==username.toLowerCase()){
+    showAppMessage('Not found', 'No local account with that username on this device.');
+    return false;
+  }
+  if(!la.recoveryHash){
+    showAppMessage('No recovery PIN', 'This account has no recovery PIN. Create a new account or use Google.');
+    return false;
+  }
+  if(la.recoveryHash !== simpleHash(recoveryPin+':'+username.toLowerCase()+':recover')){
+    showAppMessage('Wrong PIN', 'Recovery PIN does not match.');
+    return false;
+  }
+  if(newPassword.length < 4){ showAppMessage('Password', 'Use at least 4 characters.'); return false; }
+  la.passHash = simpleHash(newPassword+':'+username.toLowerCase());
+  setLocalAuth(la);
+  showAppMessage('Password updated', 'Sign in with your new password.');
+  return true;
+}
 function completeLocalLogin(username, remember){
   setSessionLoggedIn(true, !!remember);
   if(!state.profile) state.profile={};
@@ -4877,12 +4896,19 @@ function completeLocalLogin(username, remember){
   try{ saveState(); }catch(e){}
   try{ render(); }catch(e){}
 }
-function registerLocalAccount(username, password, remember){
+function registerLocalAccount(username, password, remember, recoveryPin){
   username = String(username||'').trim();
   password = String(password||'');
+  recoveryPin = String(recoveryPin||'').trim();
   if(username.length < 2){ showAppMessage('Username', 'Use at least 2 characters.'); return false; }
   if(password.length < 4){ showAppMessage('Password', 'Use at least 4 characters.'); return false; }
-  setLocalAuth({ username, passHash: simpleHash(password+':'+username.toLowerCase()), created: Date.now() });
+  if(recoveryPin.length < 4){ showAppMessage('Recovery PIN', 'Choose a 4+ digit PIN to reset password if forgotten.'); return false; }
+  setLocalAuth({
+    username,
+    passHash: simpleHash(password+':'+username.toLowerCase()),
+    recoveryHash: simpleHash(recoveryPin+':'+username.toLowerCase()+':recover'),
+    created: Date.now()
+  });
   completeLocalLogin(username, remember);
   showAppMessage('Account ready', 'You are signed in as '+username+'. Use the same username and password next time on this device.');
   return true;
@@ -4915,6 +4941,8 @@ function logoutSnapBack(){
 function viewLogin(){
   const la = getLocalAuth();
   const hasLocal = !!(la && la.username);
+  const fbSaved = getFirebaseConfig();
+  const fbText = fbSaved ? JSON.stringify(fbSaved, null, 2) : '';
   return `
   <div style="max-width:400px;margin:40px auto;padding:20px">
     <div style="text-align:center;margin-bottom:28px">
@@ -4924,15 +4952,24 @@ function viewLogin(){
     </div>
     <div class="card">
       <button type="button" class="btn" id="loginGoogleBtn" style="width:100%;margin-bottom:14px">Continue with Google (Gmail)</button>
-      <div style="text-align:center;font-size:.8rem;color:var(--muted);margin:8px 0">or</div>
+      <div style="text-align:center;font-size:.8rem;color:var(--muted);margin:8px 0">or username</div>
       <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="Username" value="${hasLocal?escapeHtml(la.username):''}"></div>
       <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="Password"></div>
+      <div class="field" id="loginPinField" style="${hasLocal?'display:none':''}"><label>Recovery PIN (forgot-password)</label><input id="loginRecoveryPin" type="password" inputmode="numeric" placeholder="4+ digits you will remember"></div>
       <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin:12px 0"><input type="checkbox" id="loginRemember" checked> Stay signed in</label>
       <button type="button" class="btn" id="loginLocalBtn" style="width:100%">${hasLocal?'Sign in':'Create account'}</button>
       ${hasLocal?'<button type="button" class="btn ghost sm" id="loginCreateBtn" style="width:100%;margin-top:8px">Create new account</button>':''}
-      <details style="margin-top:14px"><summary style="font-size:.75rem;color:var(--muted);cursor:pointer">Advanced: Google sign-in</summary>
-        <textarea id="loginFbConfig" rows="2" placeholder="Firebase config JSON" style="width:100%;font-size:.7rem;margin-top:6px"></textarea>
-        <button type="button" class="btn ghost sm" id="loginSaveFb" style="margin-top:6px">Save</button>
+      <details style="margin-top:14px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Forgot password?</summary>
+        <p style="font-size:.78rem;color:var(--muted);margin:8px 0">For username accounts with a Recovery PIN. Google users use Google account recovery.</p>
+        <div class="field"><label>Username</label><input id="resetUser" placeholder="Username"></div>
+        <div class="field"><label>Recovery PIN</label><input id="resetPin" type="password" inputmode="numeric"></div>
+        <div class="field"><label>New password</label><input id="resetPass" type="password"></div>
+        <button type="button" class="btn sm" id="resetPassBtn" style="margin-top:6px">Reset password</button>
+      </details>
+      <details style="margin-top:10px"><summary style="font-size:.75rem;color:var(--muted);cursor:pointer">Admin only: Firebase config</summary>
+        <p style="font-size:.72rem;color:var(--muted);margin:6px 0">Students should not need this. Paste full web config from Firebase Console if Google fails on this device.</p>
+        <textarea id="loginFbConfig" rows="4" style="width:100%;font-size:.7rem;margin-top:6px">${escapeHtml(fbText)}</textarea>
+        <button type="button" class="btn ghost sm" id="loginSaveFb" style="margin-top:6px">Save Firebase config</button>
       </details>
       <button type="button" class="btn ghost sm" id="loginGuestBtn" style="width:100%;margin-top:12px">Continue on this device</button>
     </div>
@@ -4942,10 +4979,13 @@ function wireLoginScreen(){
   const saveFb=document.getElementById('loginSaveFb');
   if(saveFb) saveFb.addEventListener('click', ()=>{
     const raw=(document.getElementById('loginFbConfig')?.value||'').trim();
-    if(!raw){ showAppMessage('Paste config', 'Paste the Firebase web config JSON first.'); return; }
+    if(!raw){ showAppMessage('Paste config', 'Paste the full Firebase web config JSON first.'); return; }
     try{
-      setFirebaseConfig(parseFirebaseConfigText(raw));
-      showAppMessage('Config saved', 'Now tap Sign in with Google.');
+      const cfg=parseFirebaseConfigText(raw);
+      setFirebaseConfig(cfg);
+      const box=document.getElementById('loginFbConfig');
+      if(box) box.value=JSON.stringify(cfg,null,2);
+      showAppMessage('Config saved', 'Stored on this device. Tap Continue with Google.');
     }catch(e){ showAppMessage('Invalid config', e.message||'Need valid JSON from Firebase console.'); }
   });
   const g = document.getElementById('loginGoogleBtn');
@@ -4955,7 +4995,7 @@ function wireLoginScreen(){
       try{ setFirebaseConfig(parseFirebaseConfigText(raw)); }catch(e){}
     }
     if(!getFirebaseConfig() || !getFirebaseConfig().apiKey){
-      showAppMessage('Google not set up yet', 'Firebase config is missing. Contact the app admin, or use username login below.');
+      showAppMessage('Google not set up', 'Admin must paste Firebase config once (Admin only section), or use username login.');
       return;
     }
     try{
@@ -4969,111 +5009,33 @@ function wireLoginScreen(){
   if(localBtn) localBtn.addEventListener('click', ()=>{
     const u = document.getElementById('loginUser')?.value||'';
     const p = document.getElementById('loginPass')?.value||'';
+    const pin = document.getElementById('loginRecoveryPin')?.value||'';
     const la = getLocalAuth();
-    if(la && la.username) loginLocalAccount(u,p,remember());
-    else registerLocalAccount(u,p,remember());
+    const creating = (localBtn.textContent||'').indexOf('Create')>=0;
+    if(la && la.username && !creating) loginLocalAccount(u,p,remember());
+    else registerLocalAccount(u,p,remember(), pin);
+  });
+  const resetBtn=document.getElementById('resetPassBtn');
+  if(resetBtn) resetBtn.addEventListener('click', ()=>{
+    resetLocalPassword(
+      document.getElementById('resetUser')?.value||'',
+      document.getElementById('resetPin')?.value||'',
+      document.getElementById('resetPass')?.value||''
+    );
   });
   const createBtn = document.getElementById('loginCreateBtn');
+  if(createBtn) createBtn.addEventListener('click', ()=>{
+    const pinField=document.getElementById('loginPinField');
+    if(pinField) pinField.style.display='';
+    if(localBtn) localBtn.textContent='Create account';
+    showAppMessage('New account', 'Enter username, password, and Recovery PIN, then Create account.');
+  });
   const guest=document.getElementById('loginGuestBtn');
   if(guest) guest.addEventListener('click', ()=>{
-    const name=(state.profile&&state.profile.name)||'';
-    if(!getLocalAuth()){
-      setLocalAuth({ username: name, passHash: simpleHash('device:'+name.toLowerCase()), created: Date.now(), deviceOnly:true });
-    }
-    completeLocalLogin(name, true);
-  });
-  if(createBtn) createBtn.addEventListener('click', ()=>{
-    const u = document.getElementById('loginUser')?.value||'';
-    const p = document.getElementById('loginPass')?.value||'';
-    registerLocalAccount(u,p,remember());
+    setSessionLoggedIn(true, true);
+    render();
   });
 }
-
-
-
-/* ============================================================
-   Guided tour (Next / Back / Skip)
-   ============================================================ */
-const TOUR_STEPS = [
-  {
-    view: 'today',
-    title: 'Welcome to SnapBack',
-    body: 'A calmer way through school and life tasks. Use <b>Next</b> / <b>Back</b> / <b>Skip</b>. Replay anytime: <b>Settings → Take a tour</b>.'
-  },
-  {
-    view: 'tasks',
-    title: 'Tasks — your list',
-    body: 'Add work with a due date and time. Search to find something. Completed items stay hidden until <b>Show completed tasks</b>. Mark <b>School</b> or <b>Personal</b> when you add a task.<br><br><b>Tie a technique to a task:</b> open the task’s menu (⋯) and pick a tool (e.g. Bite Size or Focus Pod), or open <b>Techniques</b> first and choose a tool — some tools ask which task to use.'
-  },
-  {
-    view: 'journal',
-    title: 'Journal',
-    body: 'Sticky notes for thoughts and worries — not a second to-do list. Park it here, then return when you have energy.'
-  },
-  {
-    view: 'plan',
-    title: 'Plan',
-    body: 'Hub for <b>Your Schedule</b>, class timetable, projects, and week planning. Use this when you need a map of the week, not only a list of tasks.'
-  },
-  {
-    view: 'calendar',
-    title: 'Your Schedule',
-    body: 'Week or month view: classes, deadlines, free time. Export a calendar file (.ics) for Google/Outlook if you want it outside SnapBack.'
-  },
-  {
-    view: 'techniques',
-    title: 'Techniques — what they are for',
-    body: 'Tools for when starting is hard. You can open a tool here, or attach one from a task.<br><br>• <b>This or That</b> — sort tasks into Do first / Schedule / Quick / Later<br>• <b>Bite Size</b> — one task → tiny steps (+ optional AI bites)<br>• <b>Focus Pod</b> — timed work/break sprints<br>• <b>Focus Plate</b> — limit today to 1 big, 3 medium, 5 small<br>• <b>Time Blocking</b> — put work on the clock for a day<br>• <b>Body Doubling</b> — structured “work with” ritual<br>• <b>Plan this week</b> — short list for this week only'
-  },
-  {
-    view: 'bitesize',
-    title: 'Bite Size — how to use it',
-    body: 'Pick a heavy task and break it into small bites you can finish soon. You can ask AI for chapter-style bites, keep the ones you want, then do <b>one bite</b> at a time. Best when the whole task feels too big to start.'
-  },
-  {
-    view: 'eisenhower',
-    title: 'This or That grid',
-    body: 'Put tasks into four boxes: do first, schedule, quick wins, or later. Helps when everything feels urgent. Add tasks into the boxes from this screen.'
-  },
-  {
-    view: 'rule135',
-    title: 'Focus Plate',
-    body: 'Cap today: <b>1</b> big, <b>3</b> medium, <b>5</b> small. When the plate is full, you stop adding. Reduces “I’ll just do one more thing” overload.'
-  },
-  {
-    view: 'timer',
-    title: 'Focus Pod (timer)',
-    body: 'Start a short timed sprint with breaks. Use alone or after you pick a task — so work has a clear start and end.'
-  },
-  {
-    view: 'bodydouble',
-    title: 'Body Doubling',
-    body: 'A simple ritual for working “with” structure (even solo): set up, work a stretch, check in. Use when you need company-style accountability without a real person in the room.'
-  },
-  {
-    view: 'studytools',
-    title: 'Study Tools',
-    body: 'Extra study supports beyond the main techniques. Open when you need a method for reading, revision, or staying with the material.'
-  },
-  {
-    view: 'challenges',
-    title: 'Challenges',
-    body: 'Optional guided paths that combine tools into small steps. Use when you want a ready-made structure, not only a blank list.'
-  },
-  {
-    view: 'settings',
-    title: 'Nudge & Settings',
-    body: 'Set your name and preferences. <b>Nudge</b> is the alarm: time, one-time date or weekdays, sound, then <b>Save Nudge</b>. On the phone, allow Alarms & reminders so it can ring when the app is closed.'
-  },
-  {
-    view: 'today',
-    title: 'You’re ready',
-    body: 'You do not need every technique every day. Typical path: add a <b>Task</b> → if stuck, open <b>Techniques</b> (or the task menu) → use <b>Bite Size</b> or <b>Focus Pod</b> → check <b>Schedule</b> for the week. Replay: <b>Settings → Take a tour</b>.'
-  }
-];
-
-
-
 
 function maybeOfferTour(){
   try{
@@ -8963,7 +8925,7 @@ function viewSettings(){
         <p style="font-size:.78rem;color:var(--muted);margin:8px 0 0">Use the same Gmail on laptop and phone so your data stays private to you.</p>
       </div>
       <details style="margin-top:12px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Advanced: Firebase config</summary><div class="field"><label>Firebase config</label>
-        <textarea id="fbConfigInput" rows="4" placeholder='{ "apiKey": "...", "projectId": "...", ... }' style="width:100%;font-size:.75rem"></textarea>
+        <textarea id="fbConfigInput" rows="5" placeholder='{ "apiKey": "...", "projectId": "..." }' style="width:100%;font-size:.75rem">${escapeHtml(getFirebaseConfig()?JSON.stringify(getFirebaseConfig(),null,2):'')}</textarea>
       </div>
       <p style="font-size:.78rem;color:var(--muted);margin:8px 0">Paste config once → Save &amp; start live sync. Firebase Console must have Google sign-in enabled.</p>
       <details style="margin-top:10px">
