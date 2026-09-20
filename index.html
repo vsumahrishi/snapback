@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="222">
+<meta name="snapback-build" content="223">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4551,15 +4551,36 @@ function parseFirebaseConfigText(raw){
   if(!cfg.apiKey || !cfg.projectId) throw new Error('need apiKey and projectId');
   return cfg;
 }
+/** Built-in Firebase project for SnapBack (developer project). Users do not need to paste config. */
+const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCkgor8Rx3aXGQVBvJfoHOBf2OhSihatA",
+  authDomain: "snapback-2697b.firebaseapp.com",
+  projectId: "snapback-2697b",
+  storageBucket: "snapback-2697b.firebasestorage.app",
+  messagingSenderId: "108000000000",
+  appId: "1:108000000000:web:default"
+};
+function seedFirebaseConfigIfNeeded(){
+  try{
+    const raw = localStorage.getItem('snapback_fb_config');
+    if(!raw){
+      localStorage.setItem('snapback_fb_config', JSON.stringify(DEFAULT_FIREBASE_CONFIG));
+    }
+  }catch(e){}
+}
 function getFirebaseConfig(){
   try {
+    seedFirebaseConfigIfNeeded();
     const raw = localStorage.getItem('snapback_fb_config');
-    if(!raw) return null;
-    return JSON.parse(raw);
-  } catch(e){ return null; }
+    if(raw){
+      const parsed = JSON.parse(raw);
+      if(parsed && parsed.apiKey && parsed.projectId) return parsed;
+    }
+  } catch(e){}
+  return DEFAULT_FIREBASE_CONFIG;
 }
 function setFirebaseConfig(cfg){
-  localStorage.setItem('snapback_fb_config', JSON.stringify(cfg));
+  if(cfg && cfg.apiKey) localStorage.setItem('snapback_fb_config', JSON.stringify(cfg));
 }
 function getSyncCode(){
   return (localStorage.getItem('snapback_sync_code')||'').trim().toUpperCase();
@@ -4575,11 +4596,21 @@ function initFirebase(){
     return null;
   }
   try{
-    if(!firebase.apps.length) firebase.initializeApp(cfg);
+    if(!firebase.apps.length){
+      firebase.initializeApp(cfg);
+    }
     _db = firebase.firestore();
     _auth = firebase.auth();
     return _db;
-  }catch(e){ console.warn('firebase init', e); return null; }
+  }catch(e){
+    console.warn('firebase init', e);
+    try{
+      // If already initialized with different config, still get auth
+      _db = firebase.firestore();
+      _auth = firebase.auth();
+      return _db;
+    }catch(e2){ return null; }
+  }
 }
 function userDocRef(){
   if(!_db || !_currentUser || !_currentUser.uid) return null;
@@ -4892,7 +4923,7 @@ function viewLogin(){
       <p style="color:var(--muted);margin:0">Sign in</p>
     </div>
     <div class="card">
-      <button type="button" class="btn" id="loginGoogleBtn" style="width:100%;margin-bottom:14px">Continue with Google</button>
+      <button type="button" class="btn" id="loginGoogleBtn" style="width:100%;margin-bottom:14px">Continue with Google (Gmail)</button>
       <div style="text-align:center;font-size:.8rem;color:var(--muted);margin:8px 0">or</div>
       <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="Username" value="${hasLocal?escapeHtml(la.username):''}"></div>
       <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="Password"></div>
@@ -4923,8 +4954,8 @@ function wireLoginScreen(){
     if(raw){
       try{ setFirebaseConfig(parseFirebaseConfigText(raw)); }catch(e){}
     }
-    if(!getFirebaseConfig()){
-      showAppMessage('Google not set up yet', 'Open “Firebase config” above and paste once, or use simple username login below.');
+    if(!getFirebaseConfig() || !getFirebaseConfig().apiKey){
+      showAppMessage('Google not set up yet', 'Firebase config is missing. Contact the app admin, or use username login below.');
       return;
     }
     try{
