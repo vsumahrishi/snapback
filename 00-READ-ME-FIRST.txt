@@ -1,1 +1,1 @@
-Build 209 — Share free/busy week link from Schedule. Replace site files.
+WEB v225 — Firebase Google login built in. Upload these files to GitHub Pages (replace old files). Hard refresh. Students: Continue with Google.

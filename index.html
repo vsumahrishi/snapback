@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="224">
+<meta name="snapback-build" content="225">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4551,8 +4551,15 @@ function parseFirebaseConfigText(raw){
   if(!cfg.apiKey || !cfg.projectId) throw new Error('need apiKey and projectId');
   return cfg;
 }
-/** Set this once when deploying (full Firebase web config) so students never paste. Until then null. */
-let DEFAULT_FIREBASE_CONFIG = null;
+/** Built-in Firebase config — students can Sign in with Google without pasting. */
+let DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCkgor8Rx3aXGQVBVqJfoHOBf2OhSihatA",
+  authDomain: "snapback-2697b.firebaseapp.com",
+  projectId: "snapback-2697b",
+  storageBucket: "snapback-2697b.firebasestorage.app",
+  messagingSenderId: "391437021013",
+  appId: "1:391437021013:web:c1d4d5b8a45d64d2db09dc"
+};
 function seedFirebaseConfigIfNeeded(){
   try{
     if(DEFAULT_FIREBASE_CONFIG && DEFAULT_FIREBASE_CONFIG.apiKey){
