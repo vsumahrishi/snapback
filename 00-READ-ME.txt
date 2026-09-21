@@ -1,0 +1,4 @@
+Website for students (built-in): https://vsumahrishi.github.io/snapback/
+1) Upload WEB zip files to the GitHub repo (root or docs as you already host).
+2) Enable Pages if needed: repo Settings → Pages → Deploy from branch main / root.
+3) Phone: copy www into project, npx cap sync android, Build APK.
