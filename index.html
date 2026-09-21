@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="226">
+<meta name="snapback-build" content="228">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4552,6 +4552,16 @@ function parseFirebaseConfigText(raw){
   return cfg;
 }
 /** Built-in Firebase config — students can Sign in with Google without pasting. */
+/** Website link shown in-app so students open web SnapBack without asking the teacher each time.
+ *  Change this to YOUR GitHub Pages URL once, then rebuild/upload. */
+let DEFAULT_PUBLIC_WEB_URL = 'https://github.com'; // replace with your real Pages URL e.g. https://username.github.io/snapback/
+function getPublicWebUrl(){
+  try{
+    const s = (state.settings && state.settings.publicWebUrl)||'';
+    if(s && String(s).indexOf('http')===0) return String(s).trim();
+  }catch(e){}
+  return DEFAULT_PUBLIC_WEB_URL;
+}
 let DEFAULT_FIREBASE_CONFIG = {
   apiKey: "AIzaSyCkgor8Rx3aXGQVBVqJfoHOBf2OhSihatA",
   authDomain: "snapback-2697b.firebaseapp.com",
@@ -4713,26 +4723,56 @@ async function signInWithGoogle(){
   }
   _googleSignInBusy=true;
   try{
-    const provider = new firebase.auth.GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
     const native = (typeof isCapacitorNative==='function' && isCapacitorNative());
-    let result=null;
-    // Capacitor/Android: avoid signInWithRedirect (returns to localhost and shows "refused to connect").
-    // Prefer popup inside the WebView; fall back to clear error + username login.
-    try{
-      result = await _auth.signInWithPopup(provider);
-    }catch(popErr){
-      console.warn('popup sign-in', popErr);
-      const code = popErr && popErr.code;
-      if(native && (code==='auth/popup-blocked' || code==='auth/operation-not-supported-in-this-environment' || code==='auth/cancelled-popup-request')){
+
+    // PHONE / Capacitor: use native Google Sign-In plugin (avoids localhost + missing initial state)
+    if(native){
+      const plugin = window.Capacitor && window.Capacitor.Plugins && (
+        window.Capacitor.Plugins.FirebaseAuthentication ||
+        window.Capacitor.Plugins.FirebaseAuth
+      );
+      if(!plugin || typeof plugin.signInWithGoogle!=='function'){
         showAppMessage(
-          'Google on phone',
-          'Google popup is blocked in this app window. Use username + password on the phone, or open the SnapBack website on the phone browser and sign in with Google there.'
+          'Phone Google setup needed',
+          'This APK was built without the Google Sign-In plugin. Rebuild with the steps in GOOGLE-PHONE-SETUP.txt, or use the SnapBack website in Chrome for Gmail (same account syncs).'
         );
         return;
       }
-      throw popErr;
+      const res = await plugin.signInWithGoogle();
+      // Plugin may return credential.idToken or result.credential
+      const idToken =
+        (res && res.credential && (res.credential.idToken||res.credential.id_token)) ||
+        (res && res.idToken) ||
+        (res && res.authentication && res.authentication.idToken) ||
+        null;
+      const accessToken =
+        (res && res.credential && res.credential.accessToken) ||
+        (res && res.authentication && res.authentication.accessToken) ||
+        null;
+      if(!idToken){
+        showAppMessage('Google sign-in', 'No token returned. Check SHA-1 and google-services.json in Firebase Android setup.');
+        return;
+      }
+      const credential = firebase.auth.GoogleAuthProvider.credential(idToken, accessToken||null);
+      const userCred = await _auth.signInWithCredential(credential);
+      const user = userCred && userCred.user;
+      if(user){
+        _currentUser = { uid:user.uid, email:user.email||'', displayName:user.displayName||'', photoURL:user.photoURL||'' };
+        if(!state.profile) state.profile={};
+        if(_currentUser.email) state.profile.email = _currentUser.email;
+        setSessionLoggedIn(true, true);
+        try{ saveState(); }catch(e){}
+        try{ startCloudSync(); pushCloudSync(); }catch(e){}
+        showAppMessage('Signed in with Google', _currentUser.email||'Connected');
+        try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+      }
+      return;
     }
+
+    // WEB (browser): popup only — do not use redirect (causes missing initial state)
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const result = await _auth.signInWithPopup(provider);
     const user = (result && result.user) || (_auth && _auth.currentUser);
     if(user){
       _currentUser = {
@@ -4752,33 +4792,29 @@ async function signInWithGoogle(){
   }catch(e){
     console.warn(e);
     const code = e && e.code;
-    if(code==='auth/cancelled-popup-request' || code==='auth/popup-closed-by-user'){
+    if(code==='auth/popup-closed-by-user' || code==='auth/cancelled-popup-request'){
       const user = _auth && _auth.currentUser;
       if(user){
         _currentUser = { uid:user.uid, email:user.email||'', displayName:user.displayName||'', photoURL:user.photoURL||'' };
         if(!state.profile) state.profile={};
         if(_currentUser.email) state.profile.email = _currentUser.email;
         setSessionLoggedIn(true, true);
-        try{ saveState(); }catch(err){}
-        try{ persistRender(); }catch(err){}
+        try{ saveState(); persistRender(); }catch(err){}
         showAppMessage('Signed in with Google', _currentUser.email||'Google account');
         return;
       }
-      if(code==='auth/popup-closed-by-user'){
-        showAppMessage('Sign-in cancelled', 'The Google window was closed. Try again, or use username login.');
-        return;
-      }
+      showAppMessage('Sign-in cancelled', 'Try again.');
+      return;
     }
     let msg = (e && e.message) ? e.message : 'Sign-in failed';
-    if(String(msg).indexOf('localhost')>=0 || String(msg).indexOf('network')>=0){
-      msg = 'Google sign-in could not return to the app. On the phone, use username + password, or open the SnapBack website in Chrome and sign in with Google there.';
+    if(/initial state|sessionStorage|localhost/i.test(String(msg))){
+      msg = 'Google could not finish in this window. On phone: rebuild APK with Google plugin (see setup file). Or open SnapBack in Chrome (website) and use Gmail there — same Gmail syncs.';
     }
     showAppMessage('Sign-in failed', msg);
   }finally{
     _googleSignInBusy=false;
   }
 }
-
 async function completeRedirectSignIn(){
   try{
     initFirebase();
@@ -4902,6 +4938,12 @@ function needsLoginScreen(){
   if(typeof isPublicShareView==='function' && isPublicShareView()) return false;
   return !isLoggedIn();
 }
+function clearLocalAccountOnDevice(){
+  try{ localStorage.removeItem('snapback_local_auth'); }catch(e){}
+  try{ setSessionLoggedIn(false, false); }catch(e){}
+  showAppMessage('Local login cleared', 'You can Create account (with Recovery PIN) or Continue with Google.');
+  try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+}
 function resetLocalPassword(username, recoveryPin, newPassword){
   username = String(username||'').trim();
   recoveryPin = String(recoveryPin||'').trim();
@@ -4991,17 +5033,26 @@ function viewLogin(){
       <div style="text-align:center;font-size:.8rem;color:var(--muted);margin:8px 0">or username</div>
       <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="Username" value="${hasLocal?escapeHtml(la.username):''}"></div>
       <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="Password"></div>
-      <div class="field" id="loginPinField" style="${hasLocal?'display:none':''}"><label>Recovery PIN (forgot-password)</label><input id="loginRecoveryPin" type="password" inputmode="numeric" placeholder="4+ digits you will remember"></div>
+      <div class="field" id="loginPinField"><label>Recovery PIN (required for new accounts)</label><input id="loginRecoveryPin" type="password" inputmode="numeric" placeholder="4+ digits — needed if you forget password"></div>
+      <p style="font-size:.72rem;color:var(--muted);margin:-4px 0 8px">Required when you <b>Create account</b>. Store it somewhere safe.</p>
       <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin:12px 0"><input type="checkbox" id="loginRemember" checked> Stay signed in</label>
       <button type="button" class="btn" id="loginLocalBtn" style="width:100%">${hasLocal?'Sign in':'Create account'}</button>
       ${hasLocal?'<button type="button" class="btn ghost sm" id="loginCreateBtn" style="width:100%;margin-top:8px">Create new account</button>':''}
       <details style="margin-top:14px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Forgot password?</summary>
-        <p style="font-size:.78rem;color:var(--muted);margin:8px 0">For username accounts with a Recovery PIN. Google users use Google account recovery.</p>
+        <p style="font-size:.78rem;color:var(--muted);margin:8px 0">If you set a <b>Recovery PIN</b> when creating the account, enter it below. Google users reset via Google, not here.</p>
         <div class="field"><label>Username</label><input id="resetUser" placeholder="Username"></div>
         <div class="field"><label>Recovery PIN</label><input id="resetPin" type="password" inputmode="numeric"></div>
         <div class="field"><label>New password</label><input id="resetPass" type="password"></div>
         <button type="button" class="btn sm" id="resetPassBtn" style="margin-top:6px">Reset password</button>
+        <p style="font-size:.78rem;color:var(--muted);margin:12px 0 6px">No Recovery PIN (older account)? You can erase <b>only the login on this device</b> and create a new account. App data on this device may remain until you clear site data.</p>
+        <button type="button" class="btn ghost sm" id="clearLocalAuthBtn" style="width:100%">Erase local login on this device</button>
       </details>
+      <div style="margin-top:16px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--input-bg)">
+        <div style="font-weight:700;font-size:.9rem;margin-bottom:6px">Website &amp; sync</div>
+        <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Use the same <b>Gmail</b> on phone and website so your tasks sync. Open the web app:</p>
+        <a id="openWebAppLink" href="${escapeHtml(getPublicWebUrl())}" target="_blank" rel="noopener" class="btn sm" style="display:inline-block;text-decoration:none;margin-bottom:8px">Open SnapBack website</a>
+        <p style="font-size:.72rem;color:var(--muted);margin:0;word-break:break-all">${escapeHtml(getPublicWebUrl())}</p>
+      </div>
       <details style="margin-top:10px"><summary style="font-size:.75rem;color:var(--muted);cursor:pointer">Admin only: Firebase config</summary>
         <p style="font-size:.72rem;color:var(--muted);margin:6px 0">Students should not need this. Paste full web config from Firebase Console if Google fails on this device.</p>
         <textarea id="loginFbConfig" rows="4" style="width:100%;font-size:.7rem;margin-top:6px">${escapeHtml(fbText)}</textarea>
@@ -5058,6 +5109,12 @@ function wireLoginScreen(){
       document.getElementById('resetPin')?.value||'',
       document.getElementById('resetPass')?.value||''
     );
+  });
+  const clearLoc=document.getElementById('clearLocalAuthBtn');
+  if(clearLoc) clearLoc.addEventListener('click', ()=>{
+    if(confirm('Erase username login on this device only? You can create a new account with a Recovery PIN, or use Google.')){
+      clearLocalAccountOnDevice();
+    }
   });
   const createBtn = document.getElementById('loginCreateBtn');
   if(createBtn) createBtn.addEventListener('click', ()=>{
@@ -8654,6 +8711,17 @@ function viewHelp(){
 
   <div class="card">
     <h3>How do I…</h3>
+    <details class="faqitem" open><summary>Open the website &amp; sync with Gmail</summary>
+      <p><b>Website:</b> Open <a href="${escapeHtml(getPublicWebUrl())}" target="_blank" rel="noopener">${escapeHtml(getPublicWebUrl())}</a> in Chrome or Edge.</p>
+      <p><b>Phone app:</b> Install the SnapBack APK from your teacher.</p>
+      <p><b>Sync:</b> Sign in with the <b>same Gmail</b> on website and phone. Your tasks stay under your Google account — private to you.</p>
+      <p><b>Username login:</b> Works on one device. Set a Recovery PIN when you create the account so you can reset a forgotten password.</p>
+    </details>
+    <details class="faqitem"><summary>Forgot password / no Recovery PIN</summary>
+      <p>If you created a Recovery PIN, use <b>Forgot password</b> on the sign-in screen.</p>
+      <p>If you never set a PIN (older login), use <b>Erase local login on this device</b> on the sign-in screen, then <b>Create account</b> with a new password and PIN, or use <b>Continue with Google</b>.</p>
+    </details>
+
     <details class="faqitem"><summary>Set a task with an alarm</summary>
       <p>Go to <b>Tasks</b> → fill Title, Due date/time → under <b>Alarm / Reminder</b> pick the time and how many days before you want alerts → <b>Add task</b>. Alerts work while the app/tab is open (browser rules). For phone alarms that fire when the app is closed, export the task to your phone calendar (📅 on the task card).</p>
     </details>
@@ -8951,6 +9019,15 @@ function viewSettings(){
         <button class="btn ghost" id="testWakeBtn" type="button">Preview</button>
         ${(state.wakeAlarm&&state.wakeAlarm.enabled)?`<button class="btn ghost" id="turnOffWakeBtn" type="button">Turn off</button>`:''}
       </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 6px">Website link (for students)</h3>
+      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Shown on the sign-in screen and Help so people can open the web app without asking you. Use your GitHub Pages URL.</p>
+      <div class="field"><label>SnapBack website URL</label>
+        <input id="publicWebUrlInput" placeholder="https://username.github.io/repo/" value="${escapeHtml((state.settings&&state.settings.publicWebUrl)||DEFAULT_PUBLIC_WEB_URL||'')}">
+      </div>
+      <button type="button" class="btn sm" id="savePublicWebUrlBtn" style="margin-top:8px">Save website link</button>
     </div>
 
     <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
@@ -10385,6 +10462,14 @@ function wireView(){
   if(state.view==='settings'){
     const gh=document.getElementById('gotoHelpBtn'); if(gh) gh.addEventListener('click', ()=>navigateTo('help'));
     const stBtn=document.getElementById('startTourBtn'); if(stBtn) stBtn.addEventListener('click', ()=>startTour(0));
+    const saveWeb=document.getElementById('savePublicWebUrlBtn');
+    if(saveWeb) saveWeb.addEventListener('click', ()=>{
+      if(!state.settings) state.settings={};
+      state.settings.publicWebUrl = (document.getElementById('publicWebUrlInput')?.value||'').trim();
+      try{ saveState(); }catch(e){}
+      showAppMessage('Saved', 'Website link updated on this device. To ship it to everyone, put the same URL in the app build (DEFAULT_PUBLIC_WEB_URL).');
+      persistRender();
+    });
     function setAudience(val){
       if(!state.profile) state.profile={};
       state.profile.audience = val;

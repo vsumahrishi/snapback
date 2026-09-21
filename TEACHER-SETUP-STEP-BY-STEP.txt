@@ -1,0 +1,92 @@
+SnapBack — Teacher setup (where to click)
+==========================================
+
+A. WEBSITE (students open in Chrome)
+------------------------------------
+1. On your laptop browser, open GitHub → your SnapBack website repository.
+2. Upload/replace files from SNAPBACK-WEB-v228.zip (index.html, sw.js, manifest, icons).
+3. GitHub → Settings → Pages → note your site URL
+   Example: https://yourname.github.io/snapback/
+4. In SnapBack (after update) → Settings → "Website link for students"
+   → paste that URL → Save website link
+5. ALSO tell Grok your exact Pages URL so it can be built into the next APK
+   for everyone automatically.
+
+Students open that URL → Continue with Google or Create account (+ Recovery PIN).
+
+
+B. YOUR LOCKED PHONE LOGIN (forgot password, no PIN)
+----------------------------------------------------
+1. Open SnapBack on the phone
+2. On sign-in screen open "Forgot password?"
+3. Tap "Erase local login on this device"
+4. Confirm
+5. Tap "Create account"
+6. Username + password + Recovery PIN (required) → Create account
+   OR Continue with Google
+
+
+C. PHONE APK WITH GMAIL (do in order)
+-------------------------------------
+
+C1. Firebase Android app
+1. Laptop browser → https://console.firebase.google.com
+2. Open project SnapBack
+3. Gear icon → Project settings
+4. Your apps → Add app → Android (skip if you already added app.snapback.study)
+5. Android package name type exactly: app.snapback.study
+6. Register
+7. Download google-services.json
+8. On the computer, put that file in:
+   [your project]\android\app\google-services.json
+   (folder that already has build.gradle inside "app")
+
+C2. SHA-1 fingerprint
+1. Open PowerShell on the laptop
+2. Paste this and press Enter:
+   keytool -list -v -keystore "%USERPROFILE%\.android\debug.keystore" -alias androiddebugkey -storepass android -keypass android
+3. Find the line SHA1: ...
+4. Copy the SHA1 value
+5. Firebase → Project settings → your Android app → Add fingerprint → paste → Save
+
+C3. Google plugin
+1. PowerShell
+2. Go to the folder that contains BOTH "www" and "android":
+   cd "C:\Users\vs_um\OneDrive\Uma Work\Transcend\ADHD Therapy Related\App\GROK\Latest\Final\snapback-capacitor\snapback-capacitor"
+   (Change path if your folder is different — look for folders named www and android together.)
+3. Run:
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+   npm install @capacitor-firebase/authentication
+   npx cap sync android
+4. If a red error appears, copy the full text to Grok.
+
+C4. New www files + build APK
+1. Unzip SNAPBACK-PHONE-v228.zip
+2. Open its "www" folder → Select all → Copy
+3. Open your project's "www" folder → Paste → Replace
+4. PowerShell (same project folder as C3):
+   npx cap sync android
+5. Open Android Studio → open the "android" folder of that project
+6. Menu Build → Build Bundle(s) / APK(s) → Build APK(s)
+7. When done, click locate → copy the APK to the phone / send to students
+
+C5. Student on phone
+1. Install APK
+2. Open SnapBack
+3. Continue with Google
+   OR Create account with Recovery PIN
+
+
+D. SYNC (no link-chasing)
+-------------------------
+- Same Gmail on website and phone = same data
+- Website address is on the sign-in screen ("Open SnapBack website") and in Help
+- Set your real GitHub Pages URL under Settings → Website link
+
+
+E. If npm or paths fail
+-----------------------
+Write down:
+- Exact folder path you used
+- Full error text
+Send to Grok.
