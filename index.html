@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="225">
+<meta name="snapback-build" content="226">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4708,19 +4708,30 @@ async function signInWithGoogle(){
   if(_googleSignInBusy) return;
   initFirebase();
   if(!_auth){
-    showAppMessage('Firebase not ready', 'Paste your Firebase config in Settings first, then try Sign in again.');
+    showAppMessage('Firebase not ready', 'Google login is not configured in this build.');
     return;
   }
   _googleSignInBusy=true;
   try{
     const provider = new firebase.auth.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent||'');
+    const native = (typeof isCapacitorNative==='function' && isCapacitorNative());
     let result=null;
-    if(isMobile){
-      await _auth.signInWithRedirect(provider);
-    } else {
+    // Capacitor/Android: avoid signInWithRedirect (returns to localhost and shows "refused to connect").
+    // Prefer popup inside the WebView; fall back to clear error + username login.
+    try{
       result = await _auth.signInWithPopup(provider);
+    }catch(popErr){
+      console.warn('popup sign-in', popErr);
+      const code = popErr && popErr.code;
+      if(native && (code==='auth/popup-blocked' || code==='auth/operation-not-supported-in-this-environment' || code==='auth/cancelled-popup-request')){
+        showAppMessage(
+          'Google on phone',
+          'Google popup is blocked in this app window. Use username + password on the phone, or open the SnapBack website on the phone browser and sign in with Google there.'
+        );
+        return;
+      }
+      throw popErr;
     }
     const user = (result && result.user) || (_auth && _auth.currentUser);
     if(user){
@@ -4731,17 +4742,16 @@ async function signInWithGoogle(){
         photoURL: user.photoURL||''
       };
       if(!state.profile) state.profile={};
-      // Keep name for the person to enter; only store email for account status
       if(_currentUser.email) state.profile.email = _currentUser.email;
       setSessionLoggedIn(true, true);
       try{ saveState(); }catch(e){}
-      showAppMessage('Signed in with Google', (_currentUser.email||'Google account')+' connected. Enter your name under Your profile if you like.');
+      try{ startCloudSync(); pushCloudSync(); }catch(e){}
+      showAppMessage('Signed in with Google', (_currentUser.email||'Google account')+' connected.');
       try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
     }
   }catch(e){
     console.warn(e);
     const code = e && e.code;
-    // Conflicting popup: if already signed in, treat as OK
     if(code==='auth/cancelled-popup-request' || code==='auth/popup-closed-by-user'){
       const user = _auth && _auth.currentUser;
       if(user){
@@ -4755,24 +4765,43 @@ async function signInWithGoogle(){
         return;
       }
       if(code==='auth/popup-closed-by-user'){
-        showAppMessage('Sign-in cancelled', 'The Google window was closed. Tap Sign in with Google again.');
+        showAppMessage('Sign-in cancelled', 'The Google window was closed. Try again, or use username login.');
         return;
       }
     }
-    showAppMessage('Sign-in failed', (e && e.message) ? e.message : 'Check Google sign-in is enabled and this site is an Authorized domain.');
+    let msg = (e && e.message) ? e.message : 'Sign-in failed';
+    if(String(msg).indexOf('localhost')>=0 || String(msg).indexOf('network')>=0){
+      msg = 'Google sign-in could not return to the app. On the phone, use username + password, or open the SnapBack website in Chrome and sign in with Google there.';
+    }
+    showAppMessage('Sign-in failed', msg);
   }finally{
     _googleSignInBusy=false;
   }
 }
+
 async function completeRedirectSignIn(){
   try{
     initFirebase();
     if(!_auth) return;
     const result = await _auth.getRedirectResult();
-    if(result && result.user){
-      showAppMessage('Signed in', result.user.email||result.user.displayName||'Welcome');
-    }
-  }catch(e){ console.warn('redirect result', e); }
+    const user = (result && result.user) || _auth.currentUser;
+    if(!user) return;
+    _currentUser = {
+      uid: user.uid,
+      email: user.email||'',
+      displayName: user.displayName||'',
+      photoURL: user.photoURL||''
+    };
+    if(!state.profile) state.profile={};
+    if(_currentUser.email) state.profile.email = _currentUser.email;
+    setSessionLoggedIn(true, true);
+    try{ saveState(); }catch(e){}
+    try{ startCloudSync(); pushCloudSync(); }catch(e){}
+    showAppMessage('Signed in with Google', _currentUser.email||'Google account connected');
+    try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+  }catch(e){
+    console.warn('redirect result', e);
+  }
 }
 async function signOutUser(){
   try{
