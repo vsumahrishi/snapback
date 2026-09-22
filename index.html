@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="229">
+<meta name="snapback-build" content="235">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1493,11 +1493,12 @@ function scheduleCampfirePops(ctx){
 }
 function startAmbient(){
   const ctx=ensureAudio(); if(!ctx) return;
+  try{ if(ctx.state==='suspended') ctx.resume(); }catch(e){}
   stopAmbientNode();
   const soundId = state.settings.adaptiveNoise ? pickAdaptiveColor() : state.settings.noiseColor;
 
   ambientGain=ctx.createGain();
-  ambientGain.gain.value=state.settings.ambientVolume;
+  ambientGain.gain.value=Math.max(0.2, state.settings.ambientVolume||0.35);
   ambientGain.connect(ctx.destination);
 
   if(soundId==='ocean'){
@@ -1670,11 +1671,21 @@ function modeLength(mode){
   return s.longBreakMin*60;
 }
 function startTimer(){
-  ensureAudio();
+  const ctx=ensureAudio();
+  try{ if(ctx && ctx.state==='suspended') ctx.resume(); }catch(e){}
   if(state.timer.mode==='work' && state.timer.remaining===state.timer.total){
     state.timer.distractionCount=0; state.timer.distractionSeconds=0;
   }
-  if(state.settings.ambientOn && state.settings.syncWithPomodoro && state.timer.mode==='work') startSoundscape();
+  // Auto-enable ambient for focus sessions if user expected sound
+  if(state.timer.mode==='work'){
+    if(state.settings.ambientVolume==null || state.settings.ambientVolume<0.05){
+      state.settings.ambientVolume = 0.35;
+    }
+    if(state.settings.syncWithPomodoro!==false){
+      state.settings.ambientOn = true;
+      try{ startSoundscape(); }catch(e){ console.warn(e); }
+    }
+  }
   state.timer.running=true;
   clearInterval(timerHandle);
   timerHandle=setInterval(tick,1000);
@@ -1817,19 +1828,66 @@ function quickAddTask(){
   input.value='';
   persistRender();
 }
+function normalizeTaskDate(raw){
+  if(raw==null) return '';
+  let s=String(raw).trim();
+  if(!s) return '';
+  // Already ISO yyyy-mm-dd
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // dd/mm/yyyy or dd-mm-yyyy
+  let m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if(m){
+    const d=m[1].padStart(2,'0'), mo=m[2].padStart(2,'0'), y=m[3];
+    return y+'-'+mo+'-'+d;
+  }
+  // mm/dd/yyyy (US)
+  m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  // Date parse fallback
+  const tms=Date.parse(s);
+  if(!isNaN(tms)){
+    const dt=new Date(tms);
+    if(!isNaN(dt.getTime())){
+      const y=dt.getFullYear(), mo=String(dt.getMonth()+1).padStart(2,'0'), d=String(dt.getDate()).padStart(2,'0');
+      return y+'-'+mo+'-'+d;
+    }
+  }
+  return s;
+}
+
 function addTask(){
-  const title=document.getElementById('newTitle').value.trim();
-  if(!title) return;
-  let date=(document.getElementById('newDate')&&document.getElementById('newDate').value)||'';
+  const titleEl=document.getElementById('newTitle');
+  const title=(titleEl && titleEl.value || '').trim();
+  if(!title){
+    showAppMessage('Title needed', 'Enter a task title first.');
+    return;
+  }
+  const dateEl=document.getElementById('newDate');
+  let date=normalizeTaskDate(dateEl && dateEl.value);
   let time=(document.getElementById('newTime')&&document.getElementById('newTime').value)||'';
-  const startDate=document.getElementById('newStartDate')?.value || '';
+  const startDate=normalizeTaskDate(document.getElementById('newStartDate')?.value || '');
   const startTime=document.getElementById('newStartTime')?.value || '';
   const priority=document.getElementById('newPriority')?.value || 'medium';
-  if(date){ const _y=parseInt(String(date).slice(0,4),10); if(!_y||_y<2020||_y>2035){ showAppMessage('Check the date','Year must be between 2020 and 2035.'); return; } }
+  // Soft year check — do not block save if format is odd
+  if(date){
+    const _y=parseInt(String(date).slice(0,4),10);
+    if(_y && (_y<2000 || _y>2100)){
+      showAppMessage('Check the date', 'Use a year between 2000 and 2100. Got: '+date);
+      return;
+    }
+    // If not yyyy-mm-dd after normalize, still save the raw string rather than drop the task
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){
+      console.warn('unusual date format', date);
+    }
+  }
   const reminderTime=document.getElementById('newReminderTime')?.value || time || '09:00';
   const leads=[];
   const dueDate = date;
-  const daysUntil = dueDate ? Math.round((new Date(dueDate+'T12:00:00') - new Date(todayStr()+'T12:00:00'))/86400000) : 99;
+  let daysUntil = 99;
+  try{
+    if(dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate)){
+      daysUntil = Math.round((new Date(dueDate+'T12:00:00') - new Date(todayStr()+'T12:00:00'))/86400000);
+    }
+  }catch(e){ daysUntil = 99; }
   if(daysUntil >= 7 && document.getElementById('newLead7')?.checked) leads.push(7);
   if(daysUntil >= 3 && document.getElementById('newLead3')?.checked) leads.push(3);
   if(daysUntil >= 1 && document.getElementById('newLead1')?.checked) leads.push(1);
@@ -1837,28 +1895,51 @@ function addTask(){
   if(!leads.length) leads.push(0);
   const id=uid();
   const taskContext=(document.getElementById('newContext')&&document.getElementById('newContext').value)||'school';
-  state.tasks.unshift({id,title,notes:'',date,time,priority,urgent:false,important:false,tier:'could',frog:false,context:taskContext,meetingUrl:'',reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{}});
+  const technique=(document.getElementById('newTechnique')&&document.getElementById('newTechnique').value)||'';
+  if(!Array.isArray(state.tasks)) state.tasks=[];
+  const taskObj={id,title,notes:'',date:date||'',time,priority,urgent:false,important:false,tier:'could',frog:false,context:taskContext,technique:technique,meetingUrl:'',reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{},created:Date.now()};
+  state.tasks.unshift(taskObj);
   state.pendingStrategyTaskId = id;
+  // Always show in list after add (Today filter hides future dates)
+  state.filter = 'all';
+  state.contextFilter = state.contextFilter || 'all';
   pushUndo({type:'add-task', id, label:'Task added — Undo'});
   try{
     if(date && (leads||[]).length){
       leads.forEach(daysBefore=>{
-        const d=new Date(date+'T12:00:00');
-        d.setDate(d.getDate()-daysBefore);
-        const [hh,mm]=(reminderTime||time||'09:00').split(':').map(Number);
-        d.setHours(hh||9, mm||0, 0, 0);
-        scheduleNativeNotification({
-          key:'task-'+id+'-'+daysBefore,
-          title: daysBefore===0 ? 'Task due today' : 'Task in '+daysBefore+' day(s)',
-          body: title,
-          when: d
-        });
+        try{
+          const d=new Date(date+'T12:00:00');
+          if(isNaN(d.getTime())) return;
+          d.setDate(d.getDate()-daysBefore);
+          const [hh,mm]=(reminderTime||time||'09:00').split(':').map(Number);
+          d.setHours(hh||9, mm||0, 0, 0);
+          scheduleNativeNotification({
+            key:'task-'+id+'-'+daysBefore,
+            title: daysBefore===0 ? 'Task due today' : 'Task in '+daysBefore+' day(s)',
+            body: title,
+            when: d
+          });
+        }catch(e1){}
       });
     }
   }catch(e){}
-  document.getElementById('newTitle').value='';
-  persistRender();
+  if(titleEl) titleEl.value='';
+  // Keep the chosen due date in the form so next add is easy; do not reset to today
+  try{ saveState(); }catch(e){}
+  try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+  const whenLabel = date ? ('Due '+date) : 'No due date';
+  showAppMessage('Task saved', title+' — '+whenLabel+'. Open Tasks → filter “All” if you do not see it.');
+  if(technique){
+    try{
+      state.cheeseTaskId = id;
+      state.timer = state.timer||{};
+      if(technique==='timer') state.timer.activeTaskId = id;
+      const map={bitesize:'bitesize',timer:'timer',eisenhower:'eisenhower',rule135:'rule135',timeblocking:'timeblocking',bodydouble:'bodydouble'};
+      if(map[technique]) setTimeout(()=>navigateTo(map[technique]), 400);
+    }catch(e){}
+  }
 }
+
 function toggleReminderLead(id, days){
   const t=findTask(id); if(!t) return;
   t.reminderLeads=t.reminderLeads||[];
@@ -1979,15 +2060,27 @@ function offerCelebration(){
 }
 
 
+function cancelTaskNotifications(taskId){
+  try{
+    if(typeof isNativeApp==='function' && !isNativeApp()) return;
+    const LN=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+    if(!LN) return;
+    const ids=[0,1,3,7].map(d=>({ id: notifIdFromKey('task-'+taskId+'-'+d) }));
+    LN.cancel({ notifications: ids });
+  }catch(e){ console.warn(e); }
+}
 function toggleDone(id){
   const t=findTask(id); if(!t) return;
   const wasDone=t.done;
   t.done=!t.done;
   if(t.done && !wasDone){
     state.stats.tasksCompletedTotal=(state.stats.tasksCompletedTotal||0)+1;
+    t.completedDate=todayStr();
     touchStreak();
-    // Celebrate after render so confetti sits on top of the updated UI
+    cancelTaskNotifications(id);
     setTimeout(()=>offerCelebration(), 80);
+  } else if(!t.done && wasDone){
+    try{ delete t.completedDate; }catch(e){}
   }
   persistRender();
 }
@@ -3217,8 +3310,8 @@ async function scheduleNativeNotification({key, title, body, when}){
     const { LocalNotifications } = window.Capacitor.Plugins;
     try {
       await LocalNotifications.createChannel({
-        id: 'snapback',
-        name: 'SnapBack Nudge',
+        id: 'snapback_alarm',
+        name: 'SnapBack Reminders',
         importance: 5,
         visibility: 1,
         sound: 'default',
@@ -3233,7 +3326,7 @@ async function scheduleNativeNotification({key, title, body, when}){
         title: title || 'SnapBack',
         body: body || '',
         schedule: { at: at, allowWhileIdle: true },
-        channelId: 'snapback',
+        channelId: 'snapback_alarm',
         sound: 'default',
         smallIcon: 'ic_stat_icon',
         largeIcon: 'ic_launcher',
@@ -3304,7 +3397,7 @@ function saveWakeAlarmFromForm(){
     }
   }catch(e){
     console.warn('saveWakeAlarmFromForm', e);
-    showAppMessage('Could not save Nudge', String(e&&e.message||e));
+    showAppMessage('Could not save alarm', String(e&&e.message||e));
   }
 }
 
@@ -3432,7 +3525,7 @@ async function scheduleNativeWakeAlarms(){
       const n = (res && (res.scheduled!=null)) ? res.scheduled : 0;
       if(res && res.canScheduleExactAlarms === false){
         try{
-          showAppMessage('Allow exact alarms', 'Phone Settings → Alarms & reminders → allow SnapBack. Then Save Nudge again.');
+          showAppMessage('Allow exact alarms', 'Phone Settings → Alarms & reminders → allow SnapBack. Then Save alarm again.');
           if(typeof plug.openExactAlarmSettings === 'function') await plug.openExactAlarmSettings();
         }catch(e){}
       }
@@ -4195,7 +4288,7 @@ function renderModal(){
             <div style="display:flex;flex-direction:column;gap:8px">
               <button class="btn" id="tmDone">${t.done?'Mark as not done':'Mark as done'}</button>
               <button class="btn ghost" id="tmResched">Reschedule…</button>
-              <button class="btn ghost" id="tmRemind">Nudge…</button>
+              <button class="btn ghost" id="tmRemind">Remind me…</button>
               <button class="btn ghost" id="tmAskAi">✨ Ask AI — I am stuck</button>
               <button class="btn ghost" id="tmPin">📌 Top of Mind</button>
               <button class="btn ghost" id="tmBurn">${t.backburner?'↩️ Bring back from Backburner':'🔥 Send to Backburner'}</button>
@@ -4217,9 +4310,15 @@ function renderModal(){
         if(e.target.id==='taskMenuOverlay') closeTaskMenu();
       });
       document.getElementById('tmDone').onclick=()=>{
+        const was=!!t.done;
         t.done=!t.done;
-        if(t.done) pushUndo({type:'toggle-done', id:t.id, was:false, label:'Marked done — Undo'});
+        if(t.done && !was){
+          t.completedDate=todayStr();
+          try{ cancelTaskNotifications(t.id); }catch(e){}
+          pushUndo({type:'toggle-done', id:t.id, was:false, label:'Marked done — Undo'});
+        }
         closeTaskMenu();
+        persistRender();
       };
       document.getElementById('tmFocus').onclick=()=>{ closeTaskMenu(); goFocusWithTask(t.id); };
       const tmFrog=document.getElementById('tmFrog');
@@ -4236,7 +4335,7 @@ function renderModal(){
       document.getElementById('tmResched').onclick=()=>{
         const box=document.getElementById('tmExtra');
         box.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:12px">
-          <div class="field"><label>Date</label><input type="date" id="tmNewDate" value="${t.date||''}" min="2020-01-01" max="2035-12-31"></div>
+          <div class="field"><label>Date</label><input type="date" id="tmNewDate" value="${t.date||''}" min="2000-01-01" max="2100-12-31"></div>
           <div class="field" style="margin-top:8px"><label>Time</label><input type="time" id="tmNewTime" value="${t.time||''}"></div>
           <button type="button" class="btn sm" id="tmSaveDate" style="margin-top:10px">Save</button>
         </div>`;
@@ -4268,7 +4367,7 @@ function renderModal(){
         const box=document.getElementById('tmExtra');
         box.innerHTML=`<div class="field"><label>Nudge at</label><input type="time" id="tmRemTime" value="${t.reminderTime||'09:00'}"></div>
           <label style="font-size:.85rem"><input type="checkbox" id="tmLead0" ${(t.reminderLeads||[]).includes(0)?'checked':''}> On the day</label>
-          <button class="btn sm" id="tmSaveRem" style="margin-top:8px">Save Nudge</button>`;
+          <button class="btn sm" id="tmSaveRem" style="margin-top:8px">Save alarm</button>`;
         document.getElementById('tmSaveRem').onclick=()=>{
           t.reminderTime=document.getElementById('tmRemTime').value;
           t.reminderLeads = document.getElementById('tmLead0').checked ? [0] : [];
@@ -4714,6 +4813,170 @@ function startAuthListener(){
   });
 }
 let _googleSignInBusy=false;
+
+/** Admin-visible contact card in Firestore (not a full analytics suite). */
+async function upsertAdminUserRecord(extra){
+  try{
+    initFirebase();
+    if(!_db) return;
+    const email = (_currentUser && _currentUser.email) || (state.profile && state.profile.email) || (extra && extra.email) || '';
+    const name = (state.profile && state.profile.name) || (extra && extra.name) || '';
+    const phone = (state.profile && state.profile.phone) || (extra && extra.phone) || '';
+    const localUser = (getLocalAuth && getLocalAuth()) ? (getLocalAuth().username||'') : '';
+    const id = (_currentUser && _currentUser.uid) || ('local_'+String(localUser||email||'anon').toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,40));
+    if(!id || id==='local_') return;
+    const ref = _db.collection('app_users').doc(id);
+    await ref.set({
+      uid: (_currentUser && _currentUser.uid) || null,
+      name: name || '',
+      email: email || '',
+      phone: phone || '',
+      localUsername: localUser || '',
+      audience: (state.profile && state.profile.audience) || '',
+      lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: Date.now(),
+      platform: (typeof isCapacitorNative==='function' && isCapacitorNative()) ? 'android' : 'web'
+    }, { merge: true });
+  }catch(e){ console.warn('upsertAdminUserRecord', e); }
+}
+
+function getGoogleAccessTokenFromUser(){
+  try{
+    const u = _auth && _auth.currentUser;
+    if(!u) return null;
+    // From last popup result we may have stored token
+    if(state._googleAccessToken) return state._googleAccessToken;
+    return null;
+  }catch(e){ return null; }
+}
+
+async function fetchGoogleCalendarEvents(daysAhead){
+  daysAhead = daysAhead || 14;
+  const token = state._googleAccessToken;
+  if(!token){
+    showAppMessage('Connect Google Calendar', 'Sign in with Google again (calendar permission), then tap Sync Google Calendar.');
+    return [];
+  }
+  const timeMin = new Date(); timeMin.setHours(0,0,0,0);
+  const timeMax = new Date(timeMin.getTime() + daysAhead*86400000);
+  const url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime'
+    + '&timeMin=' + encodeURIComponent(timeMin.toISOString())
+    + '&timeMax=' + encodeURIComponent(timeMax.toISOString())
+    + '&maxResults=100';
+  const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+  if(!res.ok){
+    const err = await res.text();
+    throw new Error('Google Calendar HTTP '+res.status+': '+err.slice(0,120));
+  }
+  const data = await res.json();
+  return (data.items||[]);
+}
+
+function mapGcalToStudyBlocks(items){
+  const blocks = [];
+  (items||[]).forEach(ev=>{
+    const start = ev.start && (ev.start.dateTime || ev.start.date);
+    const end = ev.end && (ev.end.dateTime || ev.end.date);
+    if(!start) return;
+    const allDay = !!(ev.start && ev.start.date && !ev.start.dateTime);
+    let date = '', startT = '09:00', endT = '10:00';
+    if(allDay){
+      date = String(start).slice(0,10);
+      startT = '00:00'; endT = '23:59';
+    } else {
+      const ds = new Date(start), de = new Date(end||start);
+      date = ds.getFullYear()+'-'+String(ds.getMonth()+1).padStart(2,'0')+'-'+String(ds.getDate()).padStart(2,'0');
+      startT = String(ds.getHours()).padStart(2,'0')+':'+String(ds.getMinutes()).padStart(2,'0');
+      endT = String(de.getHours()).padStart(2,'0')+':'+String(de.getMinutes()).padStart(2,'0');
+    }
+    blocks.push({
+      id: 'gcal_'+(ev.id||uid()),
+      title: (ev.summary||'Busy').slice(0,120),
+      date: date,
+      start: startT,
+      end: endT,
+      source: 'google',
+      externalId: ev.id||'',
+      allDay: allDay
+    });
+  });
+  return blocks;
+}
+
+async function syncGoogleCalendarReadonly(){
+  try{
+    showAppMessage('Syncing…', 'Reading Google Calendar (read-only).');
+    const items = await fetchGoogleCalendarEvents(21);
+    const mapped = mapGcalToStudyBlocks(items);
+    if(!state.externalBusy) state.externalBusy = [];
+    // Replace previous google-sourced blocks
+    state.externalBusy = (state.externalBusy||[]).filter(b=>b.source!=='google').concat(mapped);
+    state.settings = state.settings||{};
+    state.settings.calendarLastSync = Date.now();
+    state.settings.calendarLastSource = 'google';
+    try{ saveState(); }catch(e){}
+    try{ persistRender(); }catch(e){}
+    showAppMessage('Google Calendar', mapped.length+' event(s) imported (read-only). Shown as busy blocks in schedule.');
+  }catch(e){
+    console.warn(e);
+    showAppMessage('Calendar sync failed', (e&&e.message)||String(e));
+  }
+}
+
+/** ICS / .ics URL — works for many calendars (Outlook published ICS, Google secret address, Apple, etc.) */
+function parseIcsEvents(icsText){
+  const events = [];
+  const parts = String(icsText||'').split('BEGIN:VEVENT');
+  for(let i=1;i<parts.length;i++){
+    const block = parts[i].split('END:VEVENT')[0];
+    const get = (k)=>{
+      const re = new RegExp('^'+k+'[^:]*:(.+)$','mi');
+      const m = block.match(re);
+      return m ? m[1].trim().replace(/\\n/g,' ').replace(/\\,/g,',') : '';
+    };
+    const summary = get('SUMMARY') || 'Busy';
+    const dtStart = get('DTSTART');
+    const dtEnd = get('DTEND');
+    if(!dtStart) continue;
+    let date='', startT='09:00', endT='10:00', allDay=false;
+    if(/^\d{8}$/.test(dtStart.slice(0,8)) && dtStart.indexOf('T')<0){
+      allDay = true;
+      date = dtStart.slice(0,4)+'-'+dtStart.slice(4,6)+'-'+dtStart.slice(6,8);
+      startT='00:00'; endT='23:59';
+    } else {
+      const m = dtStart.match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/);
+      if(m){ date=m[1]+'-'+m[2]+'-'+m[3]; startT=m[4]+':'+m[5]; }
+      const me = dtEnd.match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/);
+      if(me){ endT=me[4]+':'+me[5]; }
+    }
+    if(date) events.push({ id:'ics_'+date+'_'+startT+'_'+events.length, title:summary.slice(0,120), date, start:startT, end:endT, source:'ics', allDay });
+  }
+  return events;
+}
+
+async function syncIcsCalendarUrl(url){
+  url = String(url||'').trim();
+  if(!url){ showAppMessage('ICS URL needed', 'Paste a published calendar link (.ics) from Google, Outlook, or Apple.'); return; }
+  try{
+    showAppMessage('Syncing…', 'Fetching calendar feed…');
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('Could not fetch ICS ('+res.status+'). If blocked, try a public “secret address” link.');
+    const text = await res.text();
+    const mapped = parseIcsEvents(text);
+    if(!state.externalBusy) state.externalBusy = [];
+    state.externalBusy = (state.externalBusy||[]).filter(b=>b.source!=='ics').concat(mapped);
+    state.settings = state.settings||{};
+    state.settings.icsUrl = url;
+    state.settings.calendarLastSync = Date.now();
+    state.settings.calendarLastSource = 'ics';
+    try{ saveState(); }catch(e){}
+    try{ persistRender(); }catch(e){}
+    showAppMessage('Calendar feed', mapped.length+' event(s) imported from ICS.');
+  }catch(e){
+    showAppMessage('ICS sync failed', (e&&e.message)||String(e));
+  }
+}
+
 async function signInWithGoogle(){
   if(_googleSignInBusy) return;
   initFirebase();
@@ -4734,30 +4997,38 @@ async function signInWithGoogle(){
       if(!plugin || typeof plugin.signInWithGoogle!=='function'){
         showAppMessage(
           'Phone Google setup needed',
-          'This APK was built without the Google Sign-In plugin. Rebuild with the steps in GOOGLE-PHONE-SETUP.txt, or use the SnapBack website in Chrome for Gmail (same account syncs).'
+          'Finish teacher steps: SHA-1, google-services.json, npm install plugin, then rebuild APK. Or open the website for Gmail for now.'
         );
         return;
       }
       const res = await plugin.signInWithGoogle();
-      // Plugin may return credential.idToken or result.credential
-      const idToken =
+      // @capacitor-firebase/authentication returns { user, credential: { idToken, accessToken } }
+      let idToken =
         (res && res.credential && (res.credential.idToken||res.credential.id_token)) ||
         (res && res.idToken) ||
-        (res && res.authentication && res.authentication.idToken) ||
         null;
-      const accessToken =
+      let accessToken =
         (res && res.credential && res.credential.accessToken) ||
-        (res && res.authentication && res.authentication.accessToken) ||
         null;
-      if(!idToken){
-        showAppMessage('Google sign-in', 'No token returned. Check SHA-1 and google-services.json in Firebase Android setup.');
-        return;
+      // Some builds already signed into native Firebase; still link JS SDK
+      if(!idToken && plugin.getIdToken){
+        try{
+          const tok = await plugin.getIdToken();
+          idToken = (tok && (tok.token||tok.idToken)) || idToken;
+        }catch(e){}
       }
-      const credential = firebase.auth.GoogleAuthProvider.credential(idToken, accessToken||null);
-      const userCred = await _auth.signInWithCredential(credential);
-      const user = userCred && userCred.user;
+      if(idToken){
+        const credential = firebase.auth.GoogleAuthProvider.credential(idToken, accessToken||null);
+        await _auth.signInWithCredential(credential);
+      }
+      const user = (_auth && _auth.currentUser) || (res && res.user) || null;
       if(user){
-        _currentUser = { uid:user.uid, email:user.email||'', displayName:user.displayName||'', photoURL:user.photoURL||'' };
+        _currentUser = {
+          uid: user.uid||user.id||'',
+          email: user.email||'',
+          displayName: user.displayName||user.display_name||'',
+          photoURL: user.photoURL||user.photo_url||''
+        };
         if(!state.profile) state.profile={};
         if(_currentUser.email) state.profile.email = _currentUser.email;
         setSessionLoggedIn(true, true);
@@ -4765,6 +5036,8 @@ async function signInWithGoogle(){
         try{ startCloudSync(); pushCloudSync(); }catch(e){}
         showAppMessage('Signed in with Google', _currentUser.email||'Connected');
         try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+      } else {
+        showAppMessage('Google sign-in', 'No user returned. Check SHA-1 fingerprint and re-download google-services.json after adding SHA-1.');
       }
       return;
     }
@@ -4772,7 +5045,13 @@ async function signInWithGoogle(){
     // WEB (browser): popup only — do not use redirect (causes missing initial state)
     const provider = new firebase.auth.GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
+    try{ provider.addScope('https://www.googleapis.com/auth/calendar.readonly'); }catch(e){}
     const result = await _auth.signInWithPopup(provider);
+    try{
+      const cred = result && result.credential;
+      if(cred && cred.accessToken) state._googleAccessToken = cred.accessToken;
+    }catch(e){}
+    try{ upsertAdminUserRecord(); }catch(e){}
     const user = (result && result.user) || (_auth && _auth.currentUser);
     if(user){
       _currentUser = {
@@ -4988,6 +5267,7 @@ function registerLocalAccount(username, password, remember, recoveryPin){
     created: Date.now()
   });
   completeLocalLogin(username, remember);
+  try{ upsertAdminUserRecord({ name: username }); }catch(e){}
   showAppMessage('Account ready', 'You are signed in as '+username+'. Use the same username and password next time on this device.');
   return true;
 }
@@ -5432,43 +5712,61 @@ const CHALLENGE_PATHS = {
 };
 
 
+function ensureTaskForChallenge(challengeId, toolId){
+  if(!Array.isArray(state.tasks)) state.tasks=[];
+  const ch = (typeof CHALLENGES!=='undefined' && CHALLENGES.find(c=>c.id===challengeId)) || null;
+  const toolName = toolId || 'work';
+  const title = ch ? ('Challenge: '+(ch.title||challengeId)+' — '+toolName) : ('From challenge — '+toolName);
+  const existing = state.tasks.find(x=>!x.done && x.challengeId===challengeId);
+  if(existing) return existing;
+  const id = uid();
+  const task = {id, title, notes: ch?(ch.desc||''):'', date: todayStr(), time:'', priority:'medium', urgent:false, important:false, tier:'could', frog:false, context:'school', technique: (toolId==='cheese'||toolId==='bitesize')?'bitesize':((toolId==='focus'||toolId==='timer')?'timer':''), challengeId: challengeId||'', meetingUrl:'', reminderLeads:[0], reminderTime:'09:00', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{}, strategic:{}, flip:{}, created:Date.now()};
+  state.tasks.unshift(task);
+  state.filter = 'all';
+  try{ saveState(); }catch(e){}
+  return task;
+}
 function applyChallengeTool(toolId, challengeId){
-  const open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
+  const open = (state.tasks||[]).filter(x=>!x.done && !x.backburner);
+  const needsTask = ['spotlight','small-batch','jar','spin','bitesize','cheese','focus','timer','eisenhower','backburner-help'].indexOf(toolId)>=0;
+  let task = null;
+  if(needsTask){
+    if(open.length && (toolId==='jar'||toolId==='spin'||toolId==='spotlight'||toolId==='small-batch')) task = open[Math.floor(Math.random()*open.length)] || open[0];
+    else task = ensureTaskForChallenge(challengeId, toolId);
+  }
   if(toolId==='spotlight' || toolId==='small-batch'){
-    state.listMode = 'spotlight';
-    state.spotlightLimit = 3;
-    showAppMessage('List trimmed', 'Tasks view will show a smaller set. Open Tasks to work.');
-    navigateTo('tasks');
-    return;
+    state.listMode = 'spotlight'; state.spotlightLimit = 3;
+    if(task) state.topOfMindId = task.id;
+    showAppMessage('Task ready', (task?task.title+' — ':'')+'Listed under Tasks.');
+    navigateTo('tasks'); return;
   }
   if(toolId==='jar' || toolId==='spin'){
-    if(!open.length){ showAppMessage('No open tasks', 'Add a task first.'); return; }
-    const t = open[Math.floor(Math.random()*open.length)];
+    const pool = open.length ? open : (task?[task]:[]);
+    if(!pool.length){ showAppMessage('No open tasks', 'Add a task first.'); return; }
+    const t = pool[Math.floor(Math.random()*pool.length)];
     state.topOfMindId = t.id;
-    showAppMessage('Pulled a task', t.title+'\n\nIt is pinned as Top of Mind. Start when ready.');
-    navigateTo('tasks');
-    return;
+    showAppMessage('Pulled a task', t.title);
+    navigateTo('tasks'); return;
   }
   if(toolId==='backburner-help'){
-    showAppMessage('Park it', 'Open a task → More → send to Backburner so it leaves Today until you bring it back.');
-    navigateTo('tasks');
-    return;
+    if(task){ task.backburner = true; try{saveState();}catch(e){} }
+    showAppMessage('Parked', task?task.title+' → Backburner':'Open Tasks → Backburner');
+    navigateTo('tasks'); return;
   }
   if(toolId==='bitesize' || toolId==='cheese'){
-    if(open[0]) state.cheeseTaskId = open[0].id;
-    navigateTo('bitesize');
-    return;
+    if(task) state.cheeseTaskId = task.id; else if(open[0]) state.cheeseTaskId = open[0].id;
+    navigateTo('bitesize'); return;
   }
   if(toolId==='focus' || toolId==='timer'){
-    if(open[0]) state.timer.activeTaskId = open[0].id;
-    navigateTo('timer');
-    return;
+    if(!state.timer) state.timer={};
+    if(task) state.timer.activeTaskId = task.id; else if(open[0]) state.timer.activeTaskId = open[0].id;
+    navigateTo('timer'); return;
   }
-  if(toolId==='eisenhower'){ navigateTo('eisenhower'); return; }
+  if(toolId==='eisenhower'){ if(task) state.topOfMindId=task.id; navigateTo('eisenhower'); return; }
   if(toolId==='plan-ahead'){ navigateTo('planAhead'); return; }
-  if(toolId==='bugme'){ navigateTo('settings'); showAppMessage('Nudge', 'Scroll to Nudge, set time, Save.'); return; }
+  if(toolId==='bugme'){ navigateTo('settings'); showAppMessage('Alarm', 'Set time and Save.'); return; }
   if(toolId==='journal'){ navigateTo('journal'); return; }
-  showAppMessage('Tool', 'Opening Tasks.');
+  if(task) showAppMessage('Task added', task.title);
   navigateTo('tasks');
 }
 
@@ -5568,6 +5866,8 @@ function openAIWithPrompt(prompt, ai){
   const q = String(prompt||'').trim();
   if(!q) return;
   const which = ai || preferredAI();
+  // Keep prompt for user to paste if the AI site ignores ?q=
+  try{ sessionStorage.setItem('snapback_last_ai_prompt', q); }catch(e){}
   try{ navigator.clipboard.writeText(q); }catch(e){}
   const urls = {
     grok: 'https://grok.com/?q='+encodeURIComponent(q),
@@ -5576,62 +5876,15 @@ function openAIWithPrompt(prompt, ai){
     gemini: 'https://gemini.google.com/app?q='+encodeURIComponent(q),
     perplexity: 'https://www.perplexity.ai/search?q='+encodeURIComponent(q)
   };
-  window.open(urls[which]||urls.grok, '_blank', 'noopener');
-  showAppMessage('AI opened', 'Your prompt was copied to the clipboard too. If the AI page is empty, paste (Ctrl+V) and send.');
+  showAppMessage(
+    'Prompt ready',
+    'The breakdown request was copied. If the AI chat opens empty, paste once (long-press → Paste). Opening '+which+'…'
+  );
+  try{ window.open(urls[which]||urls.grok, '_blank', 'noopener'); }catch(e){
+    showAppMessage('Open AI', 'Could not open browser. Prompt is copied — paste into your AI app.');
+  }
 }
-function aiPickerHtml(idPrefix){
-  const cur=preferredAI();
-  return `<select id="${idPrefix}AiSelect" style="max-width:130px">
-    <option value="grok" ${cur==='grok'?'selected':''}>Grok</option>
-    <option value="chatgpt" ${cur==='chatgpt'?'selected':''}>ChatGPT</option>
-    <option value="claude" ${cur==='claude'?'selected':''}>Claude</option>
-    <option value="gemini" ${cur==='gemini'?'selected':''}>Gemini</option>
-    <option value="perplexity" ${cur==='perplexity'?'selected':''}>Perplexity</option>
-  </select>`;
-}
-function promptStudyBreakdown(book, chapterNum, chapterName, taskTitle){
-  return `You are helping a student (age ~13–20) plan ADHD-friendly study bites.
 
-Subject / book: ${book||'(look up typical TOC if this is a known textbook name)'}
-Chapter number: ${chapterNum||'(unknown)'}
-Chapter title: ${chapterName||taskTitle||'(unknown)'}
-Task note: ${taskTitle||''}
-
-Please:
-1) If you know this book (e.g. Ciccarelli Psychology), use a realistic chapter structure (main sections).
-2) If not sure, assume a standard chapter: intro, 4–7 sections, summary, review questions.
-3) Break study into 8–12 bites of 10–20 minutes each (skimming, one section at a time, terms, questions, summary).
-4) Estimate total time roughly.
-5) Numbered list only — short lines a student can copy into an app.
-6) Encouraging, simple language. No long lecture.`;
-}
-function promptQuizAfterStudy(book, chapterNum, chapterName, taskTitle){
-  return `I just finished studying this (student, ADHD-friendly please):
-
-Book: ${book||''}
-Chapter ${chapterNum||''}: ${chapterName||''}
-Task: ${taskTitle||''}
-
-Give me a short quiz:
-- 5 questions (mix of recall and understanding)
-- After each question, wait — or provide answers at the end clearly labeled
-- One stretch question that connects ideas
-Keep it fair for grades 8–12 / early college. Encouraging tone.`;
-}
-function promptPrioritize(tasks){
-  const lines=(tasks||[]).slice(0,15).map((t,i)=>`${i+1}. ${t.title}${t.date?' (due '+t.date+')':''}`).join('\\n');
-  return `I am a student with a long task list and ADHD. Help me prioritize for TODAY only.
-
-My open tasks:
-${lines||'(none listed)'}
-
-Please:
-1) Pick at most 5 things for today
-2) Say which is the one non-negotiable
-3) Which can wait until tomorrow
-4) Why, in one short sentence each
-Simple language.`;
-}
 function promptStuckTask(t){
   return `I am stuck starting this school task (ADHD-friendly help):
 
@@ -5801,11 +6054,11 @@ function viewToday(){
       <div class="mustcould">
         <div class="mc-col">
           <h4 style="color:var(--brick)">Must do</h4>
-          ${mustToday.length ? mustToday.map(t=>`<div class="mc-item"><input type="checkbox" class="check" data-action="toggle-done" data-id="${t.id}"> ${escapeHtml(t.title)}</div>`).join('') : '<div class="empty">Nothing marked "must" — tag a task on the Tasks page.</div>'}
+          ${mustToday.length ? mustToday.map(t=>`<div class="mc-item" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="check" data-action="toggle-done" data-id="${t.id}" title="Mark complete"><button type="button" class="btn ghost sm" data-action="open-task-menu" data-id="${t.id}" style="flex:1;text-align:left">${escapeHtml(t.title)}</button></div>`).join('') : '<div class="empty">Nothing marked "must" — tag a task on the Tasks page.</div>'}
         </div>
         <div class="mc-col">
           <h4 style="color:var(--pine)">Could do</h4>
-          ${couldToday.length ? couldToday.map(t=>`<div class="mc-item"><input type="checkbox" class="check" data-action="toggle-done" data-id="${t.id}"> ${escapeHtml(t.title)}</div>`).join('') : '<div class="empty">Nothing here right now.</div>'}
+          ${couldToday.length ? couldToday.map(t=>`<div class="mc-item" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="check" data-action="toggle-done" data-id="${t.id}" title="Mark complete"><button type="button" class="btn ghost sm" data-action="open-task-menu" data-id="${t.id}" style="flex:1;text-align:left">${escapeHtml(t.title)}</button></div>`).join('') : '<div class="empty">Nothing here right now.</div>'}
         </div>
       </div>
     </div>
@@ -5937,7 +6190,7 @@ function taskCard(t){
           <input type="text" id="editDateText-${t.id}" value="${escapeHtml(t.date||'')}" placeholder="Type 2026-08-26" autocomplete="off" style="flex:1">
           <label style="flex:0 0 auto;cursor:pointer;position:relative;margin:0" title="Pick from calendar">
             <span style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border:1px solid var(--line);border-radius:10px;background:var(--card)">📅</span>
-            <input type="date" id="editDatePick-${t.id}" value="${t.date||''}" min="2020-01-01" max="2035-12-31" style="position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer">
+            <input type="date" id="editDatePick-${t.id}" value="${t.date||''}" min="2000-01-01" max="2100-12-31" style="position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer">
           </label>
         </div>
         <div style="font-size:.75rem;color:var(--muted);margin-top:4px">Type the date, or tap the calendar</div>
@@ -6025,8 +6278,8 @@ function viewTasks(){
   else if(f==='frog') list=list.filter(t=>t.frog && !t.done);
   else if(f==='all' || !f) list=list.filter(t=>!t.done); // completed hidden by default
   // hide backburner from main list unless filter says so
-  if(f!=='backburner') list=list.filter(t=>!t.backburner);
-  else list=(state.tasks||[]).filter(t=>t.backburner && !t.done);
+  if(f==='backburner') list=(state.tasks||[]).filter(t=>t.backburner && !t.done);
+  else if(f!=='done') list=list.filter(t=>!t.backburner);
   // Completed date range (only when viewing completed)
   if(f==='done'){
     const from=state.completedFrom||'';
@@ -6161,7 +6414,7 @@ function viewTasks(){
     <h3>Add a task</h3>
     <div class="field"><label>Title</label><input id="newTitle" placeholder="e.g. Finish problem set 4"></div>
     <div class="row" style="margin-top:10px">
-      <div class="field"><label>Due date</label><input id="newDate" type="date" value="${todayStr()}" min="2020-01-01" max="2035-12-31"></div>
+      <div class="field"><label>Due date</label><input id="newDate" type="date" value="${todayStr()}" min="2000-01-01" max="2100-12-31"></div>
       <div class="field"><label>Due time</label><input id="newTime" type="time"></div>
       <div class="field"><label>Priority</label><select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
     </div>
@@ -6169,6 +6422,17 @@ function viewTasks(){
       <select id="newContext">
         <option value="school" selected>${L('newTaskSchool')}</option>
         <option value="personal">${L('personal')}</option>
+      </select>
+    </div>
+    <div class="field" style="margin-top:10px"><label>Technique (optional)</label>
+      <select id="newTechnique">
+        <option value="">Will select later / Not required</option>
+        <option value="bitesize">Bite Size — break into small steps</option>
+        <option value="timer">Focus Pod — timed focus</option>
+        <option value="eisenhower">Eisenhower — urgent vs important</option>
+        <option value="rule135">Rule 1-3-5 — plan the day</option>
+        <option value="timeblocking">Time blocking — schedule blocks</option>
+        <option value="bodydouble">Body doubling — work with structure</option>
       </select>
     </div>
     <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
@@ -6203,18 +6467,22 @@ function viewTasks(){
   </div>
   <div class="card" style="padding:10px 12px;margin-bottom:10px">
     <div class="field" style="margin:0"><label>Search tasks</label>
-      <input type="search" id="taskSearchInput" placeholder="Type a word from the task…" value="${escapeHtml(state.taskSearch||'')}" style="width:100%">
+      <div class="row" style="gap:8px;align-items:center">
+        <input type="search" id="taskSearchInput" enterkeyhint="search" placeholder="Type a word from the task…" value="${escapeHtml(state.taskSearch||'')}" style="flex:1;min-width:0">
+        <button type="button" class="btn sm" id="taskSearchGoBtn" style="flex:0 0 auto">Go</button>
+      </div>
     </div>
   </div>
+  <div style="font-size:.85rem;font-weight:700;margin:4px 0 6px">Show tasks in progress</div>
   <div class="filters">
-    <button data-filter="all" class="${f==='all'?'active':''}">Open (${(state.tasks||[]).filter(t=>!t.done).length})</button>
+    <button data-filter="all" class="${f==='all'?'active':''}">All open (${(state.tasks||[]).filter(t=>!t.done&&!t.backburner).length})</button>
     <button data-filter="today" class="${f==='today'?'active':''}">Today</button>
     <button data-filter="tomorrow" class="${f==='tomorrow'?'active':''}">Tomorrow</button>
     <button data-filter="week" class="${f==='week'?'active':''}">This week</button>
     <button data-filter="overdue" class="${f==='overdue'?'active':''}">Overdue</button>
     <button data-filter="undated" class="${f==='undated'?'active':''}">No date</button>
-    <button data-filter="must" class="${f==='must'?'active':''}">Must-do</button>
-    <button data-filter="frog" class="${f==='frog'?'active':''}">&#128007; Frogs</button>
+    <button data-filter="must" class="${f==='must'?'active':''}">Must</button>
+    <button data-filter="frog" class="${f==='frog'?'active':''}">Frog</button>
     <button data-filter="backburner" class="${f==='backburner'?'active':''}">🔥 Backburner</button>
   </div>
   <div style="margin:8px 0 10px">
@@ -6651,6 +6919,12 @@ function buildWeekBusyData(weekStart, showDetails){
       }catch(e){}
       const block = { start: startT, end: endT };
       if(show){ block.title = task.title||'Busy'; block.place = ''; }
+      busy.push(block);
+    });
+    (state.externalBusy||[]).forEach(ev=>{
+      if(ev.date!==ds || !ev.start) return;
+      const block = { start: ev.start||'', end: ev.end||'' };
+      if(show){ block.title = (ev.title||'Busy')+(ev.source?(' · '+ev.source):''); block.place = ''; }
       busy.push(block);
     });
     busy.sort((a,b)=>String(a.start).localeCompare(String(b.start)));
@@ -8328,16 +8602,72 @@ function fileJournalEntry(id, bucket){
   persistRender();
   showAppMessage('Dropped', 'Removed from the board. Still in Drop it sheet if you need it.');
 }
-function downloadJournalBucket(bucket){
-  const list=(state.journalFiled&&state.journalFiled[bucket])||[];
-  const lines=list.map(e=>`${e.date} ${e.time||''}\n${e.text}\n---`).join('\n');
-  const blob=new Blob([lines||'(empty)'],{type:'text/plain'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='snapback-journal-'+bucket+'.txt';
-  a.click();
+function buildSimplePdf(text){
+  // Minimal single-page PDF with Helvetica text (ASCII-safe)
+  const lines = String(text||'').split(/\r?\n/);
+  const esc = (s)=>String(s).replace(/\\/g,'\\\\').replace(/\(/g,'\\(').replace(/\)/g,'\\)');
+  let y = 800;
+  const content = ['BT','/F1 11 Tf','14 TL','50 '+y+' Td'];
+  lines.slice(0,60).forEach((line,i)=>{
+    const L = esc(line.slice(0,90));
+    if(i===0) content.push('('+L+') Tj');
+    else content.push('T* ('+L+') Tj');
+  });
+  content.push('ET');
+  const stream = content.join('\n');
+  const objs = [];
+  objs.push('1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n');
+  objs.push('2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n');
+  objs.push('3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj\n');
+  objs.push('4 0 obj<< /Length '+stream.length+' >>stream\n'+stream+'\nendstream\nendobj\n');
+  objs.push('5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n');
+  let body = '%PDF-1.3\n';
+  const offsets = [0];
+  objs.forEach(o=>{ offsets.push(body.length); body += o; });
+  const xref = body.length;
+  body += 'xref\n0 '+(objs.length+1)+'\n';
+  body += '0000000000 65535 f \n';
+  for(let i=1;i<offsets.length;i++) body += String(offsets[i]).padStart(10,'0')+' 00000 n \n';
+  body += 'trailer<< /Size '+(objs.length+1)+' /Root 1 0 R >>\nstartxref\n'+xref+'\n%%EOF';
+  return body;
 }
-
+async function downloadJournalBucket(bucket){
+  if(!state.journalFiled) state.journalFiled={file:[],do:[],drop:[]};
+  let list=(state.journalFiled[bucket])||[];
+  // Also include unfiled notes if bucket empty so download is never blank by surprise
+  if(!list.length && state.journal && state.journal.length){
+    list = state.journal.map(e=>({date:e.date||'', time:e.time||'', text:e.text||''}));
+  }
+  const lines=list.map(e=>`${e.date||''} ${e.time||''}\n${e.text||''}\n---`).join('\n') || '(No journal entries yet.)';
+  const filename='snapback-journal-'+bucket+'.pdf';
+  const pdfText = 'SnapBack Journal — '+bucket+'\n\n'+lines;
+  try{
+    const pdf = buildSimplePdf(pdfText);
+    const blob = new Blob([pdf], {type:'application/pdf'});
+    // Capacitor Filesystem → app documents (real file on phone)
+    try{
+      const FS = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
+      if(FS && typeof FS.writeFile==='function'){
+        const b64 = btoa(unescape(encodeURIComponent(pdf)));
+        await FS.writeFile({ path: filename, data: b64, directory: 'DOCUMENTS', recursive: true });
+        showAppMessage('PDF saved', filename+' saved in app Documents. Open Files/Documents to view or share it.');
+        return;
+      }
+    }catch(e){ console.warn('fs write', e); }
+    // Browser / WebView download link
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=filename;
+    a.rel='noopener';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ try{ URL.revokeObjectURL(a.href); a.remove(); }catch(e){} }, 800);
+    showAppMessage('PDF download', filename+' — check your Downloads folder.');
+  }catch(e){
+    console.warn(e);
+    showAppMessage('Download failed', String(e&&e.message||e));
+  }
+}
 
 function viewHabits(){
   const today=todayStr();
@@ -8515,7 +8845,7 @@ const FAQ_ITEMS=[
   {q:'How do I set Nudge (alarm)?', a:'Settings → Nudge → turn on → set time and days → Save. When it rings, sound gets louder for about 55 seconds, then a simple math problem stops it. You can snooze 5 or 10 minutes (limited snoozes).'},
   {q:'Why no notification when the app is closed?', a:'On the website: browsers only remind you while the tab can run. On the Android APK: allow Notifications and set SnapBack to Unrestricted battery; then Local Notifications can fire. For class times, also Export calendar to Google/Apple Calendar for system alarms.'},
   {q:'How do I allow notifications on Android?', a:'In SnapBack: Settings → Grant permission. On the phone: Settings → Apps → SnapBack → Notifications → On (not Restricted), and Battery → Unrestricted / allow background.'},
-  {q:'Alarms still quiet on Android?', a:'1) Notifications unrestricted. 2) Battery unrestricted. 3) On some phones: Settings → Alarms & reminders → allow SnapBack. 4) Save Nudge again after granting permission. 5) Volume on media, not silent. The website cannot match the Clock app; the APK is closer.'},
+  {q:'Alarms still quiet on Android?', a:'1) Notifications unrestricted. 2) Battery unrestricted. 3) On some phones: Settings → Alarms & reminders → allow SnapBack. 4) Save alarm again after granting permission. 5) Volume on media, not silent. The website cannot match the Clock app; the APK is closer.'},
   {q:'How do I get classes onto my phone calendar?', a:'Calendar → export calendar file (.ics). Open the file on the phone and add to Google or Apple Calendar.'},
   {q:'How do laptop and phone stay in sync?', a:'Settings → Account: sign in with the same Google account on both (after Firebase is set up), or use the advanced private sync code on both devices. Same account/code = same data.'},
   {q:'Does this need internet?', a:'Most features work offline on this device. Cloud sync, Google sign-in, and some exports need internet.'},
@@ -8994,7 +9324,7 @@ function viewSettings(){
       <p style="font-size:.84rem;color:var(--muted);margin:0 0 14px">Daily alarm. Opens a math stop-screen so it is harder to dismiss by accident.</p>
       <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${(state.wakeAlarm&&state.wakeAlarm.time)||'07:00'}"></div>
       <div class="field" style="margin-top:8px"><label>One-time date (optional)</label>
-        <input type="date" id="wakeOnceDate" value="${(state.wakeAlarm&&state.wakeAlarm.onceDate)||''}" min="2020-01-01" max="2035-12-31">
+        <input type="date" id="wakeOnceDate" value="${(state.wakeAlarm&&state.wakeAlarm.onceDate)||''}" min="2000-01-01" max="2100-12-31">
         <div style="font-size:.78rem;color:var(--muted);margin-top:4px">If set, Nudge rings only on this date (at the time above). Leave blank to use weekly days instead.</div>
       </div>
       <div class="field" style="margin-top:8px"><label>Alarm sound</label>
@@ -9015,7 +9345,7 @@ function viewSettings(){
         }).join('')}
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;max-width:300px">
-        <button class="btn" id="saveWakeBtn" type="button">Save Nudge</button>
+        <button class="btn" id="saveWakeBtn" type="button">Save alarm</button>
         <button class="btn ghost" id="testWakeBtn" type="button">Preview</button>
         ${(state.wakeAlarm&&state.wakeAlarm.enabled)?`<button class="btn ghost" id="turnOffWakeBtn" type="button">Turn off</button>`:''}
       </div>
@@ -9028,6 +9358,26 @@ function viewSettings(){
         <input id="publicWebUrlInput" placeholder="https://username.github.io/repo/" value="${escapeHtml((state.settings&&state.settings.publicWebUrl)||DEFAULT_PUBLIC_WEB_URL||'')}">
       </div>
       <button type="button" class="btn sm" id="savePublicWebUrlBtn" style="margin-top:8px">Save website link</button>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 6px">Your contact (for teacher/admin)</h3>
+      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Optional. Saved so the app owner can see who is using SnapBack (name / email / phone) in Firebase → app_users.</p>
+      <div class="field"><label>Name</label><input id="adminContactName" value="${escapeHtml((state.profile&&state.profile.name)||'')}" placeholder="Your name"></div>
+      <div class="field"><label>Email</label><input id="adminContactEmail" type="email" value="${escapeHtml((state.profile&&state.profile.email)||'')}" placeholder="you@email.com"></div>
+      <div class="field"><label>Phone</label><input id="adminContactPhone" type="tel" value="${escapeHtml((state.profile&&state.profile.phone)||'')}" placeholder="Optional phone"></div>
+      <button type="button" class="btn sm" id="saveAdminContactBtn" style="margin-top:8px">Save contact for admin</button>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 6px">Calendar sync (read-only)</h3>
+      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Imports events into SnapBack as busy blocks. Does not write back to Google/Outlook. Live refresh when you tap Sync (auto every open is optional later).</p>
+      <button type="button" class="btn sm" id="syncGcalBtn" style="margin-top:6px">Sync Google Calendar</button>
+      <p style="font-size:.75rem;color:var(--muted);margin:8px 0">Or paste a published <b>.ics</b> link (Google “Secret address”, Outlook “Publish calendar”, Apple Calendar public URL):</p>
+      <input id="icsUrlInput" placeholder="https://…/calendar.ics" value="${escapeHtml((state.settings&&state.settings.icsUrl)||'')}" style="width:100%">
+      <button type="button" class="btn ghost sm" id="syncIcsBtn" style="margin-top:8px">Sync ICS / Outlook feed</button>
+      <p style="font-size:.72rem;color:var(--muted);margin:8px 0 0">Last sync: ${state.settings&&state.settings.calendarLastSync ? new Date(state.settings.calendarLastSync).toLocaleString() : 'never'} ${state.settings&&state.settings.calendarLastSource ? '('+state.settings.calendarLastSource+')' : ''}</p>
+
     </div>
 
     <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
@@ -9379,6 +9729,31 @@ function wireView(){
     };
   }catch(e){ console.warn('share wire', e); }
 
+  const _ts=document.getElementById('taskSearchInput');
+  const _tsg=document.getElementById('taskSearchGoBtn');
+  function _applyTaskSearch(){ state.taskSearch=(_ts&&_ts.value)||''; try{persistRender();}catch(e){try{render();}catch(e2){}} }
+  if(_ts) _ts.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); _applyTaskSearch(); } };
+  if(_tsg) _tsg.onclick=function(){ _applyTaskSearch(); };
+  
+    const saveAd=document.getElementById('saveAdminContactBtn');
+    if(saveAd) saveAd.onclick=function(){
+      if(!state.profile) state.profile={};
+      state.profile.name=(document.getElementById('adminContactName')&&document.getElementById('adminContactName').value)||'';
+      state.profile.email=(document.getElementById('adminContactEmail')&&document.getElementById('adminContactEmail').value)||'';
+      state.profile.phone=(document.getElementById('adminContactPhone')&&document.getElementById('adminContactPhone').value)||'';
+      try{ saveState(); }catch(e){}
+      upsertAdminUserRecord();
+      showAppMessage('Saved', 'Contact stored. Admin can view in Firebase → Firestore → app_users (if signed in / configured).');
+      try{ persistRender(); }catch(e){}
+    };
+    const gcal=document.getElementById('syncGcalBtn');
+    if(gcal) gcal.onclick=function(){ syncGoogleCalendarReadonly(); };
+    const icsb=document.getElementById('syncIcsBtn');
+    if(icsb) icsb.onclick=function(){
+      const u=(document.getElementById('icsUrlInput')&&document.getElementById('icsUrlInput').value)||'';
+      syncIcsCalendarUrl(u);
+    };
+
   if(!main) return;
   main.querySelectorAll('[data-action]').forEach(el=>{
     const action=el.dataset.action;
@@ -9386,6 +9761,7 @@ function wireView(){
     if(id!==undefined && id!==null && id!==''){ const n=Number(id); id = (String(n)===String(id) && !Number.isNaN(n)) ? n : id; }
     else id=null;
     if(action==='toggle-done') el.addEventListener('change', ()=>toggleDone(id));
+    else if(action==='open-task-menu') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); openTaskMenu(id); });
     
     else if(action==='quick-done') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
@@ -10462,6 +10838,12 @@ function wireView(){
   if(state.view==='settings'){
     const gh=document.getElementById('gotoHelpBtn'); if(gh) gh.addEventListener('click', ()=>navigateTo('help'));
     const stBtn=document.getElementById('startTourBtn'); if(stBtn) stBtn.addEventListener('click', ()=>startTour(0));
+    const tSearch=document.getElementById('taskSearch');
+    if(tSearch){
+      tSearch.addEventListener('input', ()=>{ state.taskSearch=tSearch.value||''; try{ persistRender(); }catch(e){ render(); } });
+      tSearch.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); state.taskSearch=tSearch.value||''; try{ persistRender(); }catch(e2){ render(); } } });
+    }
+
     const saveWeb=document.getElementById('savePublicWebUrlBtn');
     if(saveWeb) saveWeb.addEventListener('click', ()=>{
       if(!state.settings) state.settings={};

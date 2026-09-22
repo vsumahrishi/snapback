@@ -1,0 +1,47 @@
+SnapBack — Admin users + Calendar (v235)
+========================================
+
+1) SEE WHO IS USING THE APP
+---------------------------
+Users can enter Name / Email / Phone under Settings → "Your contact (for teacher/admin)".
+
+When Firebase is configured, records go to:
+  Firebase Console → Firestore Database → collection: app_users
+
+Each document can include: name, email, phone, localUsername, lastSeen, platform.
+
+If Firestore is not enabled yet:
+  Firebase → Build → Firestore Database → Create database (start in test mode for trials,
+  then lock rules down).
+
+Suggested rules (tighten later):
+  allow write: if request.auth != null || true; // tighten for production
+  allow read: if request.auth != null; // only you as admin via console anyway
+
+You always view users in the Firebase Console (not inside the student app).
+
+
+2) GOOGLE CALENDAR (read-only)
+------------------------------
+- User signs in with Google (calendar.readonly scope requested on web).
+- Settings → Sync Google Calendar.
+- Events land in SnapBack as external busy blocks (does not change Google Calendar).
+
+Note: Phone native Google plugin may need calendar scope added separately later.
+
+
+3) OUTLOOK / APPLE / ANY CALENDAR (ICS feed)
+--------------------------------------------
+Many calendars can publish an ICS URL:
+  Outlook: Calendar settings → Shared calendars → Publish calendar → ICS link
+  Google: Calendar settings → Integrate calendar → Secret address in iCal format
+  Apple: share calendar / public URL depending on setup
+
+Paste the URL in Settings → Sync ICS / Outlook feed.
+
+
+4) "LIVE" AUTO-UPDATE
+-------------------
+v235 syncs when the user taps Sync (or after you add a timer later).
+True push live-sync (instant when Outlook changes) needs Microsoft Graph webhooks
+or Google push notifications — phase 2.
