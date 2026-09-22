@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="235">
+<meta name="snapback-build" content="236">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -6272,7 +6272,7 @@ function viewTasks(){
   else if(f==='tomorrow') list=list.filter(t=>t.date===tomorrowStr() && !t.done);
   else if(f==='week') list=list.filter(t=>isThisWeek(t.date) && !t.done);
   else if(f==='overdue') list=list.filter(isOverdue);
-  else if(f==='done') list=list.filter(t=>t.done);
+  else if(f==='done') list=list.filter(t=>!!t.done);
   else if(f==='undated') list=list.filter(t=>!t.date && !t.done);
   else if(f==='must') list=list.filter(t=>t.tier==='must' && !t.done);
   else if(f==='frog') list=list.filter(t=>t.frog && !t.done);
@@ -6284,8 +6284,18 @@ function viewTasks(){
   if(f==='done'){
     const from=state.completedFrom||'';
     const to=state.completedTo||'';
-    if(from) list=list.filter(t=>!t.date || String(t.date)>=from);
-    if(to) list=list.filter(t=>!t.date || String(t.date)<=to);
+    if(from || to){
+      const ranged=list.filter(t=>{
+        const d=String(t.completedDate||t.date||'');
+        if(from && d && d<from) return false;
+        if(to && d && d>to) return false;
+        // tasks with no date still show when filtering completed
+        if(!d && (from||to)) return true;
+        return true;
+      });
+      // If range would hide everything but we have completed tasks, ignore broken range
+      if(ranged.length || !list.length) list=ranged;
+    }
   }
   // Search title / notes
   if(q){
@@ -6299,7 +6309,9 @@ function viewTasks(){
   if(cf==='school') list=list.filter(t=>(t.context||'school')!=='personal');
   if(cf==='personal') list=list.filter(t=>(t.context||'school')==='personal');
   // List overwhelm modes — must run BEFORE building items
+  // Completed view must never use spotlight/jar/one (those keep only open tasks → empty list)
   let mode = state.listMode || 'all'; if(mode==='batch') mode='spotlight';
+  if(f==='done') mode = 'all';
   let modeBanner = tasksViewToolbar();
   if((state.listMode||'')==='wall'){
     modeBanner = `<div class="card" style="padding:10px;margin-bottom:10px;border-left:4px solid var(--pine)"><b>Tile Wall</b> — only tiles below. <button type="button" class="btn ghost sm" data-action="list-mode" data-mode="all">Full list</button></div>`;
@@ -6320,7 +6332,9 @@ function viewTasks(){
     </div>`;
     list = shown; // do NOT show the rest
   }
-  const items = list.length ? list.map(taskCard).join('') : `<div class="empty">Nothing here. Add a task above, or pick a different filter.</div>`;
+  const items = list.length ? list.map(taskCard).join('') : (f==='done'
+    ? `<div class="empty">No completed tasks yet. Mark a task done (checkbox or More → Mark as done), then open Show completed tasks again.</div>`
+    : `<div class="empty">Nothing here. Add a task above, or pick a different filter.</div>`);
   if(mode === 'one'){
     const open = list.filter(t=>!t.done);
     const idx = Math.min(state.oneAtATimeIndex||0, Math.max(0, open.length-1));
@@ -6489,7 +6503,9 @@ function viewTasks(){
     <button type="button" class="btn ${f==='done'?'':'ghost'} sm" data-filter="done">Show completed tasks (${(state.tasks||[]).filter(t=>t.done).length})</button>
   </div>
   ${f==='done' ? `<div class="card" style="padding:10px 12px;margin-bottom:10px">
-    <div style="font-size:.85rem;font-weight:600;margin-bottom:8px">Completed — date range (optional)</div>
+    <div style="font-size:.85rem;font-weight:600;margin-bottom:8px">Completed tasks (${(state.tasks||[]).filter(x=>!!x.done).length} total)</div>
+    <p style="font-size:.78rem;color:var(--muted);margin:0 0 8px">Date range is optional. Leave blank to see all completed.</p>
+    <div style="font-size:.85rem;font-weight:600;margin-bottom:8px">Filter by date (optional)</div>
     <div class="row">
       <div class="field"><label>From</label><input type="date" id="completedFrom" value="${state.completedFrom||''}"></div>
       <div class="field"><label>To</label><input type="date" id="completedTo" value="${state.completedTo||''}"></div>
