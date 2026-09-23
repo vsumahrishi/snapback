@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="237">
+<meta name="snapback-build" content="238">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4352,6 +4352,7 @@ function renderModal(){
               <button class="btn ghost" id="tmPin">📌 Top of Mind</button>
               <button class="btn ghost" id="tmBurn">${t.backburner?'↩️ Bring back from Backburner':'🔥 Send to Backburner'}</button>
               <button class="btn ghost" id="tmContext">${t.context==='personal'?('🎓 Mark as '+L('newTaskSchool')):('🏠 Mark as '+L('personal'))}</button>
+              <button class="btn ghost" id="tmTier">${t.tier==='must'?'⬇️ Move to Could-do':'⬆️ Move to Must-do (Should do)'}</button>
               <button class="btn ghost" id="tmFrog">${t.frog?'🐸 Unmark frog':'🐸 Mark as Frog (do this first)'}</button>
               <button class="btn ghost" id="tmFocus">Start Focus Pod</button>
               <button class="btn ghost" id="tmEdit">✏️ Edit title / date / notes</button>
@@ -4380,6 +4381,13 @@ function renderModal(){
         persistRender();
       };
       document.getElementById('tmFocus').onclick=()=>{ closeTaskMenu(); goFocusWithTask(t.id); };
+      const tmTier=document.getElementById('tmTier');
+      if(tmTier) tmTier.onclick=()=>{
+        t.tier = (t.tier==='must') ? 'could' : 'must';
+        closeTaskMenu();
+        showAppMessage(t.tier==='must'?'Must-do':'Could-do', t.tier==='must'?'Shows under Must do on Home.':'Shows under Could do on Home.');
+        persistRender();
+      };
       const tmFrog=document.getElementById('tmFrog');
       if(tmFrog) tmFrog.onclick=()=>{ t.frog=!t.frog; closeTaskMenu(); showAppMessage(t.frog?'Frog set':'Frog cleared', t.frog?'This task shows first on Today as “eat the frog”.':'Removed frog mark.'); };
       document.getElementById('tmEdit').onclick=()=>{
@@ -6125,7 +6133,7 @@ function viewToday(){
       <h3>Must-Do vs Could-Do</h3>
       <div class="mustcould">
         <div class="mc-col">
-          <h4 style="color:var(--brick)">Must do</h4>
+          <h4 style="color:var(--brick)">Must do (should do)</h4>
           ${mustToday.length ? mustToday.map(t=>`<div class="mc-item" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="check" data-action="toggle-done" data-id="${t.id}" title="Mark complete"><button type="button" class="btn ghost sm" data-action="open-task-menu" data-id="${t.id}" style="flex:1;text-align:left">${escapeHtml(t.title)}</button></div>`).join('') : '<div class="empty">Nothing marked "must" — tag a task on the Tasks page.</div>'}
         </div>
         <div class="mc-col">
@@ -9396,14 +9404,21 @@ function viewSettings(){
         </div>
         <div style="font-size:.78rem;color:var(--muted);margin-top:6px">${L('audienceHint')}</div>
       </div>
-      <div class="field" style="margin-top:10px"><label>Your name</label><input id="profileName" placeholder="Your name" value="${escapeHtml((state.profile&&state.profile.name)||'')}"></div>
+      <div class="field" style="margin-top:10px"><label>Display name (shown on Home)</label>
+        <input id="profileName" placeholder="e.g. Uma" value="${escapeHtml((state.profile&&state.profile.name)||'')}">
+      </div>
+      <p style="font-size:.78rem;color:var(--muted);margin:4px 0 0">This is <b>not</b> your Google account name. Clear “Student” and type your name, then tap <b>Save profile</b> below.</p>
+      <div class="field" style="margin-top:10px"><label>Local login username (optional change)</label>
+        <input id="localUsernameEdit" placeholder="Only if you use username login" value="${escapeHtml((()=>{ try{ const a=getLocalAuth(); return a&&a.username||''; }catch(e){ return ''; } })())}">
+      </div>
+
       ${(state.profile&&state.profile.email)?`<p style="font-size:.85rem;color:var(--muted);margin:6px 0 0">Google: <b>${escapeHtml(state.profile.email)}</b></p>`:''}
       <div class="row" style="margin-top:8px">
         <div class="field"><label>${L('grade')}</label><input id="profileGrade" placeholder="${L('gradePh')}" value="${escapeHtml((state.profile&&state.profile.grade)||'')}"></div>
         <div class="field"><label>School / college</label><input id="profileSchool" placeholder="Optional" value="${escapeHtml((state.profile&&state.profile.school)||'')}"></div>
       </div>
       <div class="field" style="margin-top:8px"><label>Notes</label><input id="profileNotes" placeholder="Anything helpful" value="${escapeHtml((state.profile&&state.profile.notes)||'')}"></div>
-      <button class="btn sm" id="saveProfileBtn" style="margin-top:10px">Save profile</button>
+      <button class="btn sm" id="saveProfileBtn" style="margin-top:10px">Save profile / name</button>
       <button class="btn ghost sm" id="logoutBtn" style="margin-top:10px;margin-left:8px">Log out</button>
     </div>
 
@@ -11212,8 +11227,18 @@ function wireView(){
       state.profile.grade=(document.getElementById('profileGrade')?.value||'').trim();
       state.profile.school=(document.getElementById('profileSchool')?.value||'').trim();
       state.profile.notes=(document.getElementById('profileNotes')?.value||'').trim();
+      try{
+        const nu=(document.getElementById('localUsernameEdit')?.value||'').trim();
+        const la=getLocalAuth();
+        if(la && nu && nu.length>=2){
+          la.username=nu;
+          setLocalAuth(la);
+        }
+      }catch(e){}
+      try{ saveState(); }catch(e){}
+      try{ upsertAdminUserRecord(); }catch(e){}
       persistRender();
-      showAppMessage('Profile saved', state.profile.name ? state.profile.name : 'Your details are saved.');
+      showAppMessage('Profile saved', state.profile.name ? ('Name: '+state.profile.name) : 'Your details are saved.');
     });
     const pullSync=document.getElementById('pullSyncBtn');
     if(pullSync) pullSync.addEventListener('click', ()=>{
