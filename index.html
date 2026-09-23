@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="236">
+<meta name="snapback-build" content="237">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -559,10 +559,23 @@ function endOfWeekStr(){
   end.setDate(d.getDate()+(6-day));
   return toDateStr(end);
 }
+function startOfWeekStr(){
+  const d=new Date();
+  const day=(d.getDay()+6)%7;
+  const start=new Date(d);
+  start.setDate(d.getDate()-day);
+  return toDateStr(start);
+}
 function isThisWeek(dateStr){
   if(!dateStr) return false;
-  const t=todayStr(), e=endOfWeekStr();
-  return dateStr>=t && dateStr<=e;
+  // Full Mon–Sun of the current week (not only from today forward)
+  try{
+    const a=startOfWeekStr(), e=endOfWeekStr();
+    return dateStr>=a && dateStr<=e;
+  }catch(e){
+    const t=todayStr(), e2=endOfWeekStr();
+    return dateStr>=t && dateStr<=e2;
+  }
 }
 function mondayIndex(d){ return (d.getDay()+6)%7; } // Monday=0 ... Sunday=6
 
@@ -2856,19 +2869,33 @@ function wireSchedForm(){
 
 function addStudyBlock(){
   const label=document.getElementById('tbLabel').value.trim();
-  if(!label) return;
+  if(!label){ showAppMessage('What is the block for?', 'Type a name for the time block.'); return; }
   const date=document.getElementById('tbDate').value || todayStr();
   const start=document.getElementById('tbStart').value;
   const end=document.getElementById('tbEnd').value;
   const meetingUrl=document.getElementById('tbMeetingUrl').value.trim();
-  if(!start||!end) return;
+  if(!start||!end){ showAppMessage('Times needed', 'Set start and end time.'); return; }
   if(!warnIfConflicts({dateStr:date, start, end})) return;
   const id=uid();
   state.studyBlocks.push({id,label,date,start,end,meetingUrl});
-  pushUndo({type:'add-block', id, label:'Appointment added — Undo'});
-  document.getElementById('tbLabel').value=''; document.getElementById('tbMeetingUrl').value='';
+  // Also create a Tasks-list item so Time Blocking, Tasks, and Plan this week stay connected
+  if(!Array.isArray(state.tasks)) state.tasks=[];
+  const taskId=uid();
+  state.tasks.unshift({
+    id:taskId, title:label, notes:'From Time Blocking '+start+'-'+end, date:date, time:start,
+    priority:'medium', urgent:false, important:false, tier:'could', frog:false, context:'school',
+    technique:'timeblocking', meetingUrl:meetingUrl||'', reminderLeads:[0], reminderTime:start||'09:00',
+    startDate:date, startTime:start, startReminderMinutes:[], chunks:[], pomodoros:0, done:false,
+    whenThen:{}, rewarding:{}, strategic:{}, flip:{}, planWeek:true, studyBlockId:id, created:Date.now()
+  });
+  state.filter='all';
+  pushUndo({type:'add-block', id, label:'Block + task added — Undo'});
+  try{ document.getElementById('tbLabel').value=''; document.getElementById('tbMeetingUrl').value=''; }catch(e){}
+  try{ saveState(); }catch(e){}
+  showAppMessage('Saved', label+' on '+date+' — also on Tasks (This week / search).');
   persistRender();
 }
+
 function deleteStudyBlock(id){
   const item=state.studyBlocks.find(b=>b.id===id);
   if(item) pushUndo({type:'delete-block', item:JSON.parse(JSON.stringify(item)), label:'Appointment removed — Undo'});
@@ -2887,9 +2914,41 @@ function getRule135(){
 function updateRule135(level,idx,field,value){
   const r=getRule135();
   if(level==='big'){ r.big[field]=value; }
-  else{ r[level][idx][field]=value; }
+  else if(r[level] && r[level][idx]){ r[level][idx][field]=value; }
+  if(field==='text'){ try{ saveState(); }catch(e){} return; }
   persistRender();
 }
+function clearRule135Item(level, idx){
+  const r=getRule135();
+  if(level==='big'){ r.big={text:'',done:false}; }
+  else if(r[level] && r[level][idx]){ r[level][idx]={text:'',done:false}; }
+  persistRender();
+}
+function saveRule135PlateToTasks(){
+  const r=getRule135();
+  const items=[];
+  if(r.big && (r.big.text||'').trim()) items.push({text:r.big.text.trim(), tier:'must'});
+  (r.medium||[]).forEach(it=>{ if((it.text||'').trim()) items.push({text:it.text.trim(), tier:'could'}); });
+  (r.small||[]).forEach(it=>{ if((it.text||'').trim()) items.push({text:it.text.trim(), tier:'could'}); });
+  if(!items.length){ showAppMessage('Nothing to save', 'Type at least one item on the plate first.'); return; }
+  if(!Array.isArray(state.tasks)) state.tasks=[];
+  let n=0;
+  items.forEach(it=>{
+    if(state.tasks.some(x=>!x.done && (x.title||'').trim().toLowerCase()===it.text.toLowerCase())) return;
+    state.tasks.unshift({
+      id:uid(), title:it.text, notes:'From Focus Plate', date:todayStr(), time:'', priority:'medium',
+      urgent:false, important:false, tier:it.tier, frog:false, context:'school', technique:'rule135',
+      meetingUrl:'', reminderLeads:[0], reminderTime:'09:00', chunks:[], pomodoros:0, done:false,
+      whenThen:{}, rewarding:{}, strategic:{}, flip:{}, created:Date.now()
+    });
+    n++;
+  });
+  state.filter='all';
+  try{ saveState(); }catch(e){}
+  showAppMessage('Saved to Tasks', n+' item(s) are now on the Tasks list.');
+  persistRender();
+}
+
 
 /* ============================================================
    Healthy habits — a habit can be a simple checkbox, a number (sleep hours, screen time
@@ -5781,8 +5840,8 @@ function challengePathsFor(id){
 
 function viewPlanAhead(){
   const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner);
-  const week = open.filter(t=>t.planWeek===true);
-  const rest = open.filter(t=>!t.planWeek);
+  const week = open.filter(t=>t.planWeek===true || isThisWeek(t.date));
+  const rest = open.filter(t=>!(t.planWeek===true || isThisWeek(t.date)));
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
@@ -5861,6 +5920,19 @@ function setPreferredAI(v){
   if(!state.settings) state.settings={};
   state.settings.preferredAI=v;
   try{ localStorage.setItem('snapback_ai', v); }catch(e){}
+}
+
+function preferredAI(){ try{ return localStorage.getItem('snapback_preferred_ai')||'grok'; }catch(e){ return 'grok'; } }
+function setPreferredAI(v){ try{ localStorage.setItem('snapback_preferred_ai', v||'grok'); }catch(e){} }
+function aiPickerHtml(idPrefix){
+  const cur=preferredAI();
+  return '<select id="'+idPrefix+'AiSelect" style="max-width:140px">'
+    +'<option value="grok"'+(cur==='grok'?' selected':'')+'>Grok</option>'
+    +'<option value="chatgpt"'+(cur==='chatgpt'?' selected':'')+'>ChatGPT</option>'
+    +'<option value="claude"'+(cur==='claude'?' selected':'')+'>Claude</option>'
+    +'<option value="gemini"'+(cur==='gemini'?' selected':'')+'>Gemini</option>'
+    +'<option value="perplexity"'+(cur==='perplexity'?' selected':'')+'>Perplexity</option>'
+    +'</select>';
 }
 function openAIWithPrompt(prompt, ai){
   const q = String(prompt||'').trim();
@@ -8374,6 +8446,7 @@ function viewRule135(){
     <input type="checkbox" class="check" ${item.done?'checked':''} data-action="r135-done" data-level="${level}" data-idx="${idx}">
     <input type="text" value="${escapeHtml(item.text)}" placeholder="..." data-action="r135-text" data-level="${level}" data-idx="${idx}">
     <button class="btn ghost sm" data-action="make-nn" data-level="${level}" data-idx="${idx}" title="Make this today's Non-negotiable" style="flex:0 0 auto;font-size:.72rem">★ NN</button>
+    <button class="btn ghost sm" data-action="r135-clear" data-level="${level}" data-idx="${idx}" title="Clear line" style="flex:0 0 auto;font-size:.72rem">✕</button>
   </div>`;
   return `
   <div class="pagehead">
@@ -8407,8 +8480,8 @@ function viewRule135(){
     <div class="r135group"><h4>5 small tasks</h4>${r.small.map((it,i)=>row('small',i,it)).join('')}</div>
   </div>
   <div style="margin-top:16px;text-align:center">
-    <button class="btn warm" data-action="open-bitesize-from-plate">Bite Size → walk through today's tasks</button>
-    <p style="font-size:.78rem;color:var(--muted);margin-top:8px">Opens a guided flow: first task → break into bites → next task (you can skip any).</p>
+    <button class="btn" type="button" id="savePlateToTasksBtn">Save plate items to Tasks</button>
+    <p style="font-size:.78rem;color:var(--muted);margin-top:8px">Adds your big/medium/small lines to the main Tasks list for today.</p>
   </div>`;
 }
 
@@ -10140,7 +10213,11 @@ function wireView(){
     });
     else if(action==='remove-track') el.addEventListener('click', ()=>removeTrack(id));
     else if(action==='r135-done') el.addEventListener('change', ()=>updateRule135(el.dataset.level, Number(el.dataset.idx), 'done', el.checked));
-    else if(action==='r135-text') el.addEventListener('change', ()=>updateRule135(el.dataset.level, Number(el.dataset.idx), 'text', el.value));
+    else if(action==='r135-text'){
+      el.addEventListener('input', ()=>updateRule135(el.dataset.level, Number(el.dataset.idx), 'text', el.value));
+      el.addEventListener('change', ()=>updateRule135(el.dataset.level, Number(el.dataset.idx), 'text', el.value));
+    }
+    else if(action==='r135-clear') el.addEventListener('click', ()=>clearRule135Item(el.dataset.level, Number(el.dataset.idx)));
     else if(action==='make-nn') el.addEventListener('click', ()=>{
       const r=getRule135();
       const level=el.dataset.level; const idx=Number(el.dataset.idx);
@@ -10776,6 +10853,8 @@ function wireView(){
   if(state.view==='rule135'){
     const setNnPlateBtn=document.getElementById('setNnPlateBtn'); if(setNnPlateBtn) setNnPlateBtn.addEventListener('click', setNonNegotiable);
     const nnInputPlate=document.getElementById('nnInputPlate'); if(nnInputPlate) nnInputPlate.addEventListener('keydown', e=>{ if(e.key==='Enter') setNonNegotiable(); });
+    const savePlate=document.getElementById('savePlateToTasksBtn');
+    if(savePlate) savePlate.addEventListener('click', saveRule135PlateToTasks);
   }
 
   if(state.view==='bodydouble'){
