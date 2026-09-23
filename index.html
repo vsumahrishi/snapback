@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="238">
+<meta name="snapback-build" content="239">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -5053,7 +5053,7 @@ async function signInWithGoogle(){
   }
   _googleSignInBusy=true;
   try{
-    const native = (typeof isCapacitorNative==='function' && isCapacitorNative());
+    const native = (typeof isNativeApp==='function' && isNativeApp()) || !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 
     // PHONE / Capacitor: use native Google Sign-In plugin (avoids localhost + missing initial state)
     if(native){
@@ -5062,10 +5062,18 @@ async function signInWithGoogle(){
         window.Capacitor.Plugins.FirebaseAuth
       );
       if(!plugin || typeof plugin.signInWithGoogle!=='function'){
+        const web = (typeof DEFAULT_PUBLIC_WEB_URL!=='undefined' && DEFAULT_PUBLIC_WEB_URL) || 'https://vsumahrishi.github.io/snapback/';
         showAppMessage(
-          'Phone Google setup needed',
-          'Finish teacher steps: SHA-1, google-services.json, npm install plugin, then rebuild APK. Or open the website for Gmail for now.'
+          'Use website for Gmail',
+          'This APK does not have the Google plugin yet. Opening the SnapBack website so you can sign in with Gmail there (same account syncs).'
         );
+        try{
+          if(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser){
+            window.Capacitor.Plugins.Browser.open({ url: web });
+          } else {
+            window.open(web, '_blank');
+          }
+        }catch(e){ window.open(web, '_blank'); }
         return;
       }
       const res = await plugin.signInWithGoogle();
@@ -11148,8 +11156,10 @@ function wireView(){
         if(raw){
           try{ setFirebaseConfig(parseFirebaseConfigText(raw)); }catch(e){}
         }
-        if(!getFirebaseConfig()){
-          showAppMessage('Config needed once', 'Paste Firebase config above, then tap Sign in with Google.');
+        // Baked DEFAULT_FIREBASE_CONFIG is enough — do not block on paste
+        try{ initFirebase(); }catch(e){}
+        if(!getFirebaseConfig() && !(_auth)){
+          showAppMessage('Config needed once', 'Paste Firebase config above, or use the website for Gmail.');
           return;
         }
         signInWithGoogle();
