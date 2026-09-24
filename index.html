@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="243">
+<meta name="snapback-build" content="244">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -5767,7 +5767,7 @@ function hubPage(title, sub, cards){
 const SB_TOOLS = {
   focusPlate: {title:'Focus Plate', desc:'Cap today: 1 big, 3 medium, 5 small. When the plate is full, you are done.', ico:'🍽', nav:'rule135'},
   biteSize: {title:'Bite Size', desc:'Cut one scary task into tiny steps you can finish in a few minutes.', ico:'🍽', nav:'bitesize'},
-  bugMe: {title:'Nudge', desc:'A nudge that keeps coming until that task is done.', ico:'🐛', nav:'settings'},
+  bugMe: {title:'Nudge', desc:'A nudge (alarm) that keeps coming until you stop it.', ico:'⏰', nav:'settings'},
   startWizard: {title:'Start Wizard', desc:'Three quick questions to unstick “I do not know how to begin.”', ico:'🪄', action:'start-wizard'},
   spotlight: {title:'Spotlight', desc:'Opens Tasks and hides everything except 3 open tasks until you finish them.', ico:'🔦', action:'mode-spotlight'},
   smallBatch: {title:'Small Batch', desc:'Opens Tasks with only a set of 3. Finish them, then take the next set.', ico:'📦', action:'mode-batch'},
@@ -5837,47 +5837,49 @@ function ensureTaskForChallenge(challengeId, toolId){
   try{ saveState(); }catch(e){}
   return task;
 }
+
 function applyChallengeTool(toolId, challengeId){
   const open = (state.tasks||[]).filter(x=>!x.done && !x.backburner);
-  const needsTask = ['spotlight','small-batch','jar','spin','bitesize','cheese','focus','timer','eisenhower','backburner-help'].indexOf(toolId)>=0;
-  let task = null;
-  if(needsTask){
-    if(open.length && (toolId==='jar'||toolId==='spin'||toolId==='spotlight'||toolId==='small-batch')) task = open[Math.floor(Math.random()*open.length)] || open[0];
-    else task = ensureTaskForChallenge(challengeId, toolId);
+  let task = open[0] || null;
+  // Ensure a linked task when the technique needs one
+  const needEnsure = ['bitesize','cheese','focus','timer','eisenhower','rule135','focusPlate','bodydouble','focusPod'].indexOf(toolId)>=0;
+  if(needEnsure){
+    task = ensureTaskForChallenge(challengeId, toolId) || task;
   }
-  if(toolId==='spotlight' || toolId==='small-batch'){
-    state.listMode = 'spotlight'; state.spotlightLimit = 3;
-    if(task) state.topOfMindId = task.id;
-    showAppMessage('Task ready', (task?task.title+' — ':'')+'Listed under Tasks.');
-    navigateTo('tasks'); return;
-  }
-  if(toolId==='jar' || toolId==='spin'){
-    const pool = open.length ? open : (task?[task]:[]);
-    if(!pool.length){ showAppMessage('No open tasks', 'Add a task first.'); return; }
-    const t = pool[Math.floor(Math.random()*pool.length)];
-    state.topOfMindId = t.id;
-    showAppMessage('Pulled a task', t.title);
-    navigateTo('tasks'); return;
-  }
-  if(toolId==='backburner-help'){
-    if(task){ task.backburner = true; try{saveState();}catch(e){} }
-    showAppMessage('Parked', task?task.title+' → Backburner':'Open Tasks → Backburner');
-    navigateTo('tasks'); return;
-  }
-  if(toolId==='bitesize' || toolId==='cheese'){
-    if(task){ applyTechniqueTaskId(task.id); } else if(open[0]) applyTechniqueTaskId(open[0].id);
-    navigateTo('bitesize'); return;
-  }
-  if(toolId==='focus' || toolId==='timer'){
-    if(!state.timer) state.timer={};
-    if(task) applyTechniqueTaskId(task.id); else if(open[0]) applyTechniqueTaskId(open[0].id);
-    navigateTo('timer'); return;
-  }
-  if(toolId==='eisenhower'){ if(task){ applyTechniqueTaskId(task.id); state.topOfMindId=task.id; } navigateTo('eisenhower'); return; }
-  if(toolId==='plan-ahead'){ if(task) applyTechniqueTaskId(task.id); navigateTo('planAhead'); return; }
-  if(toolId==='bugme'){ navigateTo('settings'); showAppMessage('Alarm', 'Set time and Save.'); return; }
+  if(task) applyTechniqueTaskId(task.id);
+
+  // Real technique screens (same as Techniques menu)
+  if(toolId==='bitesize' || toolId==='cheese'){ navigateTo('bitesize'); return; }
+  if(toolId==='focus' || toolId==='timer' || toolId==='focusPod'){ navigateTo('timer'); return; }
+  if(toolId==='rule135' || toolId==='focusPlate'){ navigateTo('rule135'); return; }
+  if(toolId==='eisenhower'){ navigateTo('eisenhower'); return; }
+  if(toolId==='bodydouble' || toolId==='bodyDouble'){ navigateTo('bodydouble'); return; }
+  if(toolId==='timeblocking' || toolId==='schedule'){ navigateTo('timeblocking'); return; }
+  if(toolId==='plan-ahead' || toolId==='planAhead'){ navigateTo('planAhead'); return; }
   if(toolId==='journal'){ navigateTo('journal'); return; }
-  if(task) showAppMessage('Task added', task.title);
+  if(toolId==='bugme' || toolId==='bugMe' || toolId==='settings'){
+    navigateTo('settings');
+    showAppMessage('Nudge (alarm)', 'Scroll to Nudge / alarm, set time, and Save.');
+    return;
+  }
+  if(toolId==='calendar'){ navigateTo('calendar'); return; }
+  if(toolId==='today'){ navigateTo('today'); return; }
+  if(toolId==='tasks'){ state.listMode='all'; navigateTo('tasks'); return; }
+  if(toolId==='mustFrog'){ state.listMode='all'; state.filter='all'; navigateTo('tasks'); showAppMessage('Must-do & Frog', 'Open a task → More → Must-do or Frog.'); return; }
+
+  // Task-list modes with real UIs
+  if(toolId==='spotlight' || toolId==='small-batch' || toolId==='smallBatch'){
+    state.listMode='spotlight'; state.spotlightSize=3; state.filter='all'; navigateTo('tasks'); return;
+  }
+  if(toolId==='jar' || toolId==='grabBag'){ state.listMode='jar'; state.filter='all'; navigateTo('tasks'); return; }
+  if(toolId==='one' || toolId==='oneAtATime'){ state.listMode='one'; state.oneAtATimeIndex=0; state.filter='all'; navigateTo('tasks'); return; }
+  if(toolId==='wall' || toolId==='tileWall'){ state.listMode='wall'; state.filter='all'; navigateTo('tasks'); return; }
+  if(toolId==='pool' || toolId==='popPool'){ state.listMode='pool'; state.filter='all'; navigateTo('tasks'); return; }
+  if(toolId==='spin' || toolId==='spinPick'){ state.listMode='spin'; state.spinResult=null; state.filter='all'; navigateTo('tasks'); return; }
+  if(toolId==='backburner-help' || toolId==='backburner'){
+    state.filter='backburner'; state.listMode='all'; navigateTo('tasks'); return;
+  }
+
   navigateTo('tasks');
 }
 
@@ -6159,6 +6161,7 @@ function wizardCreateTask(){
   try{ saveState(); }catch(e){}
   wizardSetTask(id);
 }
+
 const START_WIZARD_QS = [
   {
     id: 'energy',
@@ -6174,26 +6177,81 @@ const START_WIZARD_QS = [
     id: 'reset',
     q: 'Quick reset first (30–60 seconds). Pick one:',
     onlyIf: (a)=> a.energy==='restless' || a.energy==='sluggish' || a.energy==='foggy',
-    opts: [
-      { id:'water', label:'Hydrate — drink water' },
-      { id:'desk', label:'Put away 3 things on the desk' },
-      { id:'stretch', label:'30-second stretch or walk to the door and back' },
-      { id:'headphones', label:'Grab headphones / set the room' }
-    ]
+    optsFor: (a)=>{
+      if(a.energy==='restless') return [
+        { id:'shake', label:'Shake out hands / stretch for 30 seconds' },
+        { id:'walk', label:'Walk to the door and back' },
+        { id:'water', label:'Drink water, then sit again' },
+        { id:'timer', label:'Set a 2-minute timer and pace until it rings' }
+      ];
+      if(a.energy==='sluggish') return [
+        { id:'water', label:'Cold water or a splash on the face' },
+        { id:'stand', label:'Stand up and open a window / light' },
+        { id:'snack', label:'Small snack or tea' },
+        { id:'stretch', label:'Gentle stretch — neck and shoulders' }
+      ];
+      return [
+        { id:'breathe', label:'3 slow breaths, eyes closed' },
+        { id:'desk', label:'Clear only 3 things off the desk' },
+        { id:'headphones', label:'Put headphones on, one calm song' },
+        { id:'name', label:'Say the task name out loud once' }
+      ];
+    },
+    opts: []
   },
   {
     id: 'fiveMin',
-    q: 'If you only had energy for 5 minutes, what part would you do?',
+    q: 'If you only had energy for 5 minutes, what would you do?',
+    optsFor: (a)=>{
+      if(a.energy==='foggy') return [
+        { id:'guidelines', label:'Read only the assignment title / first line of guidelines' },
+        { id:'open', label:'Open the file or portal — nothing else' },
+        { id:'list3', label:'Write 3 bullet words about the topic' },
+        { id:'notes', label:'Open last class notes to the bookmark' }
+      ];
+      if(a.energy==='sluggish') return [
+        { id:'open', label:'Only open the document' },
+        { id:'title', label:'Type the title or heading' },
+        { id:'portal', label:'Log in to the portal' },
+        { id:'folder', label:'Find the folder where the work lives' }
+      ];
+      return [
+        { id:'reading', label:'A specific bit of reading' },
+        { id:'notes', label:'My class notes' },
+        { id:'guidelines', label:'The assignment guidelines' },
+        { id:'open', label:'Just open the file' }
+      ];
+    },
     opts: [
       { id:'reading', label:'A specific bit of reading' },
-      { id:'notes', label:'My class notes / last notes' },
-      { id:'guidelines', label:'The assignment guidelines / rubric' },
-      { id:'open', label:'Just open the file or portal' }
+      { id:'notes', label:'My class notes' },
+      { id:'guidelines', label:'The assignment guidelines' },
+      { id:'open', label:'Just open the file' }
     ]
   },
   {
     id: 'silly',
     q: 'What is a piece so small it almost feels silly to write down?',
+    optsFor: (a)=>{
+      if(a.fiveMin==='open' || a.fiveMin==='title') return [
+        { id:'cursor', label:'Click once so the cursor is in the document' },
+        { id:'title', label:'Type one word as a title' },
+        { id:'save', label:'Hit Save / make sure the file has a name' },
+        { id:'close_tabs', label:'Close one unrelated browser tab' }
+      ];
+      if(a.fiveMin==='reading') return [
+        { id:'sentence', label:'Read exactly one sentence' },
+        { id:'heading', label:'Read only the section headings' },
+        { id:'highlight', label:'Highlight one phrase' },
+        { id:'bookmark', label:'Bookmark the page' }
+      ];
+      return [
+        { id:'blank', label:'Open a blank document' },
+        { id:'title', label:'Write just the title' },
+        { id:'sentence', label:'Read exactly one sentence' },
+        { id:'portal', label:'Log into the student portal' }
+      ];
+    },
     opts: [
       { id:'blank', label:'Open a blank document' },
       { id:'title', label:'Write just the title' },
@@ -6213,7 +6271,21 @@ const START_WIZARD_QS = [
   },
   {
     id: 'leastPain',
-    q: 'What part sounds least painful or most interesting to look at first?',
+    q: 'What part sounds least painful or most interesting to start with?',
+    optsFor: (a)=>{
+      if(a.fiveMin==='guidelines') return [
+        { id:'rubric', label:'Skim the rubric / marking criteria only' },
+        { id:'intro', label:'The intro instructions' },
+        { id:'examples', label:'Any sample or example given' },
+        { id:'deadline', label:'Just confirm the due date' }
+      ];
+      return [
+        { id:'intro', label:'Intro / creative / overview part' },
+        { id:'format', label:'Formatting / layout / fiddling' },
+        { id:'research', label:'Research / gathering links' },
+        { id:'middle', label:'The middle “real work” section' }
+      ];
+    },
     opts: [
       { id:'intro', label:'Intro / creative / overview part' },
       { id:'format', label:'Formatting / layout / fiddling' },
@@ -6223,9 +6295,16 @@ const START_WIZARD_QS = [
   }
 ];
 function wizardActiveQuestions(answers){
+  const a = answers||{};
   return START_WIZARD_QS.filter(step=>{
     if(!step.onlyIf) return true;
-    try{ return step.onlyIf(answers||{}); }catch(e){ return true; }
+    try{ return step.onlyIf(a); }catch(e){ return true; }
+  }).map(step=>{
+    let opts = step.opts||[];
+    if(typeof step.optsFor==='function'){
+      try{ opts = step.optsFor(a) || opts; }catch(e){}
+    }
+    return Object.assign({}, step, { opts: opts });
   });
 }
 function wizardPickOption(optId){
@@ -6608,11 +6687,10 @@ function viewTasks(){
   // List overwhelm modes — must run BEFORE building items
   // Completed view must never use spotlight/jar/one (those keep only open tasks → empty list)
   let mode = state.listMode || 'all'; if(mode==='batch') mode='spotlight';
-  if(f==='done' || f==='all' || f==='today' || f==='week' || f==='tomorrow' || f==='overdue'){
-    // Filters should show lists — don't trap user in Grab Bag / One-at-a-time
-    if(mode==='jar' || mode==='one' || mode==='wall') mode = 'all';
-  }
+  // Completed always uses normal list
   if(f==='done') mode = 'all';
+  // Keep intentional modes: wall / jar / one / spin / pool / spotlight
+
   let modeBanner = tasksViewToolbar();
   if((state.listMode||'')==='wall'){
     modeBanner = `<div class="card" style="padding:10px;margin-bottom:10px;border-left:4px solid var(--pine)"><b>Tile Wall</b> — only tiles below. <button type="button" class="btn ghost sm" data-action="list-mode" data-mode="all">Full list</button></div>`;
@@ -6633,6 +6711,65 @@ function viewTasks(){
     </div>`;
     list = shown; // do NOT show the rest
   }
+
+  if(mode === 'wall'){
+    const open = list.filter(t=>!t.done);
+    const tiles = open.map(t=>`
+      <button type="button" class="card" data-action="open-task-menu" data-id="${t.id}"
+        style="text-align:left;padding:14px;min-height:88px;cursor:pointer;border:1px solid var(--line)">
+        <div style="font-size:.72rem;color:var(--muted)">${taskDateTag(t)}</div>
+        <div style="font-weight:700;margin-top:6px">${escapeHtml(t.title)}</div>
+      </button>`).join('');
+    return `
+    <div class="pagehead">
+      <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+      <h1>Tile Wall</h1>
+      <p>Tiles, not a long list. Tap a tile for Done / Edit / more.</p>
+    </div>
+    ${modeBanner}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px">
+      ${tiles || '<div class="empty">No open tasks — add some on Tasks first.</div>'}
+    </div>
+    <button class="btn ghost" data-action="list-mode" data-mode="all" style="margin-top:14px;width:100%">Back to full list</button>`;
+  }
+  if(mode === 'pool'){
+    const open = list.filter(t=>!t.done);
+    const bubbles = open.map(t=>`
+      <button type="button" data-action="toggle-done" data-id="${t.id}"
+        style="border-radius:999px;padding:14px 18px;border:2px solid var(--pine);background:var(--pine-soft);font-weight:700;cursor:pointer">
+        ${escapeHtml(t.title)}
+      </button>`).join('');
+    return `
+    <div class="pagehead">
+      <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+      <h1>Pop Pool</h1>
+      <p>Tap a bubble to mark it done — like popping it.</p>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;padding:16px 0">
+      ${bubbles || '<div class="empty">No open tasks</div>'}
+    </div>
+    <button class="btn ghost" data-action="list-mode" data-mode="all" style="width:100%">Back to full list</button>`;
+  }
+  if(mode === 'spin'){
+    const open = list.filter(t=>!t.done);
+    const result = state.spinResult ? findTask(state.spinResult) : null;
+    return `
+    <div class="pagehead">
+      <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+      <h1>Spin Pick</h1>
+      <p>Let the app pick so you do not have to choose from a long list.</p>
+    </div>
+    <div class="card" style="text-align:center;padding:28px 16px">
+      <div style="font-size:3rem;margin-bottom:8px">🎡</div>
+      ${result ? `<div style="font-size:1.2rem;font-weight:800;margin:12px 0">${escapeHtml(result.title)}</div>
+        <button class="btn" data-action="open-task-menu" data-id="${result.id}">Work on this</button>
+        <button class="btn ghost" data-action="spin-again" style="margin-top:8px">Spin again</button>`
+        : `<p style="color:var(--muted)">${open.length} open task(s) in the wheel</p>
+        <button class="btn" data-action="spin-again" ${open.length?'':'disabled'}>Spin</button>`}
+    </div>
+    <button class="btn ghost" data-action="list-mode" data-mode="all" style="width:100%;margin-top:12px">Back to full list</button>`;
+  }
+
   const items = list.length ? list.map(taskCard).join('') : (f==='done'
     ? `<div class="empty">No completed tasks yet. Mark a task done (checkbox or More → Mark as done), then open Show completed tasks again.</div>`
     : `<div class="empty">Nothing here. Add a task above, or pick a different filter.</div>`);
@@ -7906,7 +8043,7 @@ function viewBiteSize(){
     <div class="field"><label>Book / subject</label><input id="biteBook" placeholder="e.g. NCERT Physics Class 11" value="${escapeHtml((t&&t.studyMeta&&t.studyMeta.book)||'')}"></div>
     <div class="row" style="margin-top:8px">
       <div class="field"><label>Chapter #</label><input id="biteChNum" placeholder="e.g. 4" value="${escapeHtml((t&&t.studyMeta&&t.studyMeta.chNum)||'')}"></div>
-      <div class="field" style="flex:2"><label>Chapter name</label><input id="biteChName" placeholder="e.g. Motion in a plane" value="${escapeHtml((t&&t.studyMeta&&t.studyMeta.chName)||'')}"></div>
+      <div class="field" style="flex:2"><label>Chapter name</label><input id="biteChName" placeholder="e.g. Motion in a plane" value="${escapeHtml((t&&t.studyMeta&&t.studyMeta.chName)||(t&&t.title)||otherTitle||'')}"></div>
     </div>
     <div class="row" style="margin-top:10px;align-items:center;flex-wrap:wrap;gap:8px">
       ${aiPickerHtml('bite')}
@@ -7916,7 +8053,7 @@ function viewBiteSize(){
   <div class="card">
     <label style="color:var(--pine)">⚡ Quick offline breakdown</label>
     <div class="row">
-      <input id="magicInput" placeholder="${escapeHtml((t&&t.title)||otherTitle||'topic')}">
+      <input id="magicInput" placeholder="topic" value="${escapeHtml((t&&t.title)||otherTitle||'')}">
       <button class="btn sm" id="magicBtn" style="flex:0 0 auto">Break it down</button>
     </div>
     <div id="magicStatus" style="font-size:.8rem;color:var(--muted);margin-top:6px"></div>
@@ -10296,6 +10433,15 @@ function wireView(){
     else if(action==='back-to-today') el.addEventListener('click', ()=>setView('today'));
     else if(action==='test-sound') el.addEventListener('click', (e)=>{ e.preventDefault(); testAlarm(); });
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
+    else if(action==='spin-again') el.addEventListener('click', ()=>{
+      const open=(state.tasks||[]).filter(x=>!x.done&&!x.backburner);
+      if(!open.length){ showAppMessage('No open tasks', 'Add a task first.'); return; }
+      const pick=open[Math.floor(Math.random()*open.length)];
+      state.spinResult=pick.id;
+      state.listMode='spin';
+      applyTechniqueTaskId(pick.id);
+      persistRender();
+    });
     else if(action==='plan-week') el.addEventListener('click', ()=>{ const t=findTask(id); if(t){ t.planWeek=true; persistRender(); } });
     else if(action==='unplan-week') el.addEventListener('click', ()=>{ const t=findTask(id); if(t){ t.planWeek=false; persistRender(); } });
     else if(action==='clear-tom') el.addEventListener('click', ()=>{ state.topOfMindId=null; if(state.timeTrack){ state.timeTrack.startedAt=null; state.timeTrack.taskId=null; } persistRender(); });
@@ -10396,7 +10542,12 @@ function wireView(){
         showAppMessage('Backburner', 'Open a task → choose Backburner to hide it from the main list until you bring it back.'); navigateTo('tasks');
         navigateTo('tasks');
       }
-      else if(p.nav){ const map={rule135:'focusPlate',bitesize:'bitesize',timer:'focus',settings:'bugme',eisenhower:'eisenhower',planAhead:'plan-ahead',journal:'journal',tasks:'bugme'}; applyChallengeTool(map[p.nav]||p.nav, state.challengeId); if(!['rule135','bitesize','timer','settings','eisenhower','planAhead','journal','tasks'].includes(p.nav)) navigateTo(p.nav); }
+      else if(p.nav){
+        // Open the real technique screen (Focus Plate, Bite Size, etc.) — not a generic Tasks dump
+        applyChallengeTool(p.nav, state.challengeId);
+      } else if(p.action){
+        applyChallengeTool(p.action, state.challengeId);
+      }
     });
     else if(action==='journal-file') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); fileJournalEntry(id, el.dataset.bucket); });
     else if(action==='open-bitesize-from-plate') el.addEventListener('click', ()=>{
@@ -11035,8 +11186,20 @@ function wireView(){
     const sel=document.getElementById('cheeseTaskSelect');
     if(sel) sel.addEventListener('change', ()=>{
       state.cheeseTaskId=sel.value;
+      applyTechniqueTaskId(sel.value==='__other__'?'':sel.value);
       if(sel.value==='__other__'){
         state.biteOtherTitle=(document.getElementById('biteOtherTitle')?.value||state.biteOtherTitle||'');
+      } else {
+        const task=findTask(sel.value);
+        if(task){
+          // Auto-fill offline breakdown + AI chapter name from task
+          const ch=document.getElementById('biteChName');
+          const mag=document.getElementById('magicInput')||document.getElementById('biteMagicInput');
+          if(ch && !(ch.value||'').trim()) ch.value=task.title||'';
+          if(ch) ch.value=task.title||ch.value||'';
+          if(mag) mag.value=task.title||'';
+          try{ state.biteOtherTitle=''; }catch(e){}
+        }
       }
       persistRender();
     });
