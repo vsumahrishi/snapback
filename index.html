@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="244">
+<meta name="snapback-build" content="245">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4675,8 +4675,7 @@ function closeTaskMenu(){
 }
 
 function navigateTo(view){
-  if(view==='tasks'){ try{ state.listMode='all'; }catch(e){} }
-
+  // Do NOT reset listMode here — Grab Bag / One-at-a-time / Tile Wall depend on it
   if(!state.navHistory) state.navHistory=[];
   if(state.view && state.view !== view){
     state.navHistory.push(state.view);
@@ -5767,7 +5766,7 @@ function hubPage(title, sub, cards){
 const SB_TOOLS = {
   focusPlate: {title:'Focus Plate', desc:'Cap today: 1 big, 3 medium, 5 small. When the plate is full, you are done.', ico:'🍽', nav:'rule135'},
   biteSize: {title:'Bite Size', desc:'Cut one scary task into tiny steps you can finish in a few minutes.', ico:'🍽', nav:'bitesize'},
-  bugMe: {title:'Nudge', desc:'A nudge (alarm) that keeps coming until you stop it.', ico:'⏰', nav:'settings'},
+  bugMe: {title:'Nudge alarm', desc:'Set an alarm that rings until you stop it — useful when “later” never comes. Not the same as quote sparks on Home.', ico:'⏰', nav:'settings'},
   startWizard: {title:'Start Wizard', desc:'Three quick questions to unstick “I do not know how to begin.”', ico:'🪄', action:'start-wizard'},
   spotlight: {title:'Spotlight', desc:'Opens Tasks and hides everything except 3 open tasks until you finish them.', ico:'🔦', action:'mode-spotlight'},
   smallBatch: {title:'Small Batch', desc:'Opens Tasks with only a set of 3. Finish them, then take the next set.', ico:'📦', action:'mode-batch'},
@@ -5877,7 +5876,7 @@ function applyChallengeTool(toolId, challengeId){
   if(toolId==='pool' || toolId==='popPool'){ state.listMode='pool'; state.filter='all'; navigateTo('tasks'); return; }
   if(toolId==='spin' || toolId==='spinPick'){ state.listMode='spin'; state.spinResult=null; state.filter='all'; navigateTo('tasks'); return; }
   if(toolId==='backburner-help' || toolId==='backburner'){
-    state.filter='backburner'; state.listMode='all'; navigateTo('tasks'); return;
+    state.listMode='backburner-pick'; state.filter='all'; navigateTo('tasks'); return;
   }
 
   navigateTo('tasks');
@@ -6178,23 +6177,36 @@ const START_WIZARD_QS = [
     q: 'Quick reset first (30–60 seconds). Pick one:',
     onlyIf: (a)=> a.energy==='restless' || a.energy==='sluggish' || a.energy==='foggy',
     optsFor: (a)=>{
+      // Restless / high energy: discharge motor energy first (movement before cognitive work)
       if(a.energy==='restless') return [
-        { id:'shake', label:'Shake out hands / stretch for 30 seconds' },
-        { id:'walk', label:'Walk to the door and back' },
-        { id:'water', label:'Drink water, then sit again' },
-        { id:'timer', label:'Set a 2-minute timer and pace until it rings' }
+        { id:'jacks', label:'20 jumping jacks or march in place 60 seconds' },
+        { id:'shake', label:'Shake arms and legs out for 30 seconds' },
+        { id:'stairs', label:'Walk to the end of the hall / one flight of stairs and back' },
+        { id:'pace', label:'Pace the room until a 2-minute timer rings' },
+        { id:'wall', label:'10 wall push-ups or push against a wall hard for 20 seconds' }
       ];
+      // Sluggish / exhausted: gentle activation + blood flow + fuel (not intense exercise)
       if(a.energy==='sluggish') return [
-        { id:'water', label:'Cold water or a splash on the face' },
-        { id:'stand', label:'Stand up and open a window / light' },
-        { id:'snack', label:'Small snack or tea' },
-        { id:'stretch', label:'Gentle stretch — neck and shoulders' }
+        { id:'water', label:'Drink a full glass of water' },
+        { id:'light', label:'Open curtains / face a bright light for 30 seconds' },
+        { id:'stand', label:'Stand up, roll shoulders, sit down again' },
+        { id:'protein', label:'Quick protein or snack if you have not eaten' },
+        { id:'walk_slow', label:'Very slow walk to another room and back' }
       ];
+      // Mentally foggy: reduce cognitive load, single sensory reset, one written cue
+      if(a.energy==='foggy') return [
+        { id:'breathe', label:'Box breathing: in 4, hold 4, out 4, hold 4 (twice)' },
+        { id:'write1', label:'Write only the next step on paper (one line)' },
+        { id:'cold', label:'Splash cool water on wrists or face' },
+        { id:'one_song', label:'One short song with eyes closed, then stop' },
+        { id:'desk3', label:'Put exactly 3 items in their place — then stop' }
+      ];
+      // OK / baseline: tiny physical anchor then task (Fogg-style activation)
       return [
-        { id:'breathe', label:'3 slow breaths, eyes closed' },
-        { id:'desk', label:'Clear only 3 things off the desk' },
-        { id:'headphones', label:'Put headphones on, one calm song' },
-        { id:'name', label:'Say the task name out loud once' }
+        { id:'sit_desk', label:'Walk to the desk and sit (that is the whole step)' },
+        { id:'open_only', label:'Open the file or book — do not start reading yet' },
+        { id:'timer2', label:'Set a 2-minute timer; only prepare materials' },
+        { id:'name_out', label:'Say the task name out loud once' }
       ];
     },
     opts: []
@@ -6203,11 +6215,17 @@ const START_WIZARD_QS = [
     id: 'fiveMin',
     q: 'If you only had energy for 5 minutes, what would you do?',
     optsFor: (a)=>{
+      if(a.energy==='restless') return [
+        { id:'timer_race', label:'Race a 5-minute timer on the noisiest first step' },
+        { id:'standing', label:'Do the first step standing up' },
+        { id:'voice', label:'Talk through the first step out loud' },
+        { id:'open_fast', label:'Open the work in under 30 seconds — no arranging' }
+      ];
       if(a.energy==='foggy') return [
-        { id:'guidelines', label:'Read only the assignment title / first line of guidelines' },
-        { id:'open', label:'Open the file or portal — nothing else' },
+        { id:'guidelines', label:'Read only the title / first line of the brief' },
+        { id:'open', label:'Open the file — do not read yet' },
         { id:'list3', label:'Write 3 bullet words about the topic' },
-        { id:'notes', label:'Open last class notes to the bookmark' }
+        { id:'notes', label:'Open last notes to the bookmark only' }
       ];
       if(a.energy==='sluggish') return [
         { id:'open', label:'Only open the document' },
@@ -6215,11 +6233,12 @@ const START_WIZARD_QS = [
         { id:'portal', label:'Log in to the portal' },
         { id:'folder', label:'Find the folder where the work lives' }
       ];
+      // energy === ok
       return [
         { id:'reading', label:'A specific bit of reading' },
         { id:'notes', label:'My class notes' },
         { id:'guidelines', label:'The assignment guidelines' },
-        { id:'open', label:'Just open the file' }
+        { id:'first_para', label:'Write or read the first short paragraph only' }
       ];
     },
     opts: [
@@ -6434,7 +6453,7 @@ function viewToday(){
       ${classesToday.length ? classesToday.map(c=>`<div class="classrow"><span class="dotcolor" style="background:var(--blue)"></span><b>${c.start}–${c.end}</b>&nbsp;${escapeHtml(c.title)} ${c.room?('· '+escapeHtml(c.room)):''}${c.meetingUrl?`<a href="${escapeHtml(c.meetingUrl)}" target="_blank" rel="noopener" style="margin-left:8px"><button class="btn ghost sm">Join &#8599;</button></a>`:''}</div>`).join('') : `<div class="empty">${isStudentMode() ? 'No classes logged for today. Add them on the Calendar page.' : 'Nothing on the timetable for today. Add commitments on the Calendar page.'}</div>`}
     </div>
     <div class="card">
-      <h3>Need a nudge?</h3>
+      <h3>Need a spark?</h3>
       <p style="color:var(--muted);font-size:.86rem;margin-top:-2px">A short line for when starting feels hard.</p>
       <button class="btn ghost" id="openQuoteBtn">Show me a quote</button>
     </div>
@@ -6712,6 +6731,24 @@ function viewTasks(){
     list = shown; // do NOT show the rest
   }
 
+  if(mode === 'backburner-pick'){
+    const open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
+    return `
+    <div class="pagehead">
+      <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+      <h1>Backburner</h1>
+      <p>Park a task so it stops crowding today. Select one and confirm — you do not need the full Tasks list.</p>
+    </div>
+    <div class="card">
+      <label>Task to park</label>
+      <select id="bbPickSelect">
+        <option value="">— Choose a task —</option>
+        ${open.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}</option>`).join('')}
+      </select>
+      <button class="btn" id="bbPickConfirm" style="margin-top:12px;width:100%">Move to Backburner</button>
+      <button class="btn ghost" data-action="list-mode" data-mode="all" style="margin-top:8px;width:100%">Cancel</button>
+    </div>`;
+  }
   if(mode === 'wall'){
     const open = list.filter(t=>!t.done);
     const tiles = open.map(t=>`
@@ -6781,7 +6818,7 @@ function viewTasks(){
     <div class="pagehead">
       <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
       <h1>One at a time</h1>
-      <p>Only the next open task. Nothing else on this screen.</p>
+      <p>Only one open task on the screen so the list cannot freeze you. Use Next to skip, or Spin for a random pick.</p>
     </div>
     ${modeBanner}
     ${cur ? `<div class="card" style="text-align:center;padding:28px 16px">
@@ -6790,6 +6827,7 @@ function viewTasks(){
       <div class="row" style="justify-content:center;gap:8px;margin-top:16px">
         <button class="btn" data-action="one-done">Mark done</button>
         <button class="btn ghost" data-action="one-next">Skip for now</button>
+        <button class="btn ghost" data-action="spin-again">🎡 Spin another</button>
       </div>
     </div>` : `<div class="empty">No open tasks. Add one above.</div>`}
     `;
@@ -6845,6 +6883,24 @@ function viewTasks(){
     </div>`;
   }
 
+  if(mode === 'backburner-pick'){
+    const open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
+    return `
+    <div class="pagehead">
+      <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+      <h1>Backburner</h1>
+      <p>Park a task so it stops crowding today. Select one and confirm — you do not need the full Tasks list.</p>
+    </div>
+    <div class="card">
+      <label>Task to park</label>
+      <select id="bbPickSelect">
+        <option value="">— Choose a task —</option>
+        ${open.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}</option>`).join('')}
+      </select>
+      <button class="btn" id="bbPickConfirm" style="margin-top:12px;width:100%">Move to Backburner</button>
+      <button class="btn ghost" data-action="list-mode" data-mode="all" style="margin-top:8px;width:100%">Cancel</button>
+    </div>`;
+  }
   if(mode === 'wall'){
     const open = list.filter(t=>!t.done);
     modeBody = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px">
@@ -8023,9 +8079,8 @@ function viewBiteSize(){
     <div class="eyebrow">Small bites, big progress</div><h1>Bite Size</h1><p>Big tasks feel scary. Break them into tiny bites you can finish in 5–15 minutes.</p>
   </div>
   ${guideBanner}
-  ${techniqueTaskPickerHtml(state.cheeseTaskId||state.techniqueTaskId||'')}
   <div class="card">
-    <label>Task (or use picker above)</label>
+    <label>Task for Bite Size</label>
     <select id="cheeseTaskSelect">
       ${undone.map(x=>`<option value="${x.id}" ${!isOther && t && String(t.id)===String(x.id)?'selected':''}>${escapeHtml(x.title)}</option>`).join('')}
       <option value="__other__" ${isOther?'selected':''}>Others</option>
