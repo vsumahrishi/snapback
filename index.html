@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="241">
+<meta name="snapback-build" content="243">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4271,128 +4271,78 @@ function renderModal(){
     return;
   }
 
-  // Start Wizard (in-app, not browser prompt)
+  
+  // Start Wizard — multi-step ADHD kickstart
   if(state.wizard && state.wizard.step){
     const w = state.wizard;
-    if(w.step==='need-task'){
-      root.innerHTML=`<div class="overlay" id="wizOverlay">
-        <div class="quotecard" style="max-width:400px;text-align:left">
-          <div class="qeyebrow">Start Wizard</div>
-          <div style="font-weight:800;font-size:1.15rem;margin-bottom:8px">Add a task first</div>
-          <p style="color:var(--muted);font-size:.95rem;margin:0 0 16px">The wizard helps you start one open task. Add something to Tasks, then come back.</p>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            <button class="btn" id="wizToTasks">Go to Tasks</button>
-            <button class="btn ghost" id="wizClose">Close</button>
-          </div>
+    const task = w.taskId ? findTask(w.taskId) : null;
+    if(w.step==='pick-task'){
+      const open = (state.tasks||[]).filter(x=>!x.done && !x.backburner);
+      root.innerHTML=`<div class="overlay" id="wizOverlay"><div class="quotecard" style="max-width:440px;text-align:left;max-height:90vh;overflow:auto">
+        <div class="qeyebrow">Start Wizard</div>
+        <div style="font-weight:800;font-size:1.15rem;margin-bottom:8px">What are we starting?</div>
+        <p style="color:var(--muted);font-size:.9rem;margin:0 0 12px">Pick an existing task or create one. Then a few short questions — not a lecture.</p>
+        <label>Existing task</label>
+        <select id="wizTaskSelect" style="width:100%;margin-bottom:10px">
+          <option value="">— Choose —</option>
+          ${open.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}</option>`).join('')}
+        </select>
+        <div class="row" style="gap:8px;margin-bottom:12px">
+          <input id="wizNewTask" placeholder="Or type a new task title" style="flex:1">
+          <button class="btn sm" id="wizCreateTask">Create</button>
         </div>
-      </div>`;
-      document.getElementById('wizToTasks').onclick=()=>{ state.wizard=null; navigateTo('tasks'); };
+        <button class="btn" id="wizUseSelected" style="width:100%;margin-bottom:8px">Continue with selected task</button>
+        <button class="btn ghost" id="wizClose" style="width:100%">Close</button>
+      </div></div>`;
       document.getElementById('wizClose').onclick=()=>wizardClose();
+      document.getElementById('wizCreateTask').onclick=()=>wizardCreateTask();
+      document.getElementById('wizUseSelected').onclick=()=>{
+        const id=document.getElementById('wizTaskSelect')?.value;
+        if(!id){ showAppMessage('Pick a task', 'Choose from the list or create a new one.'); return; }
+        wizardSetTask(id);
+      };
       return;
     }
-    if(w.step==='why'){
-      const t = findTask(w.taskId);
-      root.innerHTML=`<div class="overlay" id="wizOverlay">
-        <div class="quotecard" style="max-width:420px;text-align:left">
-          <div class="qeyebrow">Start Wizard</div>
-          <div style="font-weight:800;font-size:1.15rem;margin-bottom:6px">Why is this hard to start?</div>
-          <p style="color:var(--muted);font-size:.9rem;margin:0 0 14px">Task: <b>${escapeHtml(t?t.title:'')}</b></p>
-          <p style="font-size:.85rem;margin:0 0 12px">Tap the one that fits best:</p>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            <button class="btn ghost" id="wizBig" style="text-align:left;padding:12px 14px"><b>Too big</b><div style="font-size:.8rem;color:var(--muted);font-weight:500">I do not know where to begin</div></button>
-            <button class="btn ghost" id="wizBoring" style="text-align:left;padding:12px 14px"><b>Boring</b><div style="font-size:.8rem;color:var(--muted);font-weight:500">I avoid it because it is dull</div></button>
-            <button class="btn ghost" id="wizScary" style="text-align:left;padding:12px 14px"><b>Scary or unclear</b><div style="font-size:.8rem;color:var(--muted);font-weight:500">I am unsure what “good” looks like</div></button>
-            <button class="btn ghost" id="wizOther" style="text-align:left;padding:12px 14px"><b>Something else</b><div style="font-size:.8rem;color:var(--muted);font-weight:500">Energy, mood, or another block</div></button>
-            <button class="btn ghost sm" id="wizClose" style="margin-top:4px">Cancel</button>
-          </div>
-        </div>
-      </div>`;
-      document.getElementById('wizBig').onclick=()=>wizardPickWhy('big');
-      document.getElementById('wizBoring').onclick=()=>wizardPickWhy('boring');
-      document.getElementById('wizScary').onclick=()=>wizardPickWhy('scary');
-      document.getElementById('wizOther').onclick=()=>wizardPickWhy('other');
-      document.getElementById('wizClose').onclick=()=>wizardClose();
-      return;
-    }
-    if(w.step==='next'){
-      root.innerHTML=`<div class="overlay" id="wizOverlay">
-        <div class="quotecard" style="max-width:420px;text-align:left">
-          <div class="qeyebrow">Your next move</div>
-          <div style="font-weight:800;font-size:1.15rem;margin-bottom:8px">${escapeHtml(w.tipTitle||'')}</div>
-          <p style="font-size:.95rem;line-height:1.45;margin:0 0 18px">${escapeHtml(w.tipBody||'')}</p>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            <button class="btn" id="wizGo">Take me there</button>
-            <button class="btn ghost" id="wizClose">Not now</button>
-          </div>
-        </div>
-      </div>`;
-      document.getElementById('wizGo').onclick=()=>wizardGo();
-      document.getElementById('wizClose').onclick=()=>wizardClose();
-      return;
-    }
-  }
-
-  // Outlook-style delete series
-  if(state.deleteSeriesPrompt && state.deleteSeriesPrompt.key){
-    const p = state.deleteSeriesPrompt;
-    const all = (state.classes||[]).filter(c=>classSeriesKey(c)===p.key);
-    const sample = all[0];
-    const multi = all.length > 1;
-    root.innerHTML = `<div class="overlay" id="delSeriesOverlay">
-      <div class="quotecard" style="max-width:400px;text-align:left">
-        <div class="qeyebrow">SnapBack</div>
-        <div style="font-weight:700;margin-bottom:8px">Delete ${escapeHtml(sample?sample.title:'item')}?</div>
-        <p style="font-size:.9rem;color:var(--muted);margin:0 0 12px">
-          ${multi
-            ? 'This repeats on more than one day. What do you want to remove?'
-            : 'Remove this from your calendar?'}
-        </p>
+    if(w.step==='questions'){
+      const qs = wizardActiveQuestions(w.answers||{});
+      const step = qs[w.q] || qs[0];
+      if(!step){ w.step='result'; persistRender(); return; }
+      root.innerHTML=`<div class="overlay" id="wizOverlay"><div class="quotecard" style="max-width:440px;text-align:left;max-height:90vh;overflow:auto">
+        <div class="qeyebrow">Start Wizard · ${ (w.q||0)+1 } / ${qs.length}</div>
+        <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Task: <b>${escapeHtml(task?task.title:'')}</b></p>
+        <div style="font-weight:800;font-size:1.05rem;margin-bottom:12px">${escapeHtml(step.q)}</div>
         <div style="display:flex;flex-direction:column;gap:8px">
-          ${multi ? `<button class="btn" id="delOneOnly">Only this day</button>
-          <button class="btn danger" id="delWholeSeries">Entire series (all days)</button>` 
-            : `<button class="btn danger" id="delWholeSeries">Delete</button>`}
-          <button class="btn ghost" id="delSeriesCancel">Cancel</button>
+          ${(step.opts||[]).map(o=>`<button class="btn ghost wizOpt" data-oid="${o.id}" style="text-align:left;padding:12px 14px">${escapeHtml(o.label)}</button>`).join('')}
         </div>
-      </div>
-    </div>`;
-    const one=document.getElementById('delOneOnly');
-    if(one) one.onclick=()=>confirmDeleteSeries('one');
-    const allBtn=document.getElementById('delWholeSeries');
-    if(allBtn) allBtn.onclick=()=>confirmDeleteSeries('series');
-    document.getElementById('delSeriesCancel').onclick=()=>cancelDeleteSeries();
-    return;
+        <button class="btn ghost sm" id="wizClose" style="margin-top:12px;width:100%">Close</button>
+      </div></div>`;
+      document.querySelectorAll('.wizOpt').forEach(btn=>{
+        btn.onclick=()=>wizardPickOption(btn.getAttribute('data-oid'));
+      });
+      document.getElementById('wizClose').onclick=()=>wizardClose();
+      return;
+    }
+    if(w.step==='result'){
+      const rec = wizardRecommend();
+      const a = w.answers||{};
+      root.innerHTML=`<div class="overlay" id="wizOverlay"><div class="quotecard" style="max-width:440px;text-align:left">
+        <div class="qeyebrow">Your kickstart plan</div>
+        <div style="font-weight:800;font-size:1.15rem;margin-bottom:8px">${escapeHtml(rec.title)}</div>
+        <p style="font-size:.95rem;line-height:1.45;margin:0 0 10px">${escapeHtml(rec.body)}</p>
+        <p style="font-size:.82rem;color:var(--muted);margin:0 0 14px">Task: <b>${escapeHtml(task?task.title:'')}</b></p>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button class="btn" id="wizGo">${rec.nav==='bitesize'?'Open Bite Size':'Open Focus Pod'}</button>
+          <button class="btn ghost" id="wizTasks">Go to Tasks instead</button>
+          <button class="btn ghost" id="wizClose">Close</button>
+        </div>
+      </div></div>`;
+      document.getElementById('wizGo').onclick=()=>wizardGoRecommended();
+      document.getElementById('wizTasks').onclick=()=>{ state.wizard=null; navigateTo('tasks'); };
+      document.getElementById('wizClose').onclick=()=>wizardClose();
+      return;
+    }
   }
 
-  // Wake-up math
-  if(state.wakeMathOpen && state.wakeMath){
-    const m=state.wakeMath;
-    const snoozes=(state.wakeAlarm&&state.wakeAlarm.snoozesLeft)||0;
-    root.innerHTML=`<div class="overlay" style="background:rgba(0,0,0,.85)">
-      <div class="quotecard" style="max-width:360px;text-align:center">
-        <div class="qeyebrow">Nudge</div>
-        <div style="font-size:2.5rem;line-height:1;margin:8px 0">⏰</div>
-        <div style="font-size:1.4rem;font-weight:800;margin:4px 0">Nudge</div>
-        <p style="color:var(--muted);font-size:.9rem">Solve to stop the alarm</p>
-        <div style="font-size:2rem;font-weight:800;margin:16px 0">${m.a} + ${m.b} = ?</div>
-        <input type="number" id="wakeAnswer" inputmode="numeric" style="font-size:1.4rem;text-align:center;width:120px;padding:12px;border-radius:12px;border:2px solid var(--pine)" />
-        <div class="qactions" style="margin-top:16px;flex-direction:column;gap:8px">
-          <button class="btn" id="wakeSubmit">Stop alarm</button>
-          <button class="btn ghost" id="wakeSnooze5" ${snoozes<=0?'disabled':''}>Snooze 5 minutes (${snoozes} left)</button>
-          <button class="btn ghost" id="wakeSnooze10" ${snoozes<=0?'disabled':''}>Snooze 10 minutes (${snoozes} left)</button>
-        </div>
-      </div>
-    </div>`;
-    const ans=document.getElementById('wakeAnswer');
-    if(ans) setTimeout(()=>ans.focus(),200);
-    document.getElementById('wakeSubmit').onclick=()=>wakeDismissMath(document.getElementById('wakeAnswer')?.value);
-    const s5=document.getElementById('wakeSnooze5'); if(s5) s5.onclick=()=>wakeSnooze(5);
-    const s10=document.getElementById('wakeSnooze10'); if(s10) s10.onclick=()=>wakeSnooze(10);
-    const sOld=document.getElementById('wakeSnoozeBtn'); if(sOld) sOld.onclick=()=>wakeSnooze(5);
-    if(ans) ans.addEventListener('keydown', e=>{ if(e.key==='Enter') wakeDismissMath(ans.value); });
-    return;
-  }
-
-  // Task action sheet
   if(state.taskMenuOpen && state.taskMenuId){
     const t = findTask(state.taskMenuId);
     if(!t){ state.taskMenuOpen=false; }
@@ -4725,6 +4675,8 @@ function closeTaskMenu(){
 }
 
 function navigateTo(view){
+  if(view==='tasks'){ try{ state.listMode='all'; }catch(e){} }
+
   if(!state.navHistory) state.navHistory=[];
   if(state.view && state.view !== view){
     state.navHistory.push(state.view);
@@ -4745,6 +4697,12 @@ function navigateTo(view){
   setTimeout(()=>{ const l=document.getElementById('viewLoader'); if(l) l.classList.remove('on'); }, 280);
 }
 function goBack(){
+  // Grab Bag / One-at-a-time / Tile wall live under Tasks — back should return to Tasks list
+  if(state.view==='tasks' && state.listMode && state.listMode!=='all'){
+    state.listMode = 'all';
+    persistRender();
+    return;
+  }
   if(state.navHistory && state.navHistory.length){
     state.view = state.navHistory.pop();
   } else {
@@ -5561,8 +5519,25 @@ function maybeOfferTour(){
   }catch(e){}
 }
 
+
+const TOUR_STEPS = [
+  { title: 'Welcome to SnapBack', body: 'A quick tour of the main areas. Use Next and Back anytime. Tap Skip to leave.', view: 'today' },
+  { title: 'Today', body: 'Your home base: non-negotiable for the day, must-do and could-do tasks, classes, and deadlines.', view: 'today' },
+  { title: 'Tasks', body: 'Add tasks with due dates, search, filters (All open, Today, This week), and completed tasks.', view: 'tasks' },
+  { title: 'Techniques', body: 'Bite Size, Focus Pod, Focus Plate, Time Blocking, and more — pick a task and work it with a method.', view: 'studytools' },
+  { title: 'Challenges', body: 'Feeling stuck? Challenges open a short path that uses the right technique and can create a task for you.', view: 'challenges' },
+  { title: 'Plan & calendar', body: 'Plan this week, share free/busy calendar links, and keep schedule blocks visible.', view: 'planAhead' },
+  { title: 'Journal', body: 'Capture thoughts quickly, then File / Do / Drop them later.', view: 'journal' },
+  { title: 'Settings & account', body: 'Name, Student/Not a student labels, Google sign-in, website link, calendar sync, and this tour again.', view: 'settings' },
+  { title: 'You are ready', body: 'Add one real task for today, then try Bite Size or Focus Pod when it feels big. You can restart the tour anytime in Settings.', view: 'today' }
+];
+
 function startTour(fromStep){
   try{
+    if(typeof TOUR_STEPS==='undefined' || !TOUR_STEPS || !TOUR_STEPS.length){
+      showAppMessage('Tour unavailable', 'Tour steps are missing in this build. Update to the latest web/phone package.');
+      return;
+    }
     if(!state.tour) state.tour={};
     state.tour.open = true;
     state.tour.step = Math.max(0, Math.min(TOUR_STEPS.length-1, fromStep||0));
@@ -5808,7 +5783,7 @@ const SB_TOOLS = {
   focusPod: {title:'Focus Pod', desc:'Short focus sprints with breaks — one block at a time.', ico:'🍅', nav:'timer'},
   bodyDouble: {title:'Body Doubling', desc:'A simple “work with structure” ritual when alone is hard.', ico:'👥', nav:'bodydouble'},
   eisenhower: {title:'This or That grid', desc:'Tap Urgent / Important on each task so it jumps to the right box (Do first / Schedule / Later).', ico:'▦', nav:'eisenhower'},
-  mustFrog: {title:'Must-do & Frog', desc:'Tag what must happen and what you are avoiding.', ico:'🐸', nav:'tasks'},
+  mustFrog: {title:'Must-do & Frog', desc:'Open Tasks, pick a task (or create one), then More → Must-do or Frog.', ico:'🐸', nav:'tasks'},
   journal: {title:'Journal stickies', desc:'Catch thoughts as notes. File, do, or drop them later.', ico:'📒', nav:'journal'},
   schedule: {title:'Your Schedule', desc:'See the week as time blocks, not an endless list.', ico:'📅', nav:'calendar'},
   calendar: {title:'Calendar', desc:'Add classes and appointments once; they show on your week.', ico:'🎓', nav:'semester'},
@@ -6144,40 +6119,162 @@ function closeAppPrompt(submit){
   persistRender();
 }
 
+
 function openStartWizard(){
-  const undone = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
-  const t = undone[0];
-  if(!t){
-    state.wizard = {step:'need-task'};
-    persistRender();
-    return;
-  }
-  state.wizard = {step:'why', taskId:t.id};
-  persistRender();
-}
-function wizardPickWhy(code){
-  const t = findTask(state.wizard && state.wizard.taskId);
-  if(!t){ state.wizard=null; persistRender(); return; }
-  const tips = {
-    big: { title:'It feels too big', body:'Shrink it. Open Bite Size and cut this into pieces under 15 minutes. You only need the first piece.', nav:'bitesize', prep:()=>{ state.cheeseTaskId=t.id; } },
-    boring: { title:'It feels boring', body:'Do one short Focus Pod block on this task, then stop. A timer makes “just start” easier.', nav:'timer', prep:()=>{ state.timer.activeTaskId=t.id; } },
-    scary: { title:'It feels unclear or scary', body:'On the task, write one line: “First step is…” Then do only that step. Nothing else.', nav:'tasks', prep:null },
-    other: { title:'Something else is in the way', body:'Energy and mood count. Do one tiny step only: open Focus Pod for 10 minutes on this task, or write one line in Journal about what is blocking you. Nudge is optional if you want a later nudge.', nav:'timer', prep:()=>{ state.timer.activeTaskId=t.id; } }
+  state.wizard = {
+    step: 'pick-task',
+    taskId: null,
+    answers: {},
+    q: 0
   };
-  const tip = tips[code] || tips.other;
-  if(tip.prep) tip.prep();
-  state.wizard = {step:'next', taskId:t.id, tipTitle:tip.title, tipBody:tip.body, tipNav:tip.nav};
+  // Prefer already selected technique task
+  if(state.techniqueTaskId && findTask(state.techniqueTaskId)){
+    state.wizard.taskId = state.techniqueTaskId;
+    state.wizard.step = 'questions';
+    state.wizard.q = 0;
+  }
   persistRender();
 }
-function wizardGo(){
-  const nav = state.wizard && state.wizard.tipNav;
-  state.wizard = null;
-  if(nav) navigateTo(nav);
-  else persistRender();
+function wizardClose(){ state.wizard=null; try{ persistRender(); }catch(e){} }
+function wizardSetTask(id){
+  if(!id) return;
+  state.wizard.taskId = id;
+  state.wizard.step = 'questions';
+  state.wizard.q = 0;
+  state.wizard.answers = {};
+  applyTechniqueTaskId(id);
+  persistRender();
 }
-function wizardClose(){ state.wizard=null; persistRender(); }
-
-
+function wizardCreateTask(){
+  const title = (document.getElementById('wizNewTask')?.value||'').trim();
+  if(!title){ showAppMessage('Title needed', 'Type a task name first.'); return; }
+  if(!Array.isArray(state.tasks)) state.tasks=[];
+  const id = uid();
+  state.tasks.unshift({
+    id, title, notes:'From Start Wizard', date:todayStr(), time:'', priority:'medium',
+    tier:'could', frog:false, context:'school', technique:'startWizard', done:false,
+    chunks:[], pomodoros:0, created:Date.now()
+  });
+  state.filter='all';
+  try{ saveState(); }catch(e){}
+  wizardSetTask(id);
+}
+const START_WIZARD_QS = [
+  {
+    id: 'energy',
+    q: 'Before we open anything — how is your body/mind right now?',
+    opts: [
+      { id:'restless', label:'🔋 Super restless / high energy' },
+      { id:'sluggish', label:'🪫 Sluggish / exhausted' },
+      { id:'foggy', label:'🧠 Mentally foggy but physically calm' },
+      { id:'ok', label:'🙂 OK enough to try one small step' }
+    ]
+  },
+  {
+    id: 'reset',
+    q: 'Quick reset first (30–60 seconds). Pick one:',
+    onlyIf: (a)=> a.energy==='restless' || a.energy==='sluggish' || a.energy==='foggy',
+    opts: [
+      { id:'water', label:'Hydrate — drink water' },
+      { id:'desk', label:'Put away 3 things on the desk' },
+      { id:'stretch', label:'30-second stretch or walk to the door and back' },
+      { id:'headphones', label:'Grab headphones / set the room' }
+    ]
+  },
+  {
+    id: 'fiveMin',
+    q: 'If you only had energy for 5 minutes, what part would you do?',
+    opts: [
+      { id:'reading', label:'A specific bit of reading' },
+      { id:'notes', label:'My class notes / last notes' },
+      { id:'guidelines', label:'The assignment guidelines / rubric' },
+      { id:'open', label:'Just open the file or portal' }
+    ]
+  },
+  {
+    id: 'silly',
+    q: 'What is a piece so small it almost feels silly to write down?',
+    opts: [
+      { id:'blank', label:'Open a blank document' },
+      { id:'title', label:'Write just the title' },
+      { id:'sentence', label:'Read exactly one sentence' },
+      { id:'portal', label:'Log into the student portal' }
+    ]
+  },
+  {
+    id: 'interest',
+    q: 'How can we make the first 10 minutes more interesting or comfortable?',
+    opts: [
+      { id:'playlist', label:'Put on a focus playlist' },
+      { id:'location', label:'Change location (even a different chair)' },
+      { id:'snack', label:'Favorite snack/drink first' },
+      { id:'race', label:'Set a timer and race the clock' }
+    ]
+  },
+  {
+    id: 'leastPain',
+    q: 'What part sounds least painful or most interesting to look at first?',
+    opts: [
+      { id:'intro', label:'Intro / creative / overview part' },
+      { id:'format', label:'Formatting / layout / fiddling' },
+      { id:'research', label:'Research / gathering links' },
+      { id:'middle', label:'The middle “real work” section' }
+    ]
+  }
+];
+function wizardActiveQuestions(answers){
+  return START_WIZARD_QS.filter(step=>{
+    if(!step.onlyIf) return true;
+    try{ return step.onlyIf(answers||{}); }catch(e){ return true; }
+  });
+}
+function wizardPickOption(optId){
+  const w = state.wizard; if(!w) return;
+  const qs = wizardActiveQuestions(w.answers);
+  const step = qs[w.q];
+  if(!step) return;
+  w.answers[step.id] = optId;
+  if(w.q < qs.length-1){
+    w.q += 1;
+    // skip onlyIf steps dynamically by recomputing
+    const qs2 = wizardActiveQuestions(w.answers);
+    if(w.q >= qs2.length){ w.step = 'result'; }
+    else {
+      // align index to qs2
+      const nextId = qs[w.q] && qs[w.q].id;
+      const idx = qs2.findIndex(s=>s.id===nextId);
+      w.q = idx>=0 ? idx : Math.min(w.q, qs2.length-1);
+    }
+  } else {
+    w.step = 'result';
+  }
+  persistRender();
+}
+function wizardRecommend(){
+  const a = (state.wizard && state.wizard.answers) || {};
+  if(a.fiveMin==='reading' || a.silly==='sentence' || a.leastPain==='research'){
+    return { nav:'bitesize', title:'Bite Size next', body:'Break this into tiny bites. Start with the smallest one you picked — even one sentence counts.' };
+  }
+  if(a.interest==='race' || a.interest==='playlist' || a.energy==='ok'){
+    return { nav:'timer', title:'Focus Pod next', body:'One short timed block. When the timer ends, you are allowed to stop.' };
+  }
+  if(a.silly==='blank' || a.silly==='title' || a.fiveMin==='open'){
+    return { nav:'bitesize', title:'First bite: open it', body:'Your only job is the silly-small step. After that, stop or continue if momentum shows up.' };
+  }
+  return { nav:'timer', title:'Start with 10 minutes', body:'Open Focus Pod on this task. Ten minutes. Then decide if you continue.' };
+}
+function wizardGoRecommended(){
+  const w = state.wizard;
+  const rec = wizardRecommend();
+  const tid = w && w.taskId;
+  if(tid) applyTechniqueTaskId(tid);
+  state.wizard = null;
+  if(rec.nav==='bitesize') navigateTo('bitesize');
+  else if(rec.nav==='timer') navigateTo('timer');
+  else navigateTo('tasks');
+}
+function wizardPickWhy(code){ /* legacy no-op kept for old buttons */ wizardPickOption(code); }
+function wizardGo(){ wizardGoRecommended(); }
 
 function viewToday(){
   const needsName = !(state.profile && state.profile.name);
@@ -6357,6 +6454,16 @@ function strategyPanel(t){
   </details>`;
 }
 
+function taskDateTag(t){
+  if(t.done) return '<span class="badge low">Completed</span>';
+  if(!t.date) return '<span class="badge low">No date</span>';
+  const du = daysUntil(t.date);
+  if(du<0) return '<span class="badge overdue">Overdue</span>';
+  if(du===0) return '<span class="badge dueToday">Today</span>';
+  if(du===1) return '<span class="badge dueToday">Tomorrow</span>';
+  if(typeof isThisWeek==='function' && isThisWeek(t.date)) return '<span class="badge medium">This week</span>';
+  return '<span class="badge low">'+escapeHtml(t.date)+'</span>';
+}
 function taskCard(t){
   const frogStyle = t.frog ? 'border-left:5px solid var(--gold)' : '';
   const editing = state.editingTaskId === t.id;
@@ -6397,7 +6504,7 @@ function taskCard(t){
 
   // VIEW MODE — read-only text only; Edit is the only way to change fields
   return `<li class="taskcard ${t.done?'done':''}" style="${frogStyle};padding:14px" data-id="${t.id}">
-    <div style="font-weight:700;font-size:1.05rem;margin-bottom:6px">${escapeHtml(t.title)}</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px"><div style="font-weight:700;font-size:1.05rem">${escapeHtml(t.title)}</div>${taskDateTag(t)}</div>
     <div style="font-size:.88rem;color:var(--muted);margin-bottom:10px">
       ${t.date ? '📅 '+escapeHtml(t.date)+(t.time?' · '+escapeHtml(t.time):'') : 'No date set'}
       ${t.done?' · done':''}
@@ -6480,6 +6587,13 @@ function viewTasks(){
       if(ranged.length || !list.length) list=ranged;
     }
   }
+  // Optional due-date range for in-progress lists
+  if(f!=='done'){
+    const pf=state.progressFrom||'';
+    const pt=state.progressTo||'';
+    if(pf) list=list.filter(x=>!x.date || String(x.date)>=pf);
+    if(pt) list=list.filter(x=>!x.date || String(x.date)<=pt);
+  }
   // Search title / notes
   if(q){
     list=list.filter(t=>{
@@ -6494,6 +6608,10 @@ function viewTasks(){
   // List overwhelm modes — must run BEFORE building items
   // Completed view must never use spotlight/jar/one (those keep only open tasks → empty list)
   let mode = state.listMode || 'all'; if(mode==='batch') mode='spotlight';
+  if(f==='done' || f==='all' || f==='today' || f==='week' || f==='tomorrow' || f==='overdue'){
+    // Filters should show lists — don't trap user in Grab Bag / One-at-a-time
+    if(mode==='jar' || mode==='one' || mode==='wall') mode = 'all';
+  }
   if(f==='done') mode = 'all';
   let modeBanner = tasksViewToolbar();
   if((state.listMode||'')==='wall'){
@@ -6670,7 +6788,16 @@ function viewTasks(){
       </div>
     </div>
   </div>
-  <div style="font-size:.85rem;font-weight:700;margin:4px 0 6px">Show tasks in progress</div>
+  <div class="card" style="padding:12px;margin-bottom:10px">
+    <div style="font-size:.85rem;font-weight:700;margin-bottom:8px">Tasks in progress</div>
+    <p style="font-size:.75rem;color:var(--muted);margin:0 0 8px">Filter by when they are due. Each task shows a tag: Today, Tomorrow, This week, Overdue, or No date.</p>
+    <div class="row" style="gap:8px;margin-bottom:8px">
+      <div class="field" style="margin:0"><label>From</label><input type="date" id="progressFrom" value="${escapeHtml(state.progressFrom||'')}"></div>
+      <div class="field" style="margin:0"><label>To</label><input type="date" id="progressTo" value="${escapeHtml(state.progressTo||'')}"></div>
+      <button type="button" class="btn ghost sm" id="clearProgressDates" style="align-self:flex-end">Clear dates</button>
+    </div>
+  </div>
+  <div style="font-size:.8rem;font-weight:600;margin:4px 0 6px;color:var(--muted)">Quick filters</div>
   <div class="filters">
     <button data-filter="all" class="${f==='all'?'active':''}">All open (${(state.tasks||[]).filter(t=>!t.done&&!t.backburner).length})</button>
     <button data-filter="today" class="${f==='today'?'active':''}">Today</button>
@@ -10189,6 +10316,7 @@ function wireView(){
       persistRender();
     });
     else if(action==='ctx-filter') el.addEventListener('click', ()=>{
+      state.listMode='all';
       state.contextFilter = el.dataset.ctx || 'all';
       persistRender();
     });
