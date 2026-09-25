@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="245">
+<meta name="snapback-build" content="248">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -3998,6 +3998,38 @@ function renderMobileDrawer(){
   document.getElementById('drawerBackdrop').addEventListener('click', ()=>{ mobileMenuOpen=false; renderMobileDrawer(); });
   document.getElementById('brandHomeBtnDrawer').addEventListener('click', ()=>{ mobileMenuOpen=false; setView('today'); });
 }
+function startEnergyFocusTick(){
+  try{ if(window._efTick) clearInterval(window._efTick); }catch(e){}
+  window._efTick=setInterval(function(){
+    try{
+      const ef=state.energyFocus;
+      if(!ef||!ef.timerOn||!ef.timerEnds) return;
+      const left=Math.max(0, Math.floor((ef.timerEnds-Date.now())/1000));
+      const el=document.getElementById('efTimerDisplay');
+      if(el){
+        const m=Math.floor(left/60), s=left%60;
+        el.textContent=m+':'+String(s).padStart(2,'0');
+      }
+      if(left<=0){
+        ef.timerOn=false;
+        showAppMessage('Time is up', 'You may stop. That was the deal.');
+        try{ clearInterval(window._efTick); }catch(e){}
+      }
+    }catch(e){}
+  }, 500);
+}
+function startTopOfMindTimerTick(){
+  try{ if(window._tomTick) clearInterval(window._tomTick); }catch(e){}
+  window._tomTick = setInterval(function(){
+    try{
+      if(!state.topOfMindId) return;
+      if(state.timeTrack && state.timeTrack.startedAt){
+        const bar=document.getElementById('topOfMindBar');
+        if(bar){ try{ persistRender(); }catch(e){} }
+      }
+    }catch(e){}
+  }, 15000);
+}
 function topOfMindBanner(){
   if(!state.topOfMindId) return '';
   const t=(state.tasks||[]).find(x=>x.id===state.topOfMindId);
@@ -4006,11 +4038,13 @@ function topOfMindBanner(){
   if(state.timeTrack && state.timeTrack.taskId===t.id && state.timeTrack.startedAt){
     const sec=Math.floor((Date.now()-state.timeTrack.startedAt)/1000);
     const m=Math.floor(sec/60), s=sec%60;
-    timerHtml=`<div style="font-size:.85rem;margin-top:4px">⏱ Timing: <b>${m}:${String(s).padStart(2,'0')}</b> — stay with this task</div>`;
+    timerHtml=`<div style="font-size:.9rem;margin-top:6px;font-weight:700">⏱ Timing: ${m}:${String(s).padStart(2,'0')} — stay with this task</div>`;
   }
-  return `<div class="card" style="background:var(--gold-soft);border-color:var(--gold);display:flex;align-items:center;gap:10px;margin-bottom:10px">
-    <span style="font-size:1.2rem">📌</span>
-    <div style="flex:1"><b>Top of Mind</b><div style="font-size:.95rem;font-weight:600">${escapeHtml(t.title)}</div>${timerHtml}</div>
+  // Bright sticky bar so it is never missed
+  return `<div class="card" id="topOfMindBar" style="background:#FFF3B0;border:2px solid #E6B800;display:flex;align-items:center;gap:10px;margin-bottom:12px;position:sticky;top:0;z-index:40;box-shadow:0 4px 12px rgba(0,0,0,.08)">
+    <span style="font-size:1.4rem">📌</span>
+    <div style="flex:1"><div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;font-weight:800;color:#8a6a00">Top of Mind${timerHtml?' · timed':''}</div>
+    <div style="font-size:1.05rem;font-weight:800">${escapeHtml(t.title)}</div>${timerHtml}</div>
     <button class="btn ghost sm" data-action="clear-tom">Clear</button>
   </div>`;
 }
@@ -4035,16 +4069,14 @@ function renderMain(){
   }
   const views={today:viewToday,tasks:viewTasks,challenges:viewChallenges,planAhead:viewPlanAhead,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
     eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,
-    bodydouble:viewBodyDouble,settings:viewSettings,
+    bodydouble:viewBodyDouble,energyFocus:viewEnergyFocus,ifThen:viewIfThen,ritualBackpack:viewRitualBackpack,ritualCostume:viewRitualCostume,ritualLocation:viewRitualLocation,contextSplit:viewContextSplit,settings:viewSettings,
     habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp,
     freebusyPreview:viewFreeBusyPreview,
     freebusy:function(){ return viewFreeBusyPublic(state.freeBusyPublic||parseFreeBusyFromHash()); }
   };
   try{
     let html=(views[state.view]||viewToday)();
-    if(state.view!=='challenges'){
-      try{ html = topOfMindBanner() + html; }catch(e2){ console.warn('topOfMindBanner', e2); }
-    }
+    try{ html = topOfMindBanner() + html; }catch(e2){ console.warn('topOfMindBanner', e2); }
     el.innerHTML=html;
     try{ wireView(); }catch(e3){ console.error('wireView', e3); }
   }catch(e){
@@ -5740,7 +5772,7 @@ function viewTechniques(){
     {id:'bodydouble', label:'Body Doubling', desc:'Work-with-structure ritual', ico:'👥'},
     {id:'planAhead', label:'Plan this week', desc:'Short list for this week only', ico:'📆'}
   ];
-  return hubPage('Techniques', 'Use a tool first, or open Tasks and attach a tool to a task. Same tools either way.', cards);
+  return hubPage('Techniques', 'Each tool opens its own screen. Pick a task there (or create one). Changes save on the task everywhere — Home, Tasks, Challenges.', cards);
 }
 function hubPage(title, sub, cards){
   return `<div class="pagehead">
@@ -5764,6 +5796,13 @@ function hubPage(title, sub, cards){
    ============================================================ */
 /* Shared tools (exhaustive set used across challenges) */
 const SB_TOOLS = {
+  
+  energyFocus: {title:'Energy, not the clock', desc:'A flexible list + countdown. Work with the energy you have — not a rigid timetable.', ico:'⚡', action:'energy-focus'},
+  ifThen: {title:'If–Then plan', desc:'“If it is after dinner, then I open the notes for 10 minutes.” One cue, one action.', ico:'➡️', action:'if-then'},
+  backpackReset: {title:'Backpack Reset', desc:'When work is done, pack every tool away and put the bag out of sight. Clear boundary.', ico:'🎒', action:'ritual-backpack'},
+  costumeChange: {title:'Costume Change', desc:'Change clothes when switching from work/study to personal time — a tactile mental boundary.', ico:'👕', action:'ritual-costume'},
+  oneLocation: {title:'One-Location Rule', desc:'One place is for study/work only. Home becomes rest. Stronger mental separation.', ico:'📍', action:'ritual-location'},
+  contextSplit: {title:'Study vs personal', desc:'Label tasks Study/Work or Personal so lists stop mixing life roles.', ico:'🌓', action:'context-split'},
   focusPlate: {title:'Focus Plate', desc:'Cap today: 1 big, 3 medium, 5 small. When the plate is full, you are done.', ico:'🍽', nav:'rule135'},
   biteSize: {title:'Bite Size', desc:'Cut one scary task into tiny steps you can finish in a few minutes.', ico:'🍽', nav:'bitesize'},
   bugMe: {title:'Nudge alarm', desc:'Set an alarm that rings until you stop it — useful when “later” never comes. Not the same as quote sparks on Home.', ico:'⏰', nav:'settings'},
@@ -5804,8 +5843,8 @@ const CHALLENGES = [
   {id:'bounce', title:'I keep switching tasks', blurb:'I start one thing and jump to another.', ico:'🐇'},
   {id:'what_next', title:'I do not know what to do next', blurb:'Choosing the next step uses up all my energy.', ico:'🧭'},
   {id:'miss_due', title:'I am afraid I will miss a due date', blurb:'Deadlines live in my head and leak out.', ico:'⏰'},
-  {id:'schedule_tight', title:'Plans and schedules stress me out', blurb:'A full timetable feels tight and heavy.', ico:'📅'},
-  {id:'life_blur', title:'Study and personal life mix together', blurb:'School/college work and home/personal tasks feel mixed up.', ico:'🌓'},
+  {id:'schedule_tight', title:'Plans and schedules stress me out', blurb:'Rigid calendars freeze you. Use energy, cues, and short timers instead of a packed timetable.', ico:'📅'},
+  {id:'life_blur', title:'Study and personal life mix together', blurb:'Work and rest bleed together. Use physical boundaries and clear labels — not another full schedule.', ico:'🌓'},
   {id:'adhd_brain', title:'My brain needs ADHD-friendly setup', blurb:'I need short paths, not a complicated system.', ico:'🧠'}
 ];
 
@@ -5816,8 +5855,8 @@ const CHALLENGE_PATHS = {
   bounce: ['topOfMind','timeOnTask','oneAtATime','focusPod','bodyDouble','today'],
   what_next: ['spinPick','grabBag','eisenhower','mustFrog','today','spotlight','startWizard'],
   miss_due: ['bugMe','tasks','schedule','calendar','today'],
-  schedule_tight: ['today','calendar','schedule','focusPlate','timeOnTask'],
-  life_blur: ['contextFilter','projects','journal','habits','schedule'],
+  schedule_tight: ['energyFocus','bodyDouble','ifThen','biteSize','focusPod','oneAtATime'],
+  life_blur: ['backpackReset','costumeChange','oneLocation','contextSplit','bodyDouble'],
   adhd_brain: ['today','bugMe','biteSize','oneAtATime','focusPod','challenges_home']
 };
 
@@ -5863,8 +5902,14 @@ function applyChallengeTool(toolId, challengeId){
   }
   if(toolId==='calendar'){ navigateTo('calendar'); return; }
   if(toolId==='today'){ navigateTo('today'); return; }
+  if(toolId==='energy-focus' || toolId==='energyFocus'){ navigateTo('energyFocus'); return; }
+  if(toolId==='if-then' || toolId==='ifThen'){ navigateTo('ifThen'); return; }
+  if(toolId==='ritual-backpack' || toolId==='backpackReset'){ navigateTo('ritualBackpack'); return; }
+  if(toolId==='ritual-costume' || toolId==='costumeChange'){ navigateTo('ritualCostume'); return; }
+  if(toolId==='ritual-location' || toolId==='oneLocation'){ navigateTo('ritualLocation'); return; }
+  if(toolId==='context-split' || toolId==='contextSplit'){ navigateTo('contextSplit'); return; }
   if(toolId==='tasks'){ state.listMode='all'; navigateTo('tasks'); return; }
-  if(toolId==='mustFrog'){ state.listMode='all'; state.filter='all'; navigateTo('tasks'); showAppMessage('Must-do & Frog', 'Open a task → More → Must-do or Frog.'); return; }
+  if(toolId==='mustFrog'){ state.listMode='must-frog-pick'; state.filter='all'; navigateTo('tasks'); return; }
 
   // Task-list modes with real UIs
   if(toolId==='spotlight' || toolId==='small-batch' || toolId==='smallBatch'){
@@ -5922,6 +5967,136 @@ function viewPlanAhead(){
       <span style="flex:1">${escapeHtml(t.title)}</span>
       <button class="btn sm" data-action="plan-week" data-id="${t.id}">This week</button>
     </div>`).join('') || '<div class="empty">No other open tasks.</div>'}
+  </div>`;
+}
+
+
+function viewEnergyFocus(){
+  if(!state.energyFocus) state.energyFocus={items:[], timerSec:0, timerOn:false, timerEnds:0, activeIdx:-1};
+  const ef=state.energyFocus;
+  const items=ef.items||[];
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+    <div class="eyebrow">Schedules feel tight? Skip the rigid clock</div>
+    <h1>Energy, not the clock</h1>
+    <p>Write what you might do. Start a short countdown on <b>one</b> item. When the timer ends, you may stop. No calendar required.</p>
+  </div>
+  <div class="card">
+    <label>Add something flexible</label>
+    <div class="row" style="gap:8px">
+      <input id="efNewItem" placeholder="e.g. skim one page of notes" style="flex:1">
+      <button class="btn sm" id="efAddBtn">Add</button>
+    </div>
+  </div>
+  <div class="card">
+    <div style="font-weight:700;margin-bottom:8px">Your flexible list</div>
+    ${items.length? items.map((it,i)=>`
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)">
+        <span style="flex:1">${escapeHtml(it)}</span>
+        <button class="btn sm" data-action="ef-start" data-idx="${i}">Start timer</button>
+        <button class="btn ghost sm" data-action="ef-remove" data-idx="${i}">✕</button>
+      </div>`).join('') : '<div class="empty">Add 1–5 small optional items. Order does not matter.</div>'}
+  </div>
+  <div class="card" style="text-align:center;background:var(--pine-soft)">
+    <div style="font-size:.8rem;color:var(--muted)">Countdown</div>
+    <div id="efTimerDisplay" style="font-size:2.4rem;font-weight:800;margin:8px 0">${ef.timerOn ? '…' : '10:00'}</div>
+    <div class="row" style="justify-content:center;gap:8px">
+      <button class="btn ghost sm" data-action="ef-preset" data-min="5">5 min</button>
+      <button class="btn ghost sm" data-action="ef-preset" data-min="10">10 min</button>
+      <button class="btn ghost sm" data-action="ef-preset" data-min="15">15 min</button>
+    </div>
+    <p style="font-size:.85rem;color:var(--muted);margin:10px 0 0">When time is up, stop is allowed. That is the point.</p>
+  </div>`;
+}
+function viewIfThen(){
+  if(!state.ifThen) state.ifThen={cue:'', action:''};
+  const it=state.ifThen;
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+    <div class="eyebrow">One cue → one action</div>
+    <h1>If–Then plan</h1>
+    <p>Instead of a full schedule: decide one trigger and one tiny action. Implementation intentions reduce “when do I start?” friction.</p>
+  </div>
+  <div class="card">
+    <label>IF (cue)</label>
+    <input id="ifThenCue" placeholder="e.g. I finish dinner / I sit at my desk" value="${escapeHtml(it.cue||'')}">
+    <label style="margin-top:12px">THEN (tiny action)</label>
+    <input id="ifThenAction" placeholder="e.g. open notes for 10 minutes" value="${escapeHtml(it.action||'')}">
+    <button class="btn" id="ifThenSave" style="margin-top:14px;width:100%">Save If–Then</button>
+  </div>
+  ${(it.cue&&it.action)?`<div class="card" style="background:var(--pine-soft)"><b>Your plan</b><p style="margin:8px 0 0">If <b>${escapeHtml(it.cue)}</b>, then <b>${escapeHtml(it.action)}</b>.</p>
+    <button class="btn" style="margin-top:10px;width:100%" data-action="go-timer">Start a Focus Pod for the “then”</button></div>`:''}`;
+}
+function ritualPage(title, eyebrow, blurb, steps, key){
+  const done = (state.rituals && state.rituals[key]) || {};
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+    <div class="eyebrow">${eyebrow}</div>
+    <h1>${title}</h1>
+    <p>${blurb}</p>
+  </div>
+  <div class="card">
+    <div style="font-weight:700;margin-bottom:10px">Do these in order</div>
+    ${steps.map((s,i)=>`
+      <label style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer">
+        <input type="checkbox" data-action="ritual-check" data-key="${key}" data-idx="${i}" ${done[i]?'checked':''} style="margin-top:4px">
+        <span>${s}</span>
+      </label>`).join('')}
+  </div>
+  <p style="font-size:.85rem;color:var(--muted)">This is a boundary ritual — not a schedule. When the steps are done, personal time is allowed.</p>`;
+}
+function viewRitualBackpack(){
+  return ritualPage('Backpack Reset', 'Work day → personal boundary',
+    'When you decide work/study is finished, put every tool away so home does not stay in “work mode.”',
+    [
+      'Gather laptop, charger, notebooks, pens, and papers used for school/work.',
+      'Put them all into one bag or backpack.',
+      'Zip it shut.',
+      'Place the bag out of sight (closet, under bed, another room).',
+      'Say once: “Work is closed until tomorrow.”'
+    ], 'backpack');
+}
+function viewRitualCostume(){
+  return ritualPage('Costume Change', 'Role switch you can feel',
+    'A small clothing change marks the shift from student/worker to personal self — tactile, not another calendar.',
+    [
+      'Choose a “work” outfit and a “home/personal” outfit (can be as simple as jeans vs sweatpants).',
+      'When work/study ends, change into the personal outfit.',
+      'Optional: specific hoodie or slippers only for rest time.',
+      'Notice the physical cue: different clothes → different role.'
+    ], 'costume');
+}
+function viewRitualLocation(){
+  return ritualPage('One-Location Rule', 'Place = role',
+    'One place is for focused study/work. Your room/home stays for rest so the two stop blending.',
+    [
+      'Pick one place outside pure rest space (library floor, campus café, lounge, office desk).',
+      'Do study/work only there when you can.',
+      'At home/dorm rest space: no “just a quick assignment on the bed” if that always expands.',
+      'When you leave the study place, treat work as paused.'
+    ], 'location');
+}
+function viewContextSplit(){
+  const open=(state.tasks||[]).filter(x=>!x.done&&!x.backburner);
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+    <div class="eyebrow">Separate the two lives on the list</div>
+    <h1>Study vs personal</h1>
+    <p>Label each open task. Home and Today can then filter so work and life are not one blurry list.</p>
+  </div>
+  <div class="card">
+    ${open.length? open.map(t=>`
+      <div style="padding:10px 0;border-bottom:1px solid var(--line)">
+        <div style="font-weight:600;margin-bottom:6px">${escapeHtml(t.title)}</div>
+        <div class="row" style="gap:8px">
+          <button class="btn sm ${(t.context||'school')!=='personal'?'':'ghost'}" data-action="set-ctx" data-id="${t.id}" data-ctx="school">${L('newTaskSchool')}</button>
+          <button class="btn sm ${t.context==='personal'?'':'ghost'}" data-action="set-ctx" data-id="${t.id}" data-ctx="personal">${L('personal')}</button>
+        </div>
+      </div>`).join('') : '<div class="empty">No open tasks to label. Add tasks first, then return here.</div>'}
   </div>`;
 }
 
@@ -6718,19 +6893,53 @@ function viewTasks(){
     modeBanner = `<div class="card" style="padding:10px;margin-bottom:10px;border-left:4px solid var(--pine)"><b>Grab Bag</b> — list hidden. Pull one task. <button type="button" class="btn ghost sm" data-action="list-mode" data-mode="all">Full list</button></div>`;
   }
   let modeBody = '';
+
   if(mode === 'spotlight' || mode === 'batch'){
-    const open = list.filter(t=>!t.done);
+    const open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
     const n = state.spotlightSize || 3;
     const shown = open.slice(0, n);
-    const rest = Math.max(0, open.length - shown.length);
-    modeBody = `<div class="card" style="background:var(--pine-soft);margin-bottom:10px">
-      <b>${mode==='batch'?'Small Batch':'Spotlight'}</b> — only <b>${shown.length}</b> task(s) shown.
-      ${rest>0?` <span style="color:var(--muted)">${rest} more hidden until you finish these.</span>`:' All open tasks are visible.'}
-      ${mode==='batch'?'<div style="font-size:.82rem;margin-top:6px">Finish this batch, then open Small Batch again for the next set.</div>':''}
-    </div>`;
-    list = shown; // do NOT show the rest
+    return `
+    <div class="pagehead">
+      <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+      <h1>Spotlight</h1>
+      <p>Only <b>${shown.length}</b> open task(s) — finish these before the rest of the list comes back.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      ${shown.length ? shown.map(t=>`
+        <div class="card" style="padding:14px">
+          <div style="font-weight:700;font-size:1.05rem">${escapeHtml(t.title)}</div>
+          <div style="margin-top:6px">${taskDateTag(t)}</div>
+          <div class="row" style="margin-top:12px;gap:8px">
+            <button class="btn sm" data-action="toggle-done" data-id="${t.id}">Done</button>
+            <button class="btn ghost sm" data-action="open-task-menu" data-id="${t.id}">More</button>
+          </div>
+        </div>`).join('') : '<div class="empty">No open tasks. Add some first.</div>'}
+    </div>
+    <button class="btn ghost" data-action="list-mode" data-mode="all" style="margin-top:14px;width:100%">Show full Tasks list</button>`;
   }
 
+  if(mode === 'must-frog-pick'){
+    const open = (state.tasks||[]).filter(x=>!x.done && !x.backburner);
+    return `
+    <div class="pagehead">
+      <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+      <h1>Must-do & Frog</h1>
+      <p>Pick a task, then mark it Must-do (should do today) and/or Frog (do this first). Changes save on that task everywhere in the app.</p>
+    </div>
+    <div class="card">
+      <label>Task</label>
+      <select id="mfPickSelect">
+        <option value="">— Choose —</option>
+        ${open.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}</option>`).join('')}
+      </select>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+        <button class="btn" id="mfMustBtn">Mark as Must-do</button>
+        <button class="btn ghost" id="mfFrogBtn">🐸 Mark as Frog</button>
+        <button class="btn" id="mfBothBtn">Must-do + Frog</button>
+        <button class="btn ghost" data-action="list-mode" data-mode="all">Cancel</button>
+      </div>
+    </div>`;
+  }
   if(mode === 'backburner-pick'){
     const open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
     return `
@@ -6883,6 +7092,28 @@ function viewTasks(){
     </div>`;
   }
 
+  if(mode === 'must-frog-pick'){
+    const open = (state.tasks||[]).filter(x=>!x.done && !x.backburner);
+    return `
+    <div class="pagehead">
+      <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+      <h1>Must-do & Frog</h1>
+      <p>Pick a task, then mark it Must-do (should do today) and/or Frog (do this first). Changes save on that task everywhere in the app.</p>
+    </div>
+    <div class="card">
+      <label>Task</label>
+      <select id="mfPickSelect">
+        <option value="">— Choose —</option>
+        ${open.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}</option>`).join('')}
+      </select>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+        <button class="btn" id="mfMustBtn">Mark as Must-do</button>
+        <button class="btn ghost" id="mfFrogBtn">🐸 Mark as Frog</button>
+        <button class="btn" id="mfBothBtn">Must-do + Frog</button>
+        <button class="btn ghost" data-action="list-mode" data-mode="all">Cancel</button>
+      </div>
+    </div>`;
+  }
   if(mode === 'backburner-pick'){
     const open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
     return `
@@ -6914,117 +7145,102 @@ function viewTasks(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Today is ${new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</div>
+    <div class="eyebrow">${new Date().toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}</div>
     <h1>Tasks</h1>
-    <p>Give each task a date and time, tag it Must-do or Frog (the one you're dreading), and let the suggestion nudge you to the right technique.</p>
+    <p style="margin:0">Your list — add, filter, open a technique from a task.</p>
   </div>
-  <div class="card">
-    <h3>Add a task</h3>
-    <div class="field"><label>Title</label><input id="newTitle" placeholder="e.g. Finish problem set 4"></div>
+
+  <!-- Primary tabs -->
+  <div class="row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <button type="button" class="btn ${f!=='done'?'':'ghost'} sm" data-filter="all">Open (${(state.tasks||[]).filter(t=>!t.done&&!t.backburner).length})</button>
+    <button type="button" class="btn ${f==='done'?'':'ghost'} sm" data-filter="done">Completed (${(state.tasks||[]).filter(t=>t.done).length})</button>
+    <button type="button" class="btn ${state.showAddTask?'':'ghost'} sm" id="toggleAddTaskBtn">${state.showAddTask?'Hide add form':'+ Add task'}</button>
+  </div>
+
+  ${state.showAddTask?`<div class="card" style="margin-bottom:12px">
+    <h3 style="margin:0 0 10px">New task</h3>
+    <div class="field"><label>Title</label><input id="newTitle" placeholder="What needs doing?"></div>
     <div class="row" style="margin-top:10px">
-      <div class="field"><label>Due date</label><input id="newDate" type="date" value="${todayStr()}" min="2000-01-01" max="2100-12-31"></div>
-      <div class="field"><label>Due time</label><input id="newTime" type="time"></div>
-      <div class="field"><label>Priority</label><select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
-    </div>
-    <div class="field" style="margin-top:10px"><label>Type</label>
-      <select id="newContext">
-        <option value="school" selected>${L('newTaskSchool')}</option>
-        <option value="personal">${L('personal')}</option>
-      </select>
+      <div class="field"><label>Due date</label><input id="newDate" type="date" value="${todayStr()}"></div>
+      <div class="field"><label>Time</label><input id="newTime" type="time"></div>
+      <div class="field"><label>Type</label>
+        <select id="newContext">
+          <option value="school" selected>${L('newTaskSchool')}</option>
+          <option value="personal">${L('personal')}</option>
+        </select>
+      </div>
     </div>
     <div class="field" style="margin-top:10px"><label>Technique (optional)</label>
       <select id="newTechnique">
-        <option value="">Will select later / Not required</option>
-        <option value="bitesize">Bite Size — break into small steps</option>
-        <option value="timer">Focus Pod — timed focus</option>
-        <option value="eisenhower">Eisenhower — urgent vs important</option>
-        <option value="rule135">Rule 1-3-5 — plan the day</option>
-        <option value="timeblocking">Time blocking — schedule blocks</option>
-        <option value="bodydouble">Body doubling — work with structure</option>
+        <option value="">Later / not needed</option>
+        <option value="bitesize">Bite Size</option>
+        <option value="timer">Focus Pod</option>
+        <option value="rule135">Focus Plate</option>
+        <option value="eisenhower">This or That</option>
+        <option value="timeblocking">Time Blocking</option>
+        <option value="bodydouble">Body Doubling</option>
       </select>
     </div>
-    <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line)">
-      <div style="font-size:.78rem;font-weight:700;color:var(--muted);margin-bottom:6px">NUDGE</div>
-      <div class="row">
-        <div class="field"><label>Nudge at</label><input id="newReminderTime" type="time" value="" placeholder="Same as due time"></div>
-        <div class="field"><label>Also alert</label>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
-            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead7"> 7 days before</label>
-            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead3"> 3 days</label>
-            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead1"> 1 day</label>
-            <label style="font-size:.8rem;font-weight:500"><input type="checkbox" id="newLead0" checked> On the day</label>
-          </div>
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;font-size:.85rem;font-weight:600">More options (priority, nudge, AI)</summary>
+      <div class="row" style="margin-top:8px">
+        <div class="field"><label>Priority</label>
+          <select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
         </div>
+        <div class="field"><label>Nudge time</label><input id="newReminderTime" type="time"></div>
       </div>
-    </div>
-    <div style="margin-top:14px;padding:12px;background:var(--pine-soft);border-radius:12px;border:1px solid var(--pine)">
-      <div style="font-weight:700;font-size:.9rem;margin-bottom:4px">Need help with this task?</div>
-      <p style="font-size:.82rem;color:var(--muted);margin:0 0 8px">Ask AI for ideas, a plan, or how to break it down.</p>
-      <div class="row" style="align-items:center">
+      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;font-size:.8rem">
+        <label><input type="checkbox" id="newLead7"> 7d before</label>
+        <label><input type="checkbox" id="newLead3"> 3d</label>
+        <label><input type="checkbox" id="newLead1"> 1d</label>
+        <label><input type="checkbox" id="newLead0" checked> On day</label>
+      </div>
+      <div class="row" style="margin-top:10px;align-items:center">
         <select id="aiHelperSelect" style="max-width:140px">
-          <option value="grok">Grok</option>
-          <option value="chatgpt">ChatGPT</option>
-          <option value="claude">Claude</option>
-          <option value="gemini">Gemini</option>
-          <option value="perplexity">Perplexity</option>
+          <option value="grok">Grok</option><option value="chatgpt">ChatGPT</option>
+          <option value="claude">Claude</option><option value="gemini">Gemini</option>
         </select>
-        <button class="btn sm" id="askAiBtn" style="flex:0 0 auto">Yes — ask AI ↗</button>
+        <button class="btn sm ghost" id="askAiBtn">Ask AI ↗</button>
       </div>
-    </div>
-    <button class="btn" id="addTaskBtn" style="margin-top:14px;width:100%">Add task</button>
-  </div>
+    </details>
+    <button class="btn" id="addTaskBtn" style="margin-top:14px;width:100%">Save task</button>
+  </div>`:`<!-- add form collapsed -->`}
+
+  ${f!=='done'?`
   <div class="card" style="padding:10px 12px;margin-bottom:10px">
-    <div class="field" style="margin:0"><label>Search tasks</label>
-      <div class="row" style="gap:8px;align-items:center">
-        <input type="search" id="taskSearchInput" enterkeyhint="search" placeholder="Type a word from the task…" value="${escapeHtml(state.taskSearch||'')}" style="flex:1;min-width:0">
-        <button type="button" class="btn sm" id="taskSearchGoBtn" style="flex:0 0 auto">Go</button>
-      </div>
+    <div class="row" style="gap:8px;align-items:center;margin-bottom:8px">
+      <input type="search" id="taskSearchInput" placeholder="Search…" value="${escapeHtml(state.taskSearch||'')}" style="flex:1;min-width:0">
+      <button type="button" class="btn sm" id="taskSearchGoBtn">Go</button>
     </div>
-  </div>
-  <div class="card" style="padding:12px;margin-bottom:10px">
-    <div style="font-size:.85rem;font-weight:700;margin-bottom:8px">Tasks in progress</div>
-    <p style="font-size:.75rem;color:var(--muted);margin:0 0 8px">Filter by when they are due. Each task shows a tag: Today, Tomorrow, This week, Overdue, or No date.</p>
-    <div class="row" style="gap:8px;margin-bottom:8px">
-      <div class="field" style="margin:0"><label>From</label><input type="date" id="progressFrom" value="${escapeHtml(state.progressFrom||'')}"></div>
-      <div class="field" style="margin:0"><label>To</label><input type="date" id="progressTo" value="${escapeHtml(state.progressTo||'')}"></div>
-      <button type="button" class="btn ghost sm" id="clearProgressDates" style="align-self:flex-end">Clear dates</button>
+    <div class="filters" style="margin:0">
+      <button data-filter="all" class="${f==='all'?'active':''}">All open</button>
+      <button data-filter="today" class="${f==='today'?'active':''}">Today</button>
+      <button data-filter="week" class="${f==='week'?'active':''}">This week</button>
+      <button data-filter="overdue" class="${f==='overdue'?'active':''}">Overdue</button>
+      <button data-filter="must" class="${f==='must'?'active':''}">Must</button>
+      <button data-filter="frog" class="${f==='frog'?'active':''}">Frog</button>
+      <button data-filter="backburner" class="${f==='backburner'?'active':''}">Backburner</button>
     </div>
-  </div>
-  <div style="font-size:.8rem;font-weight:600;margin:4px 0 6px;color:var(--muted)">Quick filters</div>
-  <div class="filters">
-    <button data-filter="all" class="${f==='all'?'active':''}">All open (${(state.tasks||[]).filter(t=>!t.done&&!t.backburner).length})</button>
-    <button data-filter="today" class="${f==='today'?'active':''}">Today</button>
-    <button data-filter="tomorrow" class="${f==='tomorrow'?'active':''}">Tomorrow</button>
-    <button data-filter="week" class="${f==='week'?'active':''}">This week</button>
-    <button data-filter="overdue" class="${f==='overdue'?'active':''}">Overdue</button>
-    <button data-filter="undated" class="${f==='undated'?'active':''}">No date</button>
-    <button data-filter="must" class="${f==='must'?'active':''}">Must</button>
-    <button data-filter="frog" class="${f==='frog'?'active':''}">Frog</button>
-    <button data-filter="backburner" class="${f==='backburner'?'active':''}">🔥 Backburner</button>
-  </div>
-  <div style="margin:8px 0 10px">
-    <button type="button" class="btn ${f==='done'?'':'ghost'} sm" data-filter="done">Show completed tasks (${(state.tasks||[]).filter(t=>t.done).length})</button>
-  </div>
-  ${f==='done' ? `<div class="card" style="padding:10px 12px;margin-bottom:10px">
-    <div style="font-size:.85rem;font-weight:600;margin-bottom:8px">Completed tasks (${(state.tasks||[]).filter(x=>!!x.done).length} total)</div>
-    <p style="font-size:.78rem;color:var(--muted);margin:0 0 8px">Date range is optional. Leave blank to see all completed.</p>
-    <div style="font-size:.85rem;font-weight:600;margin-bottom:8px">Filter by date (optional)</div>
-    <div class="row">
-      <div class="field"><label>From</label><input type="date" id="completedFrom" value="${state.completedFrom||''}"></div>
-      <div class="field"><label>To</label><input type="date" id="completedTo" value="${state.completedTo||''}"></div>
+    <div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap">
+      <span style="font-size:.75rem;color:var(--muted);align-self:center">Show:</span>
+      <button type="button" data-action="ctx-filter" data-ctx="all" class="btn ghost sm ${(state.contextFilter||'all')==='all'?'active':''}">All types</button>
+      <button type="button" data-action="ctx-filter" data-ctx="school" class="btn ghost sm ${state.contextFilter==='school'?'active':''}">${L('ctxSchool')}</button>
+      <button type="button" data-action="ctx-filter" data-ctx="personal" class="btn ghost sm ${state.contextFilter==='personal'?'active':''}">${L('personal')}</button>
     </div>
-    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-      <button type="button" class="btn sm" id="applyCompletedRange">Apply dates</button>
-      <button type="button" class="btn ghost sm" id="clearCompletedRange">Clear dates</button>
+    <details style="margin-top:8px">
+      <summary style="cursor:pointer;font-size:.82rem;font-weight:600">Focus modes (Spotlight, Grab Bag, One at a time…)</summary>
+      <div style="margin-top:8px">${modeBanner||tasksViewToolbar()}</div>
+    </details>
+  </div>`:`
+  <div class="card" style="padding:10px 12px;margin-bottom:10px">
+    <div class="row" style="gap:8px">
+      <div class="field" style="margin:0"><label>From</label><input type="date" id="completedFrom" value="${state.completedFrom||''}"></div>
+      <div class="field" style="margin:0"><label>To</label><input type="date" id="completedTo" value="${state.completedTo||''}"></div>
+      <button type="button" class="btn ghost sm" id="clearCompletedRange" style="align-self:flex-end">Clear</button>
     </div>
-  </div>` : ''}
-  <div class="filters" style="margin-top:6px">
-    <span style="font-size:.75rem;color:var(--muted);align-self:center">Show:</span>
-    <button type="button" data-action="ctx-filter" data-ctx="all" class="${(state.contextFilter||'all')==='all'?'active':''}">All</button>
-    <button type="button" data-action="ctx-filter" data-ctx="school" class="${state.contextFilter==='school'?'active':''}">${L('ctxSchool')}</button>
-    <button type="button" data-action="ctx-filter" data-ctx="personal" class="${state.contextFilter==='personal'?'active':''}">${L('personal')}</button>
-  </div>
-  <ul class="tasklist">${modeBanner}${modeBody}${items}</ul>
+  </div>`}
+
+  <ul class="tasklist">${modeBody||''}${items}</ul>
   `;
 }
 
@@ -10488,6 +10704,44 @@ function wireView(){
     else if(action==='back-to-today') el.addEventListener('click', ()=>setView('today'));
     else if(action==='test-sound') el.addEventListener('click', (e)=>{ e.preventDefault(); testAlarm(); });
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
+    else if(action==='ef-start') el.addEventListener('click', ()=>{
+      if(!state.energyFocus) state.energyFocus={items:[], timerSec:600};
+      const idx=Number(el.dataset.idx);
+      const mins=state.energyFocus.presetMin||10;
+      state.energyFocus.activeIdx=idx;
+      state.energyFocus.timerOn=true;
+      state.energyFocus.timerEnds=Date.now()+mins*60*1000;
+      showAppMessage('Timer on', (state.energyFocus.items[idx]||'Item')+' — '+mins+' min. Stop is allowed when it ends.');
+      try{ startEnergyFocusTick(); }catch(e){}
+      persistRender();
+    });
+    else if(action==='ef-remove') el.addEventListener('click', ()=>{
+      if(!state.energyFocus||!state.energyFocus.items) return;
+      state.energyFocus.items.splice(Number(el.dataset.idx),1);
+      try{saveState();}catch(e){}
+      persistRender();
+    });
+    else if(action==='ef-preset') el.addEventListener('click', ()=>{
+      if(!state.energyFocus) state.energyFocus={items:[]};
+      state.energyFocus.presetMin=Number(el.dataset.min)||10;
+      showAppMessage('Timer length', state.energyFocus.presetMin+' minutes for the next Start.');
+    });
+    else if(action==='ritual-check') el.addEventListener('change', ()=>{
+      if(!state.rituals) state.rituals={};
+      const key=el.dataset.key;
+      if(!state.rituals[key]) state.rituals[key]={};
+      state.rituals[key][el.dataset.idx]=!!el.checked;
+      try{saveState();}catch(e){}
+    });
+    else if(action==='set-ctx') el.addEventListener('click', ()=>{
+      const task=findTask(el.dataset.id);
+      if(!task) return;
+      task.context=el.dataset.ctx||'school';
+      try{saveState();}catch(e){}
+      showAppMessage('Labeled', task.title+' → '+(task.context==='personal'?'Personal':'Study/Work'));
+      persistRender();
+    });
+    else if(action==='go-timer') el.addEventListener('click', ()=>navigateTo('timer'));
     else if(action==='spin-again') el.addEventListener('click', ()=>{
       const open=(state.tasks||[]).filter(x=>!x.done&&!x.backburner);
       if(!open.length){ showAppMessage('No open tasks', 'Add a task first.'); return; }
@@ -10594,9 +10848,17 @@ function wireView(){
         });
       }
       else if(p.action==='backburner-help'){
-        showAppMessage('Backburner', 'Open a task → choose Backburner to hide it from the main list until you bring it back.'); navigateTo('tasks');
+        state.listMode='backburner-pick';
+        state.filter='all';
         navigateTo('tasks');
       }
+      else if(p.action==='energy-focus'){ navigateTo('energyFocus'); }
+      else if(p.action==='if-then'){ navigateTo('ifThen'); }
+      else if(p.action==='ritual-backpack'){ navigateTo('ritualBackpack'); }
+      else if(p.action==='ritual-costume'){ navigateTo('ritualCostume'); }
+      else if(p.action==='ritual-location'){ navigateTo('ritualLocation'); }
+      else if(p.action==='context-split'){ navigateTo('contextSplit'); }
+
       else if(p.nav){
         // Open the real technique screen (Focus Plate, Bite Size, etc.) — not a generic Tasks dump
         applyChallengeTool(p.nav, state.challengeId);
@@ -10759,6 +11021,8 @@ function wireView(){
       openAIWithPrompt(title ? promptStuckTask({title, notes:'', date:document.getElementById('newDate')?.value||''}) : 'Help me plan a realistic study task for today. I am a student with ADHD. Keep steps small.', ai);
     });
     main.querySelectorAll('[data-filter]').forEach(b=>b.addEventListener('click',()=>{state.filter=b.dataset.filter; persistRender();}));
+    const toggleAdd=document.getElementById('toggleAddTaskBtn');
+    if(toggleAdd) toggleAdd.onclick=function(){ state.showAddTask=!state.showAddTask; persistRender(); };
     const tsi=document.getElementById('taskSearchInput');
     if(tsi){
       if(state._taskSearchFocus){
