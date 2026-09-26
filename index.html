@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="248">
+<meta name="snapback-build" content="250">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -181,7 +181,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 .dot.filled{background:var(--pine)}
 
 /* Eisenhower */
-.matrix{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:12px;min-height:400px}
+.matrix{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto;gap:12px;min-height:320px}.eis-matrix .quad h4{font-size:1.05rem;margin:4px 0}
 @media(max-width:700px){.matrix{grid-template-columns:1fr}}
 .quad{border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;min-height:170px}
 .quad h4{margin:0 0 3px;font-size:.9rem}
@@ -1910,7 +1910,13 @@ function addTask(){
   const taskContext=(document.getElementById('newContext')&&document.getElementById('newContext').value)||'school';
   const technique=(document.getElementById('newTechnique')&&document.getElementById('newTechnique').value)||'';
   if(!Array.isArray(state.tasks)) state.tasks=[];
-  const taskObj={id,title,notes:'',date:date||'',time,priority,urgent:false,important:false,tier:'could',frog:false,context:taskContext,technique:technique,meetingUrl:'',reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{},created:Date.now()};
+  let urgent=false, important=false, eisSet=false;
+  const eis=(document.getElementById('newEisQuad')&&document.getElementById('newEisQuad').value)||'';
+  if(eis==='do'){ urgent=true; important=true; eisSet=true; }
+  else if(eis==='schedule'){ urgent=false; important=true; eisSet=true; }
+  else if(eis==='quick'){ urgent=true; important=false; eisSet=true; }
+  else if(eis==='later'){ urgent=false; important=false; eisSet=true; }
+  const taskObj={id,title,notes:'',date:date||'',time,priority,urgent,important,eisSet,tier:'could',frog:false,context:taskContext,technique:technique,meetingUrl:'',reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{},created:Date.now()};
   state.tasks.unshift(taskObj);
   state.pendingStrategyTaskId = id;
   // Always show in list after add (Today filter hides future dates)
@@ -3883,7 +3889,14 @@ function L(key){
   return map[key] != null ? map[key] : key;
 }
 
-function setView(v){ navigateTo(v); }
+function setView(v){
+  if(v==='tasks'){
+    // Leaving challenge tools: show the real Tasks list, not Grab Bag / Backburner picker / etc.
+    const special=['backburner-pick','must-frog-pick','spotlight','wall','one','jar','pool','spin','batch'];
+    if(special.indexOf(state.listMode)>=0) state.listMode='all';
+  }
+  navigateTo(v);
+}
 
 /* ============================================================
    Render shell
@@ -5897,7 +5910,7 @@ function applyChallengeTool(toolId, challengeId){
   if(toolId==='journal'){ navigateTo('journal'); return; }
   if(toolId==='bugme' || toolId==='bugMe' || toolId==='settings'){
     navigateTo('settings');
-    showAppMessage('Nudge (alarm)', 'Scroll to Nudge / alarm, set time, and Save.');
+    showAppMessage('Nudge', 'Scroll to Nudge in Settings. Set a time and a task right away, then Save.');
     return;
   }
   if(toolId==='calendar'){ navigateTo('calendar'); return; }
@@ -5938,8 +5951,8 @@ function challengePathsFor(id){
 
 function viewPlanAhead(){
   const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner);
-  const week = open.filter(t=>t.planWeek===true || isThisWeek(t.date));
-  const rest = open.filter(t=>!(t.planWeek===true || isThisWeek(t.date)));
+  const week = open.filter(t=>t.planWeek===true);
+  const rest = open.filter(t=>!t.planWeek);
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
@@ -5958,7 +5971,7 @@ function viewPlanAhead(){
       <button class="btn ghost sm" data-action="unplan-week" data-id="${t.id}">Remove</button>
       <button class="btn sm" data-action="pin-tom" data-id="${t.id}">Top of Mind</button>
     </div>`).join('') : '<div class="empty">Nothing planned for this week yet.</div>'}
-    ${week.length?`<button class="btn" data-action="list-mode" data-mode="spotlight" style="margin-top:12px">Spotlight only these (work mode)</button>`:''}
+    ${week.length?`<button class="btn" data-action="plan-spotlight" style="margin-top:12px">Spotlight this week's tasks</button>`:''}
   </div>
   <div class="card">
     <h3 style="margin:0 0 8px">Not this week (${rest.length})</h3>
@@ -6860,13 +6873,8 @@ function viewTasks(){
       if(ranged.length || !list.length) list=ranged;
     }
   }
-  // Optional due-date range for in-progress lists
-  if(f!=='done'){
-    const pf=state.progressFrom||'';
-    const pt=state.progressTo||'';
-    if(pf) list=list.filter(x=>!x.date || String(x.date)>=pf);
-    if(pt) list=list.filter(x=>!x.date || String(x.date)<=pt);
-  }
+  // progressFrom/To removed from UI — clear any stale values so lists are not empty
+  try{ if(state.progressFrom||state.progressTo){ state.progressFrom=''; state.progressTo=''; } }catch(e){}
   // Search title / notes
   if(q){
     list=list.filter(t=>{
@@ -6895,7 +6903,8 @@ function viewTasks(){
   let modeBody = '';
 
   if(mode === 'spotlight' || mode === 'batch'){
-    const open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
+    let open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
+    if(state.spotlightOnlyPlanWeek) open = open.filter(t=>t.planWeek);
     const n = state.spotlightSize || 3;
     const shown = open.slice(0, n);
     return `
@@ -7181,6 +7190,15 @@ function viewTasks(){
         <option value="bodydouble">Body Doubling</option>
       </select>
     </div>
+    <div class="field" style="margin-top:10px"><label>Eisenhower (optional)</label>
+      <select id="newEisQuad">
+        <option value="">Not set yet</option>
+        <option value="do">Do First — urgent &amp; important</option>
+        <option value="schedule">Plan It — important, not urgent</option>
+        <option value="quick">Quick — urgent, less important</option>
+        <option value="later">Later — neither</option>
+      </select>
+    </div>
     <details style="margin-top:10px">
       <summary style="cursor:pointer;font-size:.85rem;font-weight:600">More options (priority, nudge, AI)</summary>
       <div class="row" style="margin-top:8px">
@@ -7227,10 +7245,11 @@ function viewTasks(){
       <button type="button" data-action="ctx-filter" data-ctx="school" class="btn ghost sm ${state.contextFilter==='school'?'active':''}">${L('ctxSchool')}</button>
       <button type="button" data-action="ctx-filter" data-ctx="personal" class="btn ghost sm ${state.contextFilter==='personal'?'active':''}">${L('personal')}</button>
     </div>
-    <details style="margin-top:8px">
-      <summary style="cursor:pointer;font-size:.82rem;font-weight:600">Focus modes (Spotlight, Grab Bag, One at a time…)</summary>
-      <div style="margin-top:8px">${modeBanner||tasksViewToolbar()}</div>
-    </details>
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+      <div style="font-size:.82rem;font-weight:700;margin-bottom:6px">Focus modes</div>
+      <p style="font-size:.75rem;color:var(--muted);margin:0 0 8px">Tap a mode to change how the list below is shown.</p>
+      ${modeBanner||tasksViewToolbar()}
+    </div>
   </div>`:`
   <div class="card" style="padding:10px 12px;margin-bottom:10px">
     <div class="row" style="gap:8px">
@@ -8230,36 +8249,94 @@ function viewTimer(){
    VIEW: Eisenhower
    ============================================================ */
 function viewEisenhower(){
-  const active=state.tasks.filter(t=>!t.done && !t.backburner);
-  const q1=active.filter(t=>t.urgent&&t.important), q2=active.filter(t=>!t.urgent&&t.important);
-  const q3=active.filter(t=>t.urgent&&!t.important), q4=active.filter(t=>!t.urgent&&!t.important);
-  const card=(t)=>`<div class="qcard" style="padding:12px">
-      <div class="qtitle" style="font-weight:700;margin-bottom:8px">${escapeHtml(t.title)}</div>
-      <div style="font-size:.8rem;color:var(--muted);margin-bottom:6px">${t.date?(t.date+(t.time?' '+t.time:'')):'No date yet'}</div>
-      <div style="font-size:.78rem;color:var(--muted);margin-bottom:8px">Tap to move:</div>
-      <div class="qchips" style="display:flex;flex-wrap:wrap;gap:6px">
-        <button type="button" class="btn sm ${t.urgent?'':'ghost'}" data-action="toggle-urgent" data-id="${t.id}">${t.urgent?'✓ ':''}Urgent</button>
-        <button type="button" class="btn sm ${t.important?'':'ghost'}" data-action="toggle-important" data-id="${t.id}">${t.important?'✓ ':''}Important</button>
-      </div>
-      <div style="font-size:.75rem;color:var(--muted);margin-top:8px">${t.urgent&&t.important?'Do first':(!t.urgent&&t.important)?'Schedule':(t.urgent&&!t.important)?'Quick / interrupt':('Later')}</div>
-    </div>`;
-  const listOrEmpty=(arr)=>arr.length?arr.map(card).join(''):`<div style="font-size:.77rem;color:var(--muted)">Nothing here yet</div>`;
-  const addBox=(uq,iq,label)=>`<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)">
-      <input class="eis-add" data-uq="${uq}" data-iq="${iq}" placeholder="Add task to ${label}…" style="width:100%;margin-bottom:6px">
-      <button type="button" class="btn sm" data-action="eis-add" data-uq="${uq}" data-iq="${iq}">Add here</button>
-    </div>`;
+  const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner);
+  const q1=open.filter(t=>t.urgent && t.important);
+  const q2=open.filter(t=>!t.urgent && t.important);
+  const q3=open.filter(t=>t.urgent && !t.important);
+  const q4=open.filter(t=>!t.urgent && !t.important && t.eisSet);
+  const unassigned=open.filter(t=>!t.eisSet && !t.urgent && !t.important);
+  // Also treat explicit false flags without eisSet as unassigned if never set
+  const unassigned2=open.filter(t=>{
+    if(t.eisSet) return false;
+    if(t.urgent||t.important) return false;
+    return true;
+  });
+  const unas = unassigned2;
+  const chip=(t)=>`<div class="eis-chip" style="background:rgba(255,255,255,.35);border-radius:10px;padding:8px 10px;margin-bottom:6px">
+    <div style="font-weight:700;font-size:.9rem">${escapeHtml(t.title)}</div>
+    <div style="font-size:.72rem;opacity:.85;margin-top:2px">${t.date||'No date'}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">
+      <button type="button" class="btn sm" style="font-size:.7rem;padding:4px 8px" data-action="eis-move" data-id="${t.id}" data-u="1" data-i="1">Do First</button>
+      <button type="button" class="btn sm" style="font-size:.7rem;padding:4px 8px" data-action="eis-move" data-id="${t.id}" data-u="0" data-i="1">Plan It</button>
+      <button type="button" class="btn sm" style="font-size:.7rem;padding:4px 8px" data-action="eis-move" data-id="${t.id}" data-u="1" data-i="0">Quick</button>
+      <button type="button" class="btn sm" style="font-size:.7rem;padding:4px 8px" data-action="eis-move" data-id="${t.id}" data-u="0" data-i="0">Later</button>
+    </div>
+  </div>`;
+  const listOrEmpty=(arr)=>arr.length?arr.map(chip).join(''):`<div style="font-size:.78rem;opacity:.8;padding:6px 0">Empty — place a task here</div>`;
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Sort, then do</div><h1>This or That (Eisenhower)</h1>
-    <p>Add a task into a box, or tap Urgent / Important to move it. Tasks you add here also appear under Tasks.</p>
+    <div class="eyebrow">Urgent × Important</div>
+    <h1>Eisenhower matrix</h1>
+    <p>Place each task in one box. Labels match how SnapBack stores them so Home and Tasks stay in sync.</p>
   </div>
-  <div class="matrix">
-    <div class="quad q1"><h4>Do First</h4><div class="qsub">Urgent &amp; important</div><div class="qlist">${listOrEmpty(q1)}</div>${addBox(1,1,'Do First')}</div>
-    <div class="quad q2"><h4>Schedule</h4><div class="qsub">Important, not urgent</div><div class="qlist">${listOrEmpty(q2)}</div>${addBox(0,1,'Schedule')}</div>
-    <div class="quad q3"><h4>Quick</h4><div class="qsub">Urgent, less important</div><div class="qlist">${listOrEmpty(q3)}</div>${addBox(1,0,'Quick')}</div>
-    <div class="quad q4"><h4>Later</h4><div class="qsub">Neither</div><div class="qlist">${listOrEmpty(q4)}</div>${addBox(0,0,'Later')}</div>
+
+  <div class="card" style="border-left:4px solid var(--pine);margin-bottom:14px">
+    <div style="font-weight:700;margin-bottom:6px">Place a task</div>
+    <label>Existing task</label>
+    <select id="eisTaskSelect">
+      <option value="">— Choose —</option>
+      ${open.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}${x.eisSet?' ✓':''}</option>`).join('')}
+    </select>
+    <div class="row" style="margin-top:8px;gap:8px">
+      <input id="eisNewTitle" placeholder="Or new task title" style="flex:1">
+      <button type="button" class="btn sm" id="eisCreateBtn">Create</button>
+    </div>
+    <div style="font-size:.8rem;font-weight:600;margin:12px 0 6px">Put it in</div>
+    <div class="row" style="gap:6px;flex-wrap:wrap">
+      <button type="button" class="btn sm" data-action="eis-place" data-u="1" data-i="1">Do First<br><span style="font-size:.68rem;font-weight:500">Urgent &amp; important</span></button>
+      <button type="button" class="btn sm" data-action="eis-place" data-u="0" data-i="1">Plan It<br><span style="font-size:.68rem;font-weight:500">Important, not urgent</span></button>
+      <button type="button" class="btn sm" data-action="eis-place" data-u="1" data-i="0">Quick<br><span style="font-size:.68rem;font-weight:500">Urgent, less important</span></button>
+      <button type="button" class="btn sm" data-action="eis-place" data-u="0" data-i="0">Later<br><span style="font-size:.68rem;font-weight:500">Neither</span></button>
+    </div>
   </div>
+
+  ${unas.length?`<div class="card" style="margin-bottom:14px">
+    <div style="font-weight:700;margin-bottom:6px">Not placed yet (${unas.length})</div>
+    <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">These tasks have no Eisenhower tag. Use the buttons under each name, or the controls above.</p>
+    ${unas.map(chip).join('')}
+  </div>`:''}
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;font-size:.75rem;font-weight:700;text-align:center;color:var(--muted)">
+    <div>Urgent →</div><div>Not urgent →</div>
+  </div>
+  <div class="matrix eis-matrix">
+    <div class="quad q1" style="background:#5EC8D8;color:#0a3a42">
+      <div style="font-size:1.4rem">🚨</div>
+      <h4 style="color:inherit">Do First</h4>
+      <div class="qsub" style="color:inherit;opacity:.9">Urgent &amp; important · clear deadlines</div>
+      <div class="qlist">${listOrEmpty(q1)}</div>
+    </div>
+    <div class="quad q2" style="background:#2A6F73;color:#fff">
+      <div style="font-size:1.4rem">📅</div>
+      <h4 style="color:inherit">Plan It</h4>
+      <div class="qsub" style="color:inherit;opacity:.9">Important, not urgent · goals, easy to delay</div>
+      <div class="qlist">${listOrEmpty(q2)}</div>
+    </div>
+    <div class="quad q3" style="background:#E8957A;color:#3a1a12">
+      <div style="font-size:1.4rem">↪️</div>
+      <h4 style="color:inherit">Quick</h4>
+      <div class="qsub" style="color:inherit;opacity:.9">Urgent, less important · interruptions / busy work</div>
+      <div class="qlist">${listOrEmpty(q3)}</div>
+    </div>
+    <div class="quad q4" style="background:#3BA8B5;color:#fff">
+      <div style="font-size:1.4rem">🗑</div>
+      <h4 style="color:inherit">Later</h4>
+      <div class="qsub" style="color:inherit;opacity:.9">Neither · drop, delay, or park</div>
+      <div class="qlist">${listOrEmpty(q4)}</div>
+    </div>
+  </div>
+  <p style="font-size:.78rem;color:var(--muted);margin-top:10px">Students: “Quick” is for short interruptions (app version of Delegate when you cannot hand work off). “Later” can mean delete, backburner, or wait.</p>
 `;
 }
 function viewBiteSize(){
@@ -8298,9 +8375,11 @@ function viewBiteSize(){
   <div class="card">
     <label>Task for Bite Size</label>
     <select id="cheeseTaskSelect">
+      <option value="">— Select a task —</option>
       ${undone.map(x=>`<option value="${x.id}" ${!isOther && t && String(t.id)===String(x.id)?'selected':''}>${escapeHtml(x.title)}</option>`).join('')}
-      <option value="__other__" ${isOther?'selected':''}>Others</option>
+      <option value="__other__" ${isOther?'selected':''}>+ New / other title</option>
     </select>
+    <button type="button" class="btn sm" id="biteTaskOkBtn" style="margin-top:10px;width:100%">OK — use this task</button>
     <div id="biteOtherWrap" style="margin-top:10px;${isOther?'':'display:none'}">
       <div class="field"><label>Type what you want to break down</label>
         <input id="biteOtherTitle" placeholder="e.g. Ciccarelli Psychology chapter 8" value="${escapeHtml(otherTitle)}">
@@ -9106,19 +9185,28 @@ function viewRule135(){
     <h1>Focus Plate</h1>
     <p>One big thing. Three medium things. Five small things. That's the whole list for today — nothing else counts.</p>
   </div>
-  
-  ${techniqueTaskPickerHtml(state.plateTaskId||state.techniqueTaskId||'')}
-  <div class="card">
-    <label>Work on an existing task (optional)</label>
+
+  <div class="card" style="border-left:4px solid var(--pine)">
+    <div style="font-weight:700;margin-bottom:6px">Choose a task for the plate</div>
+    <p style="font-size:.8rem;color:var(--muted);margin:0 0 10px">Pick an existing task or create one, then place it on Big, Medium, Small, or Non-negotiable.</p>
+    <label>Existing task</label>
     <select id="plateTaskSelect">
-      <option value="">— Select a task or type new lines below —</option>
+      <option value="">— Select a task —</option>
       ${(state.tasks||[]).filter(x=>!x.done&&!x.backburner).map(x=>`<option value="${x.id}" ${String(state.plateTaskId||'')===String(x.id)?'selected':''}>${escapeHtml(x.title)}</option>`).join('')}
     </select>
-    <div class="row" style="margin-top:8px;gap:8px">
+    <button type="button" class="btn sm" id="plateTaskOkBtn" style="margin-top:8px;width:100%">OK — use selected task</button>
+    <div class="row" style="margin-top:10px;gap:8px">
       <input id="plateNewTaskTitle" placeholder="Or type a new task title" style="flex:1">
-      <button type="button" class="btn sm" id="plateCreateTaskBtn" style="flex:0 0 auto">Create task</button>
+      <button type="button" class="btn sm" id="plateCreateTaskBtn">Create task</button>
     </div>
-    <button type="button" class="btn ghost sm" id="fillPlateBtn" style="margin-top:8px">Fill plate from my open tasks</button>
+    <div style="font-size:.8rem;font-weight:600;margin:12px 0 6px">Place selected task on</div>
+    <div class="row" style="gap:6px;flex-wrap:wrap">
+      <button type="button" class="btn sm" data-action="plate-place" data-slot="nn">★ Non-negotiable</button>
+      <button type="button" class="btn sm" data-action="plate-place" data-slot="big">1 Big</button>
+      <button type="button" class="btn sm" data-action="plate-place" data-slot="medium">Medium</button>
+      <button type="button" class="btn sm" data-action="plate-place" data-slot="small">Small</button>
+    </div>
+    <button type="button" class="btn ghost sm" id="fillPlateBtn" style="margin-top:10px">Auto-fill empty slots from open tasks</button>
   </div>
 
   <div class="card" style="background:var(--gold-soft);border-color:var(--gold)">
@@ -10703,6 +10791,60 @@ function wireView(){
     else if(action==='back-to-tasks') el.addEventListener('click', ()=>setView('tasks'));
     else if(action==='back-to-today') el.addEventListener('click', ()=>setView('today'));
     else if(action==='test-sound') el.addEventListener('click', (e)=>{ e.preventDefault(); testAlarm(); });
+    else if(action==='eis-move' || action==='eis-place') el.addEventListener('click', ()=>{
+      let id=el.dataset.id;
+      if(action==='eis-place'){
+        id=document.getElementById('eisTaskSelect')?.value||'';
+        if(!id){
+          const title=(document.getElementById('eisNewTitle')?.value||'').trim();
+          if(!title){ showAppMessage('Choose a task', 'Select or create a task first.'); return; }
+          id=uid();
+          if(!Array.isArray(state.tasks)) state.tasks=[];
+          state.tasks.unshift({id,title,notes:'From Eisenhower',date:todayStr(),time:'',priority:'medium',tier:'could',frog:false,context:'school',technique:'eisenhower',done:false,chunks:[],pomodoros:0,urgent:false,important:false,eisSet:false,created:Date.now()});
+          try{ const sel=document.getElementById('eisTaskSelect'); if(sel) sel.value=id; }catch(e){}
+        }
+      }
+      const task=findTask(id);
+      if(!task) return;
+      task.urgent = el.dataset.u==='1';
+      task.important = el.dataset.i==='1';
+      task.eisSet = true;
+      try{saveState();}catch(e){}
+      showAppMessage('Placed', task.title);
+      persistRender();
+    });
+    else if(action==='plate-place') el.addEventListener('click', ()=>{
+      const slot=el.dataset.slot;
+      let id=state.plateTaskId||document.getElementById('plateTaskSelect')?.value;
+      let task=findTask(id);
+      if(!task){
+        const title=(document.getElementById('plateNewTaskTitle')?.value||'').trim();
+        if(!title){ showAppMessage('Pick or create a task', 'Select from the list or type a title first.'); return; }
+        if(!Array.isArray(state.tasks)) state.tasks=[];
+        id=uid();
+        task={id,title,notes:'From Focus Plate',date:todayStr(),time:'',priority:'medium',tier:'could',frog:false,context:'school',technique:'rule135',done:false,chunks:[],pomodoros:0,created:Date.now()};
+        state.tasks.unshift(task);
+        state.plateTaskId=id;
+      }
+      const r=getRule135();
+      const text=task.title||'';
+      if(slot==='nn'){
+        state.nonNegotiable[todayStr()]={text, done:false, taskId:task.id};
+      } else if(slot==='big'){
+        r.big={text, done:false, taskId:task.id};
+      } else if(slot==='medium'){
+        const i=(r.medium||[]).findIndex(x=>!(x&&x.text));
+        if(i>=0) r.medium[i]={text, done:false, taskId:task.id};
+        else showAppMessage('Medium full', 'Clear a medium line first, or edit a line below.');
+      } else if(slot==='small'){
+        const i=(r.small||[]).findIndex(x=>!(x&&x.text));
+        if(i>=0) r.small[i]={text, done:false, taskId:task.id};
+        else showAppMessage('Small full', 'Clear a small line first.');
+      }
+      try{saveState();}catch(e){}
+      showAppMessage('On the plate', text);
+      persistRender();
+    });
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
     else if(action==='ef-start') el.addEventListener('click', ()=>{
       if(!state.energyFocus) state.energyFocus={items:[], timerSec:600};
@@ -10752,7 +10894,18 @@ function wireView(){
       persistRender();
     });
     else if(action==='plan-week') el.addEventListener('click', ()=>{ const t=findTask(id); if(t){ t.planWeek=true; persistRender(); } });
-    else if(action==='unplan-week') el.addEventListener('click', ()=>{ const t=findTask(id); if(t){ t.planWeek=false; persistRender(); } });
+    else if(action==='unplan-week') el.addEventListener('click', ()=>{ const t=findTask(id); if(t){ t.planWeek=false; try{saveState();}catch(e){} showAppMessage('Removed from this week', t.title); persistRender(); } });
+    else if(action==='plan-spotlight') el.addEventListener('click', ()=>{
+      const week=(state.tasks||[]).filter(x=>!x.done&&!x.backburner&&x.planWeek);
+      if(!week.length){ showAppMessage('Nothing in This week', 'Move tasks into This week first.'); return; }
+      state.listMode='spotlight';
+      state.spotlightSize=Math.min(3, week.length);
+      state.filter='all';
+      // Pin week tasks to top of open list by marking order - use spotlight on planWeek only
+      state.spotlightOnlyPlanWeek=true;
+      navigateTo('tasks');
+      showAppMessage('Spotlight', 'Showing up to '+state.spotlightSize+' tasks from This week.');
+    });
     else if(action==='clear-tom') el.addEventListener('click', ()=>{ state.topOfMindId=null; if(state.timeTrack){ state.timeTrack.startedAt=null; state.timeTrack.taskId=null; } persistRender(); });
     else if(action==='pin-tom') el.addEventListener('click', ()=>{ state.topOfMindId=id; persistRender(); });
     else if(action==='to-backburner') el.addEventListener('click', ()=>{
@@ -11020,9 +11173,40 @@ function wireView(){
       setPreferredAI(ai);
       openAIWithPrompt(title ? promptStuckTask({title, notes:'', date:document.getElementById('newDate')?.value||''}) : 'Help me plan a realistic study task for today. I am a student with ADHD. Keep steps small.', ai);
     });
-    main.querySelectorAll('[data-filter]').forEach(b=>b.addEventListener('click',()=>{state.filter=b.dataset.filter; persistRender();}));
+    main.querySelectorAll('[data-filter]').forEach(b=>b.addEventListener('click',()=>{
+      state.filter=b.dataset.filter||'all';
+      state.listMode='all';
+      state.taskSearch='';
+      try{ const si=document.getElementById('taskSearchInput'); if(si) si.value=''; }catch(e){}
+      persistRender();
+    }));
     const toggleAdd=document.getElementById('toggleAddTaskBtn');
     if(toggleAdd) toggleAdd.onclick=function(){ state.showAddTask=!state.showAddTask; persistRender(); };
+    const bbConfirm=document.getElementById('bbPickConfirm');
+    if(bbConfirm) bbConfirm.onclick=function(){
+      const id=document.getElementById('bbPickSelect')?.value||'';
+      const task=findTask(id);
+      if(!task){ showAppMessage('Pick a task', 'Choose which task to park on the Backburner.'); return; }
+      task.backburner=true;
+      state.listMode='all';
+      state.filter='backburner';
+      try{ saveState(); }catch(e){}
+      showAppMessage('On Backburner', task.title+' is parked. Open Tasks → Backburner to see it.');
+      persistRender();
+    };
+
+    const eisCreate=document.getElementById('eisCreateBtn');
+    if(eisCreate) eisCreate.onclick=function(){
+      const title=(document.getElementById('eisNewTitle')?.value||'').trim();
+      if(!title){ showAppMessage('Title needed','Type a new task name.'); return; }
+      if(!Array.isArray(state.tasks)) state.tasks=[];
+      const id=uid();
+      state.tasks.unshift({id,title,notes:'From Eisenhower',date:todayStr(),time:'',priority:'medium',tier:'could',frog:false,context:'school',technique:'eisenhower',done:false,chunks:[],pomodoros:0,urgent:false,important:false,eisSet:false,created:Date.now()});
+      try{saveState();}catch(e){}
+      showAppMessage('Task created', 'Now choose a quadrant above.');
+      persistRender();
+    };
+
     const tsi=document.getElementById('taskSearchInput');
     if(tsi){
       if(state._taskSearchFocus){
@@ -11503,6 +11687,54 @@ function wireView(){
   }
   if(state.view==='bitesize'){
     const sel=document.getElementById('cheeseTaskSelect');
+    function biteApplyTaskToFields(){
+      const selEl=document.getElementById('cheeseTaskSelect');
+      const v=selEl?selEl.value:'';
+      state.cheeseTaskId=v;
+      if(v==='__other__'){
+        state.biteOtherTitle=(document.getElementById('biteOtherTitle')?.value||'').trim();
+        const title=state.biteOtherTitle;
+        const ch=document.getElementById('biteChName');
+        const mag=document.getElementById('magicInput');
+        if(ch) ch.value=title||'';
+        if(mag) mag.value=title||'';
+      } else if(v){
+        const task=findTask(v);
+        applyTechniqueTaskId(v);
+        if(task){
+          const ch=document.getElementById('biteChName');
+          const mag=document.getElementById('magicInput');
+          const title=task.title||'';
+          if(ch) ch.value=(task.studyMeta&&task.studyMeta.chName)||title;
+          if(mag) mag.value=title;
+          if(task.studyMeta){
+            const b=document.getElementById('biteBook');
+            const n=document.getElementById('biteChNum');
+            if(b&&task.studyMeta.book) b.value=task.studyMeta.book;
+            if(n&&task.studyMeta.chNum) n.value=task.studyMeta.chNum;
+          }
+        }
+      }
+      try{saveState();}catch(e){}
+      showAppMessage('Task ready', 'Details filled below — edit if you need, then Ask AI or offline bites.');
+    }
+    const biteOk=document.getElementById('biteTaskOkBtn');
+    if(biteOk) biteOk.onclick=function(){
+      const selEl=document.getElementById('cheeseTaskSelect');
+      const v=selEl?selEl.value:'';
+      if(!v){ showAppMessage('Select a task', 'Pick a task or + New / other title first.'); return; }
+      if(v==='__other__'){
+        const title=(document.getElementById('biteOtherTitle')?.value||'').trim();
+        if(!title){ showAppMessage('Title needed', 'Type the new task title in the box.'); return; }
+        if(!Array.isArray(state.tasks)) state.tasks=[];
+        const id=uid();
+        state.tasks.unshift({id,title,notes:'From Bite Size',date:todayStr(),done:false,chunks:[],tier:'could',context:'school',technique:'bitesize',created:Date.now()});
+        state.cheeseTaskId=id;
+        try{saveState();}catch(e){}
+      }
+      biteApplyTaskToFields();
+      persistRender();
+    };
     if(sel) sel.addEventListener('change', ()=>{
       state.cheeseTaskId=sel.value;
       applyTechniqueTaskId(sel.value==='__other__'?'':sel.value);
@@ -11612,6 +11844,17 @@ function wireView(){
         const r=getRule135();
         if(!(r.big&&r.big.text)) { r.big={text:task.title, done:false}; try{saveState();}catch(e){} persistRender(); }
       }
+    };
+    const plateOk=document.getElementById('plateTaskOkBtn');
+    if(plateOk) plateOk.onclick=function(){
+      const id=document.getElementById('plateTaskSelect')?.value||'';
+      if(!id){ showAppMessage('Select a task', 'Choose a task from the list first.'); return; }
+      state.plateTaskId=id;
+      applyTechniqueTaskId(id);
+      try{saveState();}catch(e){}
+      const task=findTask(id);
+      showAppMessage('Task selected', (task&&task.title)||'Now place it on Big / Medium / Small / Non-negotiable.');
+      persistRender();
     };
     const plateCreate=document.getElementById('plateCreateTaskBtn');
     if(plateCreate) plateCreate.onclick=function(){
