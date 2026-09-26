@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="250">
+<meta name="snapback-build" content="251">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -8347,10 +8347,9 @@ function viewBiteSize(){
     if(gid) state.cheeseTaskId = gid;
   }
   const isOther = state.cheeseTaskId==='__other__';
-  let t = isOther ? null : findTask(state.cheeseTaskId);
-  if(!isOther && !t && undone[0]){ t=undone[0]; state.cheeseTaskId=t.id; }
-  // Working task for bites: Other uses temporary title until created
+  let t = (!isOther && state.cheeseTaskId) ? findTask(state.cheeseTaskId) : null;
   const otherTitle = (state.biteOtherTitle||'').trim();
+  const biteReady = !!(state.biteLocked && (t || (isOther && otherTitle)));
   const chunks = t ? normalizeChunks(t) : [];
   const allBitesDone = chunks.length>0 && chunks.every(c=>c.done);
   const guideBanner = (guide && guide.active) ? `
@@ -8386,7 +8385,7 @@ function viewBiteSize(){
       </div>
     </div>
   </div>
-  ${(t||isOther)?`
+  ${biteReady?`
   <div class="card" style="background:var(--gold-soft);border-color:var(--gold)">
     <div style="font-weight:800;margin-bottom:6px">✨ Ask AI to break up a chapter</div>
     <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Book + chapter → AI suggests realistic 10–20 min bites. Paste ideas back as bites below.</p>
@@ -9090,69 +9089,137 @@ function viewSemester(){
 /* ============================================================
    VIEW: Projects (placeholder — full implementation next)
    ============================================================ */
-function viewProjects(){
-  // Treat each class as a project. Also allow free-form projects later.
-  const projects = state.classes.map(c=>{
-    const related = state.tasks.filter(t => 
-      (t.projectId === c.id) || 
-      (t.title && t.title.toLowerCase().includes(c.title.toLowerCase().slice(0,12)))
-    );
-    const done = related.filter(t=>t.done).length;
-    return {...c, related, done, total: related.length};
-  });
 
+const PROJECT_STREAMS = {"academic": {"label": "Academic", "streams": {"sciences": {"label": "Sciences (B.Sc / M.Sc)", "subjects": ["Physics", "Chemistry", "Biology", "Environmental Science", "Other"], "focus": "Testing hypotheses and finding empirical truths", "deliverables": "Lab reports, scientific posters, datasets", "steps": [{"title": "Formulate a hypothesis", "hint": "Clear, testable prediction.", "items": ["Write the research question", "State hypothesis and null hypothesis", "Note constraints and safety"]}, {"title": "Design the protocol", "hint": "Controls, variables, equipment, safety.", "items": ["List independent / dependent variables", "List equipment and materials", "Write step-by-step method", "Safety checklist"]}, {"title": "Data collection", "hint": "Repeat trials for validity.", "items": ["Run trial 1 and log raw data", "Repeat trials as planned", "Note anomalies in a lab log"]}, {"title": "Analysis", "hint": "Graphs, stats, error checks.", "items": ["Enter data in Excel or R", "Plot graphs", "Check for outliers / error", "Draft results paragraph"]}, {"title": "Write-up & present", "hint": "IMRAD structure + poster if needed.", "items": ["Introduction draft", "Methods draft", "Results & Discussion", "References / poster / submit"]}]}, "liberal_arts": {"label": "Liberal Arts & Humanities", "subjects": ["History", "Literature", "Sociology", "Psychology", "Other"], "focus": "Analyzing text, culture, history, and human behavior", "deliverables": "Critical essays, policy briefs, documentaries", "steps": [{"title": "Define the scope", "hint": "One text, era, or social group.", "items": ["Pick specific focus", "Write 1-sentence scope", "Note word/count limits"]}, {"title": "Literature review", "hint": "What experts already said.", "items": ["Find 5+ scholarly sources", "Summarize each in 3 lines", "Note gaps your project fills"]}, {"title": "Thesis statement", "hint": "Central arguable claim.", "items": ["Draft thesis", "Test: is it arguable?", "Revise with supervisor if needed"]}, {"title": "Evidence & argument", "hint": "Quotes, archives, interviews.", "items": ["Gather primary evidence", "Map evidence to thesis points", "Outline body sections"]}, {"title": "Draft & cite", "hint": "APA / MLA / Chicago.", "items": ["Full draft", "Citation pass", "Proofread and submit"]}]}, "commerce": {"label": "Commerce, Business & Economics", "subjects": ["Finance", "Marketing", "Economics", "HR", "Other"], "focus": "Solving market, financial, or organizational problems", "deliverables": "Business plans, market research, audit reports", "steps": [{"title": "Problem identification", "hint": "Market gap or org problem.", "items": ["Write the problem in one paragraph", "Define success metric", "List stakeholders"]}, {"title": "Market / data mapping", "hint": "Sheets, competitors, surveys.", "items": ["Collect data sources", "Competitor snapshot", "Survey or interview plan"]}, {"title": "Framework application", "hint": "SWOT, PESTEL, etc.", "items": ["Apply SWOT or PESTEL", "Financial or demand model", "Risk list"]}, {"title": "Recommendations", "hint": "Actionable advice.", "items": ["3 concrete recommendations", "Timeline and resources", "Risks and mitigations"]}, {"title": "Executive summary & deck", "hint": "Report + slides.", "items": ["Executive summary", "Slide deck", "Final submit / pitch"]}]}, "engineering": {"label": "Engineering & Technology", "subjects": ["Computer Science", "IT", "Mechanical", "Civil", "Electrical", "Other"], "focus": "Building practical solutions to real-world problems", "deliverables": "Working prototypes, software, design schematics", "steps": [{"title": "Requirements", "hint": "User problem + constraints.", "items": ["User problem statement", "Budget / time / tech constraints", "Acceptance criteria"]}, {"title": "Architecture & design", "hint": "Wireframes, flowcharts, CAD.", "items": ["System diagram", "UI wireframes or CAD sketch", "Tech stack decision"]}, {"title": "Build / prototype", "hint": "Sprints, clean code or assembly.", "items": ["MVP feature list", "Build sprint 1", "Document decisions"]}, {"title": "Test & debug", "hint": "Edge cases, stress tests.", "items": ["Test plan", "Bug list and fixes", "Verify acceptance criteria"]}, {"title": "Deploy & document", "hint": "README, demo, manual.", "items": ["README / manual", "Live demo ready", "Submit / present"]}]}}}, "non_academic": {"label": "Non-academic", "streams": {"portfolio": {"label": "Portfolio & career building", "subjects": ["Personal branding", "Open source contribution", "Case studies / redesign", "Other"], "focus": "Show skills to employers with real work", "deliverables": "Portfolio pieces, case studies, public contributions", "steps": [{"title": "Define the MVP", "hint": "Smallest shareable version.", "items": ["One-sentence goal", "MVP checklist", "Public deadline for yourself"]}, {"title": "Build in public", "hint": "Share progress for accountability.", "items": ["Pick channel (LinkedIn / X / blog)", "Post first update", "Collect feedback"]}, {"title": "Ship it", "hint": "Publish imperfectly.", "items": ["Publish / launch", "Ask 3 people for feedback", "Log metrics"]}, {"title": "Post-mortem", "hint": "What you learned for interviews.", "items": ["Write short case summary", "What went wrong / right", "Add to portfolio / resume"]}]}, "entrepreneurial": {"label": "Entrepreneurial & side hustles", "subjects": ["E-commerce / dropshipping", "Micro-SaaS or digital tools", "Freelance portfolio", "Other"], "focus": "Revenue or a self-sustaining asset", "deliverables": "Store, tool, client work, or agency start", "steps": [{"title": "Define the MVP", "hint": "Avoid scope creep.", "items": ["Offer in one sentence", "Price or goal", "MVP feature list"]}, {"title": "Build in public", "hint": "Audience before polish.", "items": ["Landing page or profile", "First 3 outreach messages", "Weekly progress note"]}, {"title": "Ship / sell", "hint": "Real users or buyers.", "items": ["First sale or user", "Support / fix loop", "Simple metrics"]}, {"title": "Post-mortem", "hint": "Keep or kill.", "items": ["Revenue / learning summary", "Next experiment", "Portfolio write-up"]}]}, "community": {"label": "Community, social & advocacy", "subjects": ["Grassroots campaign", "Content & media", "Non-profit initiative", "Other"], "focus": "Social impact and organizing people", "deliverables": "Campaign, media piece, or local service", "steps": [{"title": "Define the MVP", "hint": "One event or one deliverable.", "items": ["Impact goal", "Audience", "MVP event or asset"]}, {"title": "Build in public", "hint": "Partners and volunteers.", "items": ["Recruit 1-3 helpers", "Announce date / plan", "Content calendar"]}, {"title": "Ship / host", "hint": "Run the thing.", "items": ["Execute event or publish", "Capture photos / numbers", "Thank participants"]}, {"title": "Post-mortem", "hint": "Impact story.", "items": ["What changed", "Lessons", "Share story publicly"]}]}, "passion": {"label": "Personal growth & passion", "subjects": ["Physical / maker", "Creative endurance", "Self-education curriculum", "Other"], "focus": "Curiosity and skill outside formal class", "deliverables": "Finished creative or learning artifact", "steps": [{"title": "Define the MVP", "hint": "Finishable version.", "items": ["Skill or piece you want", "MVP definition", "Weekly time box"]}, {"title": "Build in public", "hint": "Accountability.", "items": ["Log day 1", "Share a weekly update", "Adjust scope if stuck"]}, {"title": "Ship it", "hint": "Show the work.", "items": ["Finish MVP", "Share with one person", "Celebrate small win"]}, {"title": "Post-mortem", "hint": "Keep the habit or archive.", "items": ["What you learned", "Continue or close", "Optional portfolio note"]}]}}}};
+function ensureProjects(){ if(!Array.isArray(state.projects)) state.projects=[]; return state.projects; }
+function getProject(id){ return ensureProjects().find(p=>p.id===id); }
+function projectProgress(p){
+  if(!p||!p.steps) return 0;
+  let total=0, done=0;
+  p.steps.forEach(s=>{(s.items||[]).forEach(it=>{ total++; if(it.done) done++; });});
+  (p.customItems||[]).forEach(it=>{ total++; if(it.done) done++; });
+  return total? Math.round(100*done/total):0;
+}
+function viewProjects(){
+  ensureProjects();
+  const open = state.projectId ? getProject(state.projectId) : null;
+  if(open) return viewProjectDetail(open);
+  if(state.projectWizard) return viewProjectWizard();
+  const list = ensureProjects().slice().sort((a,b)=>(b.created||0)-(a.created||0));
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">Classes = projects</div>
+    <div class="eyebrow">Guided work, not just another task</div>
     <h1>Projects</h1>
-    <p>Every class is a project. See related tasks and progress for each subject in one place.</p>
+    <p>Academic or non-academic. Pick a type, get step-by-step milestones, track progress. Optionally link a class or task.</p>
   </div>
-
-  ${projects.length === 0 ? `
-    <div class="card">
-      <p style="color:var(--muted)">No classes yet. Go to <b>Calendar</b> and add your classes first. They will automatically appear here as projects.</p>
-    </div>` : 
-    projects.map(p => `
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
-          <div>
-            <h3 style="margin:0">${escapeHtml(p.title)}</h3>
-            <div style="font-size:.82rem;color:var(--muted);margin-top:4px">
-              ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][p.day] || ''} ${p.start}–${p.end}
-              ${p.room ? ' · ' + escapeHtml(p.room) : ''}
-            </div>
-            ${p.textbook ? `<div style="font-size:.8rem;margin-top:4px">📖 ${escapeHtml(p.textbook)}</div>` : ''}
-          </div>
-          <div style="text-align:right">
-            <div style="font-size:1.4rem;font-weight:700;color:var(--pine)">${p.done}/${p.total}</div>
-            <div style="font-size:.72rem;color:var(--muted)">tasks done</div>
-          </div>
+  <button class="btn" id="newProjectBtn" style="width:100%;margin-bottom:14px">+ New project</button>
+  ${list.length? list.map(p=>{
+    const pct=projectProgress(p);
+    const streamLabel = (PROJECT_STREAMS[p.kind]&&PROJECT_STREAMS[p.kind].streams[p.stream]&&PROJECT_STREAMS[p.kind].streams[p.stream].label)||p.stream||'';
+    return `<button class="card" data-action="open-project" data-id="${p.id}" style="text-align:left;width:100%;cursor:pointer;border:1px solid var(--line);background:var(--card);margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;gap:10px">
+        <div>
+          <div style="font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase">${p.kind==='academic'?'Academic':'Non-academic'} · ${escapeHtml(streamLabel)}</div>
+          <div style="font-weight:800;font-size:1.05rem;margin-top:4px">${escapeHtml(p.title)}</div>
+          ${p.deadline?`<div style="font-size:.8rem;color:var(--muted);margin-top:4px">Due ${escapeHtml(p.deadline)}</div>`:''}
         </div>
-        ${p.related.length ? `
-          <div style="margin-top:14px;border-top:1px solid var(--line);padding-top:10px">
-            ${p.related.slice(0,6).map(t=>`
-              <div class="deadline-row" style="padding:6px 0">
-                <input type="checkbox" class="check" ${t.done?'checked':''} data-action="toggle-done" data-id="${t.id}" style="margin-right:8px">
-                <span style="flex:1;${t.done?'text-decoration:line-through;opacity:.6':''}">${escapeHtml(t.title)}</span>
-              </div>
-            `).join('')}
-            ${p.related.length > 6 ? `<div style="font-size:.78rem;color:var(--muted)">+ ${p.related.length-6} more</div>` : ''}
-          </div>` : 
-          `<div style="margin-top:12px;font-size:.82rem;color:var(--muted)">No tasks linked yet. Add one below or on Tasks (titles that mention this class also link).</div>`
-        }
-        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-          <input class="proj-add" data-class-id="${p.id}" placeholder="Add task for ${escapeHtml(p.title)}…" style="flex:1;min-width:140px">
-          <button type="button" class="btn sm" data-action="proj-add-task" data-class-id="${p.id}">Add task</button>
-        </div>
+        <div style="font-weight:800;color:var(--pine)">${pct}%</div>
       </div>
-    `).join('')
-  }`;
+      <div style="margin-top:10px;height:8px;background:var(--line);border-radius:99px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--pine)"></div></div>
+    </button>`;
+  }).join('') : `<div class="card empty">No projects yet. Tap <b>+ New project</b>.</div>`}`;
+}
+function viewProjectWizard(){
+  const w = state.projectWizard || { step:1, kind:'', stream:'', subject:'', subjectOther:'', title:'', deadline:'', linkTaskId:'', linkClassId:'' };
+  if(w.step===1){
+    return `<div class="pagehead"><button class="btn ghost sm" id="projWizCancel" style="margin-bottom:8px">← Cancel</button><h1>New project</h1><p>Academic (course style) or non-academic (portfolio, hustle, community, passion).</p></div>
+    <div style="display:grid;gap:12px">
+      <button class="card" id="projKindAcademic" style="text-align:left;cursor:pointer;border:2px solid #1F497D;background:#eef3f9"><div style="font-weight:800;color:#1F497D">Academic</div><div style="font-size:.88rem;color:var(--muted);margin-top:4px">Sciences, liberal arts, commerce, engineering — milestones + deadline budget.</div></button>
+      <button class="card" id="projKindNon" style="text-align:left;cursor:pointer;border:2px solid #2d6a4f;background:#eef8f2"><div style="font-weight:800;color:#2d6a4f">Non-academic</div><div style="font-size:.88rem;color:var(--muted);margin-top:4px">Portfolio, side hustle, community, passion — MVP → ship → post-mortem.</div></button>
+    </div>`;
+  }
+  const streams = (PROJECT_STREAMS[w.kind]&&PROJECT_STREAMS[w.kind].streams)||{};
+  if(w.step===2){
+    return `<div class="pagehead"><button class="btn ghost sm" id="projWizBack" style="margin-bottom:8px">← Back</button><h1>${w.kind==='academic'?'Academic stream':'Project goal'}</h1></div>
+    <div style="display:grid;gap:10px">${Object.keys(streams).map(k=>{const s=streams[k];return `<button class="card" data-action="proj-pick-stream" data-stream="${k}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line)"><div style="font-weight:800">${escapeHtml(s.label)}</div><div style="font-size:.82rem;color:var(--muted);margin-top:4px">${escapeHtml(s.focus||'')}</div><div style="font-size:.78rem;margin-top:6px"><b>Often ends with:</b> ${escapeHtml(s.deliverables||'')}</div></button>`;}).join('')}</div>`;
+  }
+  const s = streams[w.stream]||{subjects:['Other'],steps:[]};
+  const tasks=(state.tasks||[]).filter(x=>!x.done&&!x.backburner);
+  const classes=state.classes||[];
+  return `<div class="pagehead"><button class="btn ghost sm" id="projWizBack" style="margin-bottom:8px">← Back</button><h1>Project details</h1><p>${escapeHtml((s.label)||'')}</p></div>
+  <div class="card">
+    <label>Project title</label>
+    <input id="projTitle" placeholder="e.g. Enzyme activity lab" value="${escapeHtml(w.title||'')}">
+    <label style="margin-top:12px">Subject / focus</label>
+    <select id="projSubject">${(s.subjects||['Other']).map(x=>`<option value="${escapeHtml(x)}" ${w.subject===x?'selected':''}>${escapeHtml(x)}</option>`).join('')}</select>
+    <div id="projSubjectOtherWrap" style="margin-top:8px;display:none"><input id="projSubjectOther" placeholder="Type your subject"></div>
+    <label style="margin-top:12px">${w.kind==='academic'?'Deadline (recommended)':'Target date (optional)'}</label>
+    <input type="date" id="projDeadline" value="${escapeHtml(w.deadline||'')}">
+    <label style="margin-top:12px">Link a task (optional)</label>
+    <select id="projLinkTask"><option value="">— None —</option>${tasks.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}</option>`).join('')}</select>
+    <label style="margin-top:12px">Link a class (optional)</label>
+    <select id="projLinkClass"><option value="">— None —</option>${classes.map(c=>`<option value="${c.id}">${escapeHtml(c.title)}</option>`).join('')}</select>
+    <button class="btn" id="projGenerateBtn" style="margin-top:16px;width:100%">Generate my guide</button>
+  </div>`;
+}
+function viewProjectDetail(p){
+  const pct=projectProgress(p);
+  const steps=p.steps||[];
+  const cur=Math.min(p.currentStep||0, Math.max(0,steps.length-1));
+  const step=steps[cur]||{title:'',items:[],hint:''};
+  const streamMeta=(PROJECT_STREAMS[p.kind]&&PROJECT_STREAMS[p.kind].streams[p.stream])||{};
+  let timeHint='';
+  if(p.deadline && p.kind==='academic'){
+    try{
+      const days=Math.round((new Date(p.deadline+'T12:00:00')-new Date(todayStr()+'T12:00:00'))/86400000);
+      if(days>=0){ const plan=Math.max(1,Math.round(days*0.2)); const exec=Math.max(1,Math.round(days*0.5)); timeHint=days+' day(s) to deadline · rough split: planning ~'+plan+'d · execution ~'+exec+'d · polish the rest.'; }
+      else timeHint='Deadline has passed — finish the active step.';
+    }catch(e){}
+  }
+  return `<div class="pagehead">
+    <button class="btn ghost sm" data-action="close-project" style="margin-bottom:8px">← All projects</button>
+    <div class="eyebrow">${p.kind==='academic'?'Academic':'Non-academic'} · ${escapeHtml(streamMeta.label||p.stream||'')}${p.subject? ' · '+escapeHtml(p.subject):''}</div>
+    <h1>${escapeHtml(p.title)}</h1>
+    ${p.deadline?`<p style="margin:0;color:var(--muted)">Due ${escapeHtml(p.deadline)}</p>`:''}
+  </div>
+  <div class="card"><div style="display:flex;justify-content:space-between"><b>Overall progress</b><span style="font-weight:800;color:var(--pine)">${pct}%</span></div>
+    <div style="margin-top:8px;height:10px;background:var(--line);border-radius:99px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--pine)"></div></div>
+    ${timeHint?`<p style="font-size:.82rem;color:var(--muted);margin:10px 0 0">${escapeHtml(timeHint)}</p>`:''}
+  </div>
+  <div class="card" style="overflow-x:auto"><div style="display:flex;gap:8px;min-width:min-content">
+    ${steps.map((s,i)=>`<button type="button" class="btn ${i===cur?'':'ghost'} sm" data-action="proj-step" data-idx="${i}" style="flex:0 0 auto">${i+1}. ${escapeHtml(s.title)}</button>`).join('')}
+  </div></div>
+  <div class="card" style="border-left:4px solid var(--pine)">
+    <div style="font-size:.72rem;font-weight:800;color:var(--muted);text-transform:uppercase">Active milestone · Step ${cur+1}</div>
+    <h3 style="margin:6px 0">${escapeHtml(step.title)}</h3>
+    ${step.hint?`<p style="font-size:.9rem;color:var(--muted);margin:0 0 12px">${escapeHtml(step.hint)}</p>`:''}
+    ${(step.items||[]).map((it,ii)=>`<label style="display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line);cursor:pointer">
+      <input type="checkbox" data-action="proj-item" data-step="${cur}" data-idx="${ii}" ${it.done?'checked':''} style="margin-top:3px">
+      <span style="${it.done?'text-decoration:line-through;opacity:.65':''}">${escapeHtml(it.text)}</span>
+    </label>`).join('')||'<p class="empty">No checklist items</p>'}
+    <div class="row" style="margin-top:14px;gap:8px">
+      <button class="btn ghost" data-action="proj-step" data-idx="${Math.max(0,cur-1)}" ${cur<=0?'disabled':''}>Previous</button>
+      <button class="btn" data-action="proj-step" data-idx="${Math.min(steps.length-1,cur+1)}" style="flex:1">${cur>=steps.length-1?'Last step':'Next milestone'}</button>
+    </div>
+  </div>
+  <div class="card">
+    <div style="font-weight:700;margin-bottom:8px">Your custom points</div>
+    <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Extra notes or sub-goals for this project.</p>
+    ${(p.customItems||[]).map((it,ii)=>`<label style="display:flex;gap:8px;align-items:center;padding:6px 0">
+      <input type="checkbox" data-action="proj-custom-item" data-idx="${ii}" ${it.done?'checked':''}>
+      <span style="flex:1;${it.done?'text-decoration:line-through;opacity:.65':''}">${escapeHtml(it.text)}</span>
+      <button type="button" class="btn ghost sm" data-action="proj-custom-del" data-idx="${ii}">✕</button>
+    </label>`).join('')}
+    <div class="row" style="gap:8px;margin-top:8px">
+      <input id="projCustomNew" placeholder="Add a point…" style="flex:1">
+      <button type="button" class="btn sm" id="projCustomAdd">+</button>
+    </div>
+  </div>
+  <button class="btn ghost" data-action="delete-project" data-id="${p.id}" style="width:100%;color:var(--brick)">Delete project</button>`;
 }
 
-/* ============================================================
-   VIEW: Focus Plate (formerly 1-3-5 Rule)
-   ============================================================ */
+
 function fillPlateFromTasks(){
   const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner).slice(0,9);
   if(!open.length){ showAppMessage('No open tasks', 'Add tasks first.'); return; }
@@ -10845,6 +10912,14 @@ function wireView(){
       showAppMessage('On the plate', text);
       persistRender();
     });
+    else if(action==='open-project') el.addEventListener('click', ()=>{ state.projectId=el.dataset.id; state.projectWizard=null; persistRender(); });
+    else if(action==='close-project') el.addEventListener('click', ()=>{ state.projectId=null; persistRender(); });
+    else if(action==='proj-pick-stream') el.addEventListener('click', ()=>{ if(!state.projectWizard) state.projectWizard={}; state.projectWizard.stream=el.dataset.stream; state.projectWizard.step=3; persistRender(); });
+    else if(action==='proj-step') el.addEventListener('click', ()=>{ const pr=getProject(state.projectId); if(!pr) return; pr.currentStep=Number(el.dataset.idx)||0; try{saveState();}catch(e){} persistRender(); });
+    else if(action==='proj-item') el.addEventListener('change', ()=>{ const pr=getProject(state.projectId); if(!pr) return; const s=pr.steps[Number(el.dataset.step)]; if(s&&s.items[Number(el.dataset.idx)]) s.items[Number(el.dataset.idx)].done=!!el.checked; try{saveState();}catch(e){} persistRender(); });
+    else if(action==='proj-custom-item') el.addEventListener('change', ()=>{ const pr=getProject(state.projectId); if(!pr||!pr.customItems) return; if(pr.customItems[Number(el.dataset.idx)]) pr.customItems[Number(el.dataset.idx)].done=!!el.checked; try{saveState();}catch(e){} persistRender(); });
+    else if(action==='proj-custom-del') el.addEventListener('click', ()=>{ const pr=getProject(state.projectId); if(!pr||!pr.customItems) return; pr.customItems.splice(Number(el.dataset.idx),1); try{saveState();}catch(e){} persistRender(); });
+    else if(action==='delete-project') el.addEventListener('click', ()=>{ const id=el.dataset.id; state.projects=(state.projects||[]).filter(x=>x.id!==id); if(state.projectId===id) state.projectId=null; try{saveState();}catch(e){} persistRender(); });
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
     else if(action==='ef-start') el.addEventListener('click', ()=>{
       if(!state.energyFocus) state.energyFocus={items:[], timerSec:600};
@@ -11181,7 +11256,51 @@ function wireView(){
       persistRender();
     }));
     const toggleAdd=document.getElementById('toggleAddTaskBtn');
+    
     if(toggleAdd) toggleAdd.onclick=function(){ state.showAddTask=!state.showAddTask; persistRender(); };
+    const newProj=document.getElementById('newProjectBtn');
+    if(newProj) newProj.onclick=function(){ state.projectWizard={step:1,kind:'',stream:'',subject:'',title:'',deadline:''}; state.projectId=null; persistRender(); };
+    const pAc=document.getElementById('projKindAcademic');
+    if(pAc) pAc.onclick=function(){ state.projectWizard={step:2,kind:'academic',stream:'',subject:'',title:'',deadline:''}; persistRender(); };
+    const pNon=document.getElementById('projKindNon');
+    if(pNon) pNon.onclick=function(){ state.projectWizard={step:2,kind:'non_academic',stream:'',subject:'',title:'',deadline:''}; persistRender(); };
+    const pCancel=document.getElementById('projWizCancel');
+    if(pCancel) pCancel.onclick=function(){ state.projectWizard=null; persistRender(); };
+    const pBack=document.getElementById('projWizBack');
+    if(pBack) pBack.onclick=function(){ if(!state.projectWizard) return; state.projectWizard.step = state.projectWizard.step<=2?1:2; persistRender(); };
+    const pSub=document.getElementById('projSubject');
+    if(pSub) pSub.onchange=function(){ const wrap=document.getElementById('projSubjectOtherWrap'); if(wrap) wrap.style.display=(pSub.value==='Other')?'':'none'; };
+    const pGen=document.getElementById('projGenerateBtn');
+    if(pGen) pGen.onclick=function(){
+      const w=state.projectWizard; if(!w) return;
+      const title=(document.getElementById('projTitle')?.value||'').trim();
+      if(!title){ showAppMessage('Title needed','Name your project.'); return; }
+      let subject=document.getElementById('projSubject')?.value||'';
+      if(subject==='Other') subject=(document.getElementById('projSubjectOther')?.value||'').trim()||'Other';
+      const deadline=document.getElementById('projDeadline')?.value||'';
+      const linkTaskId=document.getElementById('projLinkTask')?.value||'';
+      const linkClassId=document.getElementById('projLinkClass')?.value||'';
+      const meta=(PROJECT_STREAMS[w.kind]&&PROJECT_STREAMS[w.kind].streams[w.stream])||{steps:[]};
+      const steps=(meta.steps||[]).map(s=>({title:s.title,hint:s.hint||'',items:(s.items||[]).map(text=>({text,done:false}))}));
+      const id=uid();
+      ensureProjects().unshift({ id, title, kind:w.kind, stream:w.stream, subject, deadline, linkTaskId, linkClassId, currentStep:0, steps, customItems:[], created:Date.now() });
+      if(linkTaskId){ const task=findTask(linkTaskId); if(task){ task.projectId=id; } }
+      state.projectWizard=null; state.projectId=id;
+      try{saveState();}catch(e){}
+      showAppMessage('Guide ready', 'Milestones are set. Work step by step.');
+      persistRender();
+    };
+    const pAdd=document.getElementById('projCustomAdd');
+    if(pAdd) pAdd.onclick=function(){
+      const pr=getProject(state.projectId); if(!pr) return;
+      const text=(document.getElementById('projCustomNew')?.value||'').trim();
+      if(!text) return;
+      if(!pr.customItems) pr.customItems=[];
+      pr.customItems.push({text,done:false});
+      try{saveState();}catch(e){}
+      persistRender();
+    };
+
     const bbConfirm=document.getElementById('bbPickConfirm');
     if(bbConfirm) bbConfirm.onclick=function(){
       const id=document.getElementById('bbPickSelect')?.value||'';
@@ -11728,31 +11847,24 @@ function wireView(){
         if(!title){ showAppMessage('Title needed', 'Type the new task title in the box.'); return; }
         if(!Array.isArray(state.tasks)) state.tasks=[];
         const id=uid();
-        state.tasks.unshift({id,title,notes:'From Bite Size',date:todayStr(),done:false,chunks:[],tier:'could',context:'school',technique:'bitesize',created:Date.now()});
+        state.tasks.unshift({id,title,notes:'From Bite Size',date:todayStr(),time:'',priority:'medium',done:false,chunks:[],tier:'could',context:'school',technique:'bitesize',studyMeta:{chName:title},created:Date.now()});
         state.cheeseTaskId=id;
+        state.biteOtherTitle='';
         try{saveState();}catch(e){}
+      } else {
+        state.cheeseTaskId=v;
+        applyTechniqueTaskId(v);
       }
-      biteApplyTaskToFields();
+      state.biteLocked=true;
+      try{saveState();}catch(e){}
+      showAppMessage('Locked in', 'Scroll down — Ask AI and offline breakdown are ready. Edit if you need.');
       persistRender();
     };
     if(sel) sel.addEventListener('change', ()=>{
       state.cheeseTaskId=sel.value;
-      applyTechniqueTaskId(sel.value==='__other__'?'':sel.value);
-      if(sel.value==='__other__'){
-        state.biteOtherTitle=(document.getElementById('biteOtherTitle')?.value||state.biteOtherTitle||'');
-      } else {
-        const task=findTask(sel.value);
-        if(task){
-          // Auto-fill offline breakdown + AI chapter name from task
-          const ch=document.getElementById('biteChName');
-          const mag=document.getElementById('magicInput')||document.getElementById('biteMagicInput');
-          if(ch && !(ch.value||'').trim()) ch.value=task.title||'';
-          if(ch) ch.value=task.title||ch.value||'';
-          if(mag) mag.value=task.title||'';
-          try{ state.biteOtherTitle=''; }catch(e){}
-        }
-      }
-      persistRender();
+      state.biteLocked=false;
+      const wrap=document.getElementById('biteOtherWrap');
+      if(wrap) wrap.style.display = (sel.value==='__other__') ? '' : 'none';
     });
     const bot=document.getElementById('biteOtherTitle');
     if(bot){
