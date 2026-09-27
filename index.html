@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="251">
+<meta name="snapback-build" content="252">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -9113,7 +9113,10 @@ function viewProjects(){
     <h1>Projects</h1>
     <p>Academic or non-academic. Pick a type, get step-by-step milestones, track progress. Optionally link a class or task.</p>
   </div>
-  <button class="btn" id="newProjectBtn" style="width:100%;margin-bottom:14px">+ New project</button>
+  <div style="display:grid;gap:10px;margin-bottom:14px">
+    <button class="btn" data-action="proj-start-new" style="width:100%">+ Start a new project</button>
+    <button class="btn ghost" data-action="proj-start-existing" style="width:100%">Convert an existing task or class → project</button>
+  </div>
   ${list.length? list.map(p=>{
     const pct=projectProgress(p);
     const streamLabel = (PROJECT_STREAMS[p.kind]&&PROJECT_STREAMS[p.kind].streams[p.stream]&&PROJECT_STREAMS[p.kind].streams[p.stream].label)||p.stream||'';
@@ -9131,38 +9134,99 @@ function viewProjects(){
   }).join('') : `<div class="card empty">No projects yet. Tap <b>+ New project</b>.</div>`}`;
 }
 function viewProjectWizard(){
-  const w = state.projectWizard || { step:1, kind:'', stream:'', subject:'', subjectOther:'', title:'', deadline:'', linkTaskId:'', linkClassId:'' };
-  if(w.step===1){
-    return `<div class="pagehead"><button class="btn ghost sm" id="projWizCancel" style="margin-bottom:8px">← Cancel</button><h1>New project</h1><p>Academic (course style) or non-academic (portfolio, hustle, community, passion).</p></div>
+  const w = state.projectWizard || { step:'choose', kind:'', stream:'', subject:'', title:'', deadline:'' };
+  if(w.step==='choose'){
+    return `<div class="pagehead">
+      <button class="btn ghost sm" data-action="proj-wiz-cancel" style="margin-bottom:8px">← Cancel</button>
+      <h1>Projects</h1>
+      <p>Build a guided project from something you already have, or start fresh.</p>
+    </div>
     <div style="display:grid;gap:12px">
-      <button class="card" id="projKindAcademic" style="text-align:left;cursor:pointer;border:2px solid #1F497D;background:#eef3f9"><div style="font-weight:800;color:#1F497D">Academic</div><div style="font-size:.88rem;color:var(--muted);margin-top:4px">Sciences, liberal arts, commerce, engineering — milestones + deadline budget.</div></button>
-      <button class="card" id="projKindNon" style="text-align:left;cursor:pointer;border:2px solid #2d6a4f;background:#eef8f2"><div style="font-weight:800;color:#2d6a4f">Non-academic</div><div style="font-size:.88rem;color:var(--muted);margin-top:4px">Portfolio, side hustle, community, passion — MVP → ship → post-mortem.</div></button>
+      <button class="card" data-action="proj-start-existing" style="text-align:left;cursor:pointer;border:2px solid var(--pine);background:var(--pine-soft)">
+        <div style="font-weight:800">Convert an existing item</div>
+        <div style="font-size:.88rem;color:var(--muted);margin-top:4px">Pick a task, a class, or type under Other — then turn it into a project with milestones.</div>
+      </button>
+      <button class="card" data-action="proj-start-new" style="text-align:left;cursor:pointer;border:2px solid #1F497D;background:#eef3f9">
+        <div style="font-weight:800;color:#1F497D">Start a new project</div>
+        <div style="font-size:.88rem;color:var(--muted);margin-top:4px">Academic or non-academic → stream → title → generate guide.</div>
+      </button>
+    </div>`;
+  }
+  if(w.step==='existing'){
+    const tasks=(state.tasks||[]).filter(x=>!x.done&&!x.backburner);
+    const classes=state.classes||[];
+    return `<div class="pagehead">
+      <button class="btn ghost sm" data-action="proj-wiz-cancel" style="margin-bottom:8px">← Cancel</button>
+      <h1>Convert existing</h1>
+      <p>Choose a task, a class, or Other (type your own title).</p>
+    </div>
+    <div class="card">
+      <label>Task</label>
+      <select id="projExistTask"><option value="">— None —</option>${tasks.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}</option>`).join('')}</select>
+      <label style="margin-top:12px">Class</label>
+      <select id="projExistClass"><option value="">— None —</option>${classes.map(c=>`<option value="${c.id}">${escapeHtml(c.title)}</option>`).join('')}</select>
+      <label style="margin-top:12px">Or Other (type a title)</label>
+      <input id="projExistOther" placeholder="e.g. Biology Chapter 4 project">
+      <button class="btn" data-action="proj-exist-continue" style="margin-top:14px;width:100%">Continue → Academic or Non-academic</button>
+    </div>`;
+  }
+  if(w.step==='kind'){
+    return `<div class="pagehead">
+      <button class="btn ghost sm" data-action="proj-wiz-back" style="margin-bottom:8px">← Back</button>
+      <h1>Academic or non-academic?</h1>
+      <p>${w.title?('Project: <b>'+escapeHtml(w.title)+'</b>'):'Choose the kind of guide you need.'}</p>
+    </div>
+    <div style="display:grid;gap:12px">
+      <button class="card" data-action="proj-kind" data-kind="academic" style="text-align:left;cursor:pointer;border:2px solid #1F497D;background:#eef3f9">
+        <div style="font-weight:800;color:#1F497D">Academic</div>
+        <div style="font-size:.88rem;color:var(--muted);margin-top:4px">Sciences, liberal arts, commerce, engineering — milestones + deadline budget.</div>
+      </button>
+      <button class="card" data-action="proj-kind" data-kind="non_academic" style="text-align:left;cursor:pointer;border:2px solid #2d6a4f;background:#eef8f2">
+        <div style="font-weight:800;color:#2d6a4f">Non-academic</div>
+        <div style="font-size:.88rem;color:var(--muted);margin-top:4px">Portfolio, side hustle, community, passion — MVP → ship → post-mortem.</div>
+      </button>
     </div>`;
   }
   const streams = (PROJECT_STREAMS[w.kind]&&PROJECT_STREAMS[w.kind].streams)||{};
-  if(w.step===2){
-    return `<div class="pagehead"><button class="btn ghost sm" id="projWizBack" style="margin-bottom:8px">← Back</button><h1>${w.kind==='academic'?'Academic stream':'Project goal'}</h1></div>
-    <div style="display:grid;gap:10px">${Object.keys(streams).map(k=>{const s=streams[k];return `<button class="card" data-action="proj-pick-stream" data-stream="${k}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line)"><div style="font-weight:800">${escapeHtml(s.label)}</div><div style="font-size:.82rem;color:var(--muted);margin-top:4px">${escapeHtml(s.focus||'')}</div><div style="font-size:.78rem;margin-top:6px"><b>Often ends with:</b> ${escapeHtml(s.deliverables||'')}</div></button>`;}).join('')}</div>`;
+  if(w.step==='stream'){
+    return `<div class="pagehead">
+      <button class="btn ghost sm" data-action="proj-wiz-back" style="margin-bottom:8px">← Back</button>
+      <h1>${w.kind==='academic'?'Academic stream':'Project goal'}</h1>
+    </div>
+    <div style="display:grid;gap:10px">${Object.keys(streams).map(k=>{
+      const s=streams[k];
+      return `<button class="card" data-action="proj-pick-stream" data-stream="${k}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line)">
+        <div style="font-weight:800">${escapeHtml(s.label)}</div>
+        <div style="font-size:.82rem;color:var(--muted);margin-top:4px">${escapeHtml(s.focus||'')}</div>
+        <div style="font-size:.78rem;margin-top:6px"><b>Often ends with:</b> ${escapeHtml(s.deliverables||'')}</div>
+      </button>`;
+    }).join('')}</div>`;
   }
+  // details
   const s = streams[w.stream]||{subjects:['Other'],steps:[]};
   const tasks=(state.tasks||[]).filter(x=>!x.done&&!x.backburner);
   const classes=state.classes||[];
-  return `<div class="pagehead"><button class="btn ghost sm" id="projWizBack" style="margin-bottom:8px">← Back</button><h1>Project details</h1><p>${escapeHtml((s.label)||'')}</p></div>
+  return `<div class="pagehead">
+    <button class="btn ghost sm" data-action="proj-wiz-back" style="margin-bottom:8px">← Back</button>
+    <h1>Project details</h1>
+    <p>${escapeHtml((s.label)||'')}</p>
+  </div>
   <div class="card">
     <label>Project title</label>
     <input id="projTitle" placeholder="e.g. Enzyme activity lab" value="${escapeHtml(w.title||'')}">
     <label style="margin-top:12px">Subject / focus</label>
     <select id="projSubject">${(s.subjects||['Other']).map(x=>`<option value="${escapeHtml(x)}" ${w.subject===x?'selected':''}>${escapeHtml(x)}</option>`).join('')}</select>
-    <div id="projSubjectOtherWrap" style="margin-top:8px;display:none"><input id="projSubjectOther" placeholder="Type your subject"></div>
+    <div id="projSubjectOtherWrap" style="margin-top:8px;${w.subject==='Other'?'':'display:none'}"><input id="projSubjectOther" placeholder="Type your subject" value="${escapeHtml(w.subjectOther||'')}"></div>
     <label style="margin-top:12px">${w.kind==='academic'?'Deadline (recommended)':'Target date (optional)'}</label>
     <input type="date" id="projDeadline" value="${escapeHtml(w.deadline||'')}">
     <label style="margin-top:12px">Link a task (optional)</label>
-    <select id="projLinkTask"><option value="">— None —</option>${tasks.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}</option>`).join('')}</select>
+    <select id="projLinkTask"><option value="">— None —</option>${tasks.map(x=>`<option value="${x.id}" ${w.linkTaskId===x.id?'selected':''}>${escapeHtml(x.title)}</option>`).join('')}</select>
     <label style="margin-top:12px">Link a class (optional)</label>
-    <select id="projLinkClass"><option value="">— None —</option>${classes.map(c=>`<option value="${c.id}">${escapeHtml(c.title)}</option>`).join('')}</select>
-    <button class="btn" id="projGenerateBtn" style="margin-top:16px;width:100%">Generate my guide</button>
+    <select id="projLinkClass"><option value="">— None —</option>${classes.map(c=>`<option value="${c.id}" ${w.linkClassId===c.id?'selected':''}>${escapeHtml(c.title)}</option>`).join('')}</select>
+    <button class="btn" data-action="proj-generate" style="margin-top:16px;width:100%">Generate my guide</button>
   </div>`;
 }
+
 function viewProjectDetail(p){
   const pct=projectProgress(p);
   const steps=p.steps||[];
@@ -10912,9 +10976,71 @@ function wireView(){
       showAppMessage('On the plate', text);
       persistRender();
     });
+    else if(action==='proj-start-new') el.addEventListener('click', ()=>{
+      state.projectId=null;
+      state.projectWizard={step:'kind', kind:'', stream:'', subject:'', title:'', deadline:'', fromExisting:false};
+      state.view='projects';
+      persistRender();
+    });
+    else if(action==='proj-start-existing') el.addEventListener('click', ()=>{
+      state.projectId=null;
+      state.projectWizard={step:'existing', kind:'', stream:'', subject:'', title:'', deadline:'', fromExisting:true};
+      state.view='projects';
+      persistRender();
+    });
+    else if(action==='proj-exist-continue') el.addEventListener('click', ()=>{
+      if(!state.projectWizard) state.projectWizard={};
+      const tid=document.getElementById('projExistTask')?.value||'';
+      const cid=document.getElementById('projExistClass')?.value||'';
+      const other=(document.getElementById('projExistOther')?.value||'').trim();
+      let title='';
+      if(tid){ const task=findTask(tid); title=task?task.title:''; state.projectWizard.linkTaskId=tid; }
+      if(cid){ const c=(state.classes||[]).find(x=>x.id===cid); if(c){ title=title||c.title; state.projectWizard.linkClassId=cid; } }
+      if(other) title=other;
+      if(!title){ showAppMessage('Pick something', 'Select a task, a class, or type under Other.'); return; }
+      state.projectWizard.title=title;
+      state.projectWizard.step='kind';
+      state.projectWizard.fromExisting=true;
+      persistRender();
+    });
+    else if(action==='proj-kind') el.addEventListener('click', ()=>{
+      if(!state.projectWizard) state.projectWizard={};
+      state.projectWizard.kind=el.dataset.kind||'academic';
+      state.projectWizard.step='stream';
+      persistRender();
+    });
+    else if(action==='proj-wiz-cancel') el.addEventListener('click', ()=>{ state.projectWizard=null; state.projectId=null; persistRender(); });
+    else if(action==='proj-wiz-back') el.addEventListener('click', ()=>{
+      const w=state.projectWizard; if(!w) return;
+      if(w.step==='stream') w.step='kind';
+      else if(w.step==='kind') w.step = w.fromExisting ? 'existing' : 'choose';
+      else if(w.step==='existing') w.step='choose';
+      else if(w.step==='details' || w.step===3) w.step='stream';
+      else { state.projectWizard=null; }
+      persistRender();
+    });
+    else if(action==='proj-generate') el.addEventListener('click', ()=>{
+      const w=state.projectWizard; if(!w) return;
+      const title=(document.getElementById('projTitle')?.value||w.title||'').trim();
+      if(!title){ showAppMessage('Title needed','Name your project.'); return; }
+      let subject=document.getElementById('projSubject')?.value||'';
+      if(subject==='Other') subject=(document.getElementById('projSubjectOther')?.value||'').trim()||'Other';
+      const deadline=document.getElementById('projDeadline')?.value||'';
+      const linkTaskId=document.getElementById('projLinkTask')?.value||w.linkTaskId||'';
+      const linkClassId=document.getElementById('projLinkClass')?.value||w.linkClassId||'';
+      const meta=(PROJECT_STREAMS[w.kind]&&PROJECT_STREAMS[w.kind].streams[w.stream])||{steps:[]};
+      const steps=(meta.steps||[]).map(s=>({title:s.title,hint:s.hint||'',items:(s.items||[]).map(text=>({text,done:false}))}));
+      const id=uid();
+      ensureProjects().unshift({ id, title, kind:w.kind, stream:w.stream, subject, deadline, linkTaskId, linkClassId, currentStep:0, steps, customItems:[], created:Date.now() });
+      if(linkTaskId){ const task=findTask(linkTaskId); if(task){ task.projectId=id; } }
+      state.projectWizard=null; state.projectId=id;
+      try{saveState();}catch(e){}
+      showAppMessage('Guide ready', 'Milestones are set. Work step by step.');
+      persistRender();
+    });
     else if(action==='open-project') el.addEventListener('click', ()=>{ state.projectId=el.dataset.id; state.projectWizard=null; persistRender(); });
     else if(action==='close-project') el.addEventListener('click', ()=>{ state.projectId=null; persistRender(); });
-    else if(action==='proj-pick-stream') el.addEventListener('click', ()=>{ if(!state.projectWizard) state.projectWizard={}; state.projectWizard.stream=el.dataset.stream; state.projectWizard.step=3; persistRender(); });
+    else if(action==='proj-pick-stream') el.addEventListener('click', ()=>{ if(!state.projectWizard) state.projectWizard={}; state.projectWizard.stream=el.dataset.stream; state.projectWizard.step='details'; persistRender(); });
     else if(action==='proj-step') el.addEventListener('click', ()=>{ const pr=getProject(state.projectId); if(!pr) return; pr.currentStep=Number(el.dataset.idx)||0; try{saveState();}catch(e){} persistRender(); });
     else if(action==='proj-item') el.addEventListener('change', ()=>{ const pr=getProject(state.projectId); if(!pr) return; const s=pr.steps[Number(el.dataset.step)]; if(s&&s.items[Number(el.dataset.idx)]) s.items[Number(el.dataset.idx)].done=!!el.checked; try{saveState();}catch(e){} persistRender(); });
     else if(action==='proj-custom-item') el.addEventListener('change', ()=>{ const pr=getProject(state.projectId); if(!pr||!pr.customItems) return; if(pr.customItems[Number(el.dataset.idx)]) pr.customItems[Number(el.dataset.idx)].done=!!el.checked; try{saveState();}catch(e){} persistRender(); });
