@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="256">
+<meta name="snapback-build" content="257">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -6562,6 +6562,18 @@ function wizardGoRecommended(){
 function wizardPickWhy(code){ /* legacy no-op kept for old buttons */ wizardPickOption(code); }
 function wizardGo(){ wizardGoRecommended(); }
 
+
+function homeSectionOpen(key){
+  if(!state.homeOpen) state.homeOpen={};
+  return !!state.homeOpen[key];
+}
+function homeSectionToggle(key){
+  if(!state.homeOpen) state.homeOpen={};
+  state.homeOpen[key]=!state.homeOpen[key];
+  try{saveState();}catch(e){}
+  persistRender();
+}
+
 function viewToday(){
   const needsName = !(state.profile && state.profile.name);
 
@@ -6614,9 +6626,12 @@ function viewToday(){
     ${frogTasks.map(t=>`<div class="mc-item" style="background:transparent;border:none;padding:6px 0"><input type="checkbox" class="check" data-action="toggle-done" data-id="${t.id}"> ${escapeHtml(t.title)}</div>`).join('')}
   </div>` : ''}
 
-  <div class="grid2">
-    <div class="card">
-      <h3>Must-Do vs Could-Do</h3>
+  <div class="card" style="padding:0;overflow:hidden">
+    <button type="button" class="btn ghost" data-action="home-toggle" data-key="mustCould" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0">Must-Do vs Could-Do</h3>
+      <span style="font-size:1.1rem;color:var(--muted)">${homeSectionOpen('mustCould')?'▾':'▸'}</span>
+    </button>
+    ${homeSectionOpen('mustCould')?`<div style="padding:0 16px 16px">
       <div class="mustcould">
         <div class="mc-col">
           <h4 style="color:var(--brick)">Must do (should do)</h4>
@@ -6627,45 +6642,55 @@ function viewToday(){
           ${couldToday.length ? couldToday.map(t=>`<div class="mc-item" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="check" data-action="toggle-done" data-id="${t.id}" title="Mark complete"><button type="button" class="btn ghost sm" data-action="open-task-menu" data-id="${t.id}" style="flex:1;text-align:left">${escapeHtml(t.title)}</button></div>`).join('') : '<div class="empty">Nothing here right now.</div>'}
         </div>
       </div>
-    </div>
-
-    <div class="card">
-      <h3>Upcoming deadlines</h3>
-      ${deadlines.length ? deadlines.map(dlRow).join('') : '<div class="empty">Nothing dated yet.</div>'}
-    </div>
+    </div>`:''}
   </div>
 
-  <div class="grid2">
-    <div class="card">
-      <h3>${L('classesToday')}</h3>
-      ${classesToday.length ? classesToday.map(c=>`<div class="classrow"><span class="dotcolor" style="background:var(--blue)"></span><b>${c.start}–${c.end}</b>&nbsp;${escapeHtml(c.title)} ${c.room?('· '+escapeHtml(c.room)):''}${c.meetingUrl?`<a href="${escapeHtml(c.meetingUrl)}" target="_blank" rel="noopener" style="margin-left:8px"><button class="btn ghost sm">Join &#8599;</button></a>`:''}</div>`).join('') : `<div class="empty">${isStudentMode() ? 'No classes logged for today. Add them on the Calendar page.' : 'Nothing on the timetable for today. Add commitments on the Calendar page.'}</div>`}
-    </div>
-    <div class="card">
-      <h3>Need a spark?</h3>
-      <p style="color:var(--muted);font-size:.86rem;margin-top:-2px">A short line for when starting feels hard.</p>
+  <div class="card" style="padding:0;overflow:hidden">
+    <button type="button" class="btn ghost" data-action="home-toggle" data-key="deadlines" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0">Upcoming deadlines</h3>
+      <span style="font-size:1.1rem;color:var(--muted)">${homeSectionOpen('deadlines')?'▾':'▸'}</span>
+    </button>
+    ${homeSectionOpen('deadlines')?`<div style="padding:0 16px 16px">${deadlines.length ? deadlines.map(dlRow).join('') : '<div class="empty">Nothing dated yet.</div>'}</div>`:''}
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    <button type="button" class="btn ghost" data-action="home-toggle" data-key="classes" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0">${L('classesToday')}</h3>
+      <span style="font-size:1.1rem;color:var(--muted)">${homeSectionOpen('classes')?'▾':'▸'}</span>
+    </button>
+    ${homeSectionOpen('classes')?`<div style="padding:0 16px 16px">${classesToday.length ? classesToday.map(c=>`<div class="classrow"><span class="dotcolor" style="background:var(--blue)"></span><b>${c.start}–${c.end}</b>&nbsp;${escapeHtml(c.title)} ${c.room?('· '+escapeHtml(c.room)):''}${c.meetingUrl?`<a href="${escapeHtml(c.meetingUrl)}" target="_blank" rel="noopener" style="margin-left:8px"><button class="btn ghost sm">Join &#8599;</button></a>`:''}</div>`).join('') : `<div class="empty">${isStudentMode() ? 'No classes logged for today. Add them on the Calendar page.' : 'Nothing on the timetable for today. Add commitments on the Calendar page.'}</div>`}</div>`:''}
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    <button type="button" class="btn ghost" data-action="home-toggle" data-key="spark" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0">Need a spark?</h3>
+      <span style="font-size:1.1rem;color:var(--muted)">${homeSectionOpen('spark')?'▾':'▸'}</span>
+    </button>
+    ${homeSectionOpen('spark')?`<div style="padding:0 16px 16px">
+      <p style="color:var(--muted);font-size:.86rem;margin:0 0 10px">A short line for when starting feels hard.</p>
       <button class="btn ghost" id="openQuoteBtn">Show me a quote</button>
-    </div>
+    </div>`:''}
   </div>
 
 
-  ${(()=>{
+    ${(()=>{
     const tom=tomorrowStr();
     const tomTasks=state.tasks.filter(t=>!t.done && t.date===tom);
     const tomClasses=(state.classes||[]).filter(c=>{
       try{ return c.day===mondayIndex(new Date(tom+'T12:00:00')); }catch(e){ return false; }
     }).sort((a,b)=>String(a.start).localeCompare(String(b.start)));
-    const open = state.sneakTomorrow;
+    const open = homeSectionOpen('sneak');
     return `
-  <div class="card" style="border:1px dashed var(--line)">
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <div style="flex:1">
+  <div class="card" style="padding:0;overflow:hidden;border:1px dashed var(--line)">
+    <button type="button" class="btn ghost" data-action="home-toggle" data-key="sneak" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
+      <div>
         <div style="font-weight:800">Sneak peek into tomorrow</div>
-        <div style="font-size:.85rem;color:var(--muted)">${new Date(tom+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})} · optional look-ahead</div>
+        <div style="font-size:.85rem;color:var(--muted)">${new Date(tom+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}</div>
       </div>
-      <button class="btn ghost sm" id="sneakTomBtn">${open?'Hide peek':'Show tomorrow'}</button>
-    </div>
+      <span style="font-size:1.1rem;color:var(--muted)">${open?'▾':'▸'}</span>
+    </button>
     ${open?`
-      <div style="margin-top:12px">
+      <div style="padding:0 16px 16px">
         <div style="font-size:.8rem;font-weight:700;color:var(--muted);margin-bottom:6px">Tasks</div>
         ${tomTasks.length?tomTasks.map(t=>`<div class="deadline-row"><span class="badge dueToday">${t.time||'all day'}</span><span style="flex:1">${escapeHtml(t.title)}</span></div>`).join(''):'<div class="empty">No tasks dated tomorrow.</div>'}
         <div style="font-size:.8rem;font-weight:700;color:var(--muted);margin:12px 0 6px">Classes</div>
@@ -6675,15 +6700,20 @@ function viewToday(){
   </div>`;
   })()}
 
-  <div class="card">
-    <h3>Your grove</h3>
-    <p style="color:var(--muted);font-size:.85rem;margin-top:-2px">A tree grows every time a Focus Pod session runs all the way through — resetting early doesn't count, same as Forest.</p>
+  <div class="card" style="padding:0;overflow:hidden">
+    <button type="button" class="btn ghost" data-action="home-toggle" data-key="grove" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
+      <h3 style="margin:0">Your grove</h3>
+      <span style="font-size:1.1rem;color:var(--muted)">${homeSectionOpen('grove')?'▾':'▸'}</span>
+    </button>
+    ${homeSectionOpen('grove')?`<div style="padding:0 16px 16px">
+    <p style="color:var(--muted);font-size:.85rem;margin:0 0 10px">A tree grows every time a Focus Pod session runs all the way through — resetting early doesn't count, same as Forest.</p>
     <div class="moneystats" style="margin-bottom:10px">
       <div class="statbox"><div class="lbl">Trees grown</div><div class="val" style="color:var(--pine)">${state.stats.treesGrown||0}</div></div>
       <div class="statbox"><div class="lbl">Day streak</div><div class="val" style="color:var(--amber)">${state.stats.streakDays||0}</div></div>
       <div class="statbox"><div class="lbl">Tasks completed</div><div class="val">${state.stats.tasksCompletedTotal||0}</div></div>
     </div>
     <div style="font-size:1.4rem;line-height:1.8">${'&#127795;'.repeat(Math.min(state.stats.treesGrown||0,60))}${(state.stats.treesGrown||0)>60?` <span style="font-size:.8rem;color:var(--muted)">+${(state.stats.treesGrown||0)-60} more</span>`:''}${!state.stats.treesGrown?'<span style="font-size:.85rem;color:var(--muted)">Run your first Focus Pod session to plant one.</span>':''}</div>
+    </div>`:''}
   </div>
   `;
 }
@@ -9090,7 +9120,7 @@ function viewSemester(){
    VIEW: Projects (placeholder — full implementation next)
    ============================================================ */
 
-const PROJECT_STREAMS = {"academic": {"label": "Academic", "streams": {"sciences": {"label": "Sciences (B.Sc / M.Sc)", "subjects": ["Physics", "Chemistry", "Biology", "Environmental Science", "Other"], "focus": "Testing hypotheses and finding empirical truths", "deliverables": "Lab reports, scientific posters, datasets", "steps": [{"title": "Formulate a hypothesis", "hint": "Clear, testable prediction.", "items": ["Write the research question", "State hypothesis and null hypothesis", "Note constraints and safety"]}, {"title": "Design the protocol", "hint": "Controls, variables, equipment, safety.", "items": ["List independent / dependent variables", "List equipment and materials", "Write step-by-step method", "Safety checklist"]}, {"title": "Data collection", "hint": "Repeat trials for validity.", "items": ["Run trial 1 and log raw data", "Repeat trials as planned", "Note anomalies in a lab log"]}, {"title": "Analysis", "hint": "Graphs, stats, error checks.", "items": ["Enter data in Excel or R", "Plot graphs", "Check for outliers / error", "Draft results paragraph"]}, {"title": "Write-up & present", "hint": "IMRAD structure + poster if needed.", "items": ["Introduction draft", "Methods draft", "Results & Discussion", "References / poster / submit"]}]}, "liberal_arts": {"label": "Liberal Arts & Humanities", "subjects": ["History", "Literature", "Sociology", "Psychology", "Other"], "focus": "Analyzing text, culture, history, and human behavior", "deliverables": "Critical essays, policy briefs, documentaries", "steps": [{"title": "Define the scope", "hint": "One text, era, or social group.", "items": ["Pick specific focus", "Write 1-sentence scope", "Note word/count limits"]}, {"title": "Literature review", "hint": "What experts already said.", "items": ["Find 5+ scholarly sources", "Summarize each in 3 lines", "Note gaps your project fills"]}, {"title": "Thesis statement", "hint": "Central arguable claim.", "items": ["Draft thesis", "Test: is it arguable?", "Revise with supervisor if needed"]}, {"title": "Evidence & argument", "hint": "Quotes, archives, interviews.", "items": ["Gather primary evidence", "Map evidence to thesis points", "Outline body sections"]}, {"title": "Draft & cite", "hint": "APA / MLA / Chicago.", "items": ["Full draft", "Citation pass", "Proofread and submit"]}]}, "commerce": {"label": "Commerce, Business & Economics", "subjects": ["Finance", "Marketing", "Economics", "HR", "Other"], "focus": "Solving market, financial, or organizational problems", "deliverables": "Business plans, market research, audit reports", "steps": [{"title": "Problem identification", "hint": "Market gap or org problem.", "items": ["Write the problem in one paragraph", "Define success metric", "List stakeholders"]}, {"title": "Market / data mapping", "hint": "Sheets, competitors, surveys.", "items": ["Collect data sources", "Competitor snapshot", "Survey or interview plan"]}, {"title": "Framework application", "hint": "SWOT, PESTEL, etc.", "items": ["Apply SWOT or PESTEL", "Financial or demand model", "Risk list"]}, {"title": "Recommendations", "hint": "Actionable advice.", "items": ["3 concrete recommendations", "Timeline and resources", "Risks and mitigations"]}, {"title": "Executive summary & deck", "hint": "Report + slides.", "items": ["Executive summary", "Slide deck", "Final submit / pitch"]}]}, "engineering": {"label": "Engineering & Technology", "subjects": ["Computer Science", "IT", "Mechanical", "Civil", "Electrical", "Other"], "focus": "Building practical solutions to real-world problems", "deliverables": "Working prototypes, software, design schematics", "steps": [{"title": "Requirements", "hint": "User problem + constraints.", "items": ["User problem statement", "Budget / time / tech constraints", "Acceptance criteria"]}, {"title": "Architecture & design", "hint": "Wireframes, flowcharts, CAD.", "items": ["System diagram", "UI wireframes or CAD sketch", "Tech stack decision"]}, {"title": "Build / prototype", "hint": "Sprints, clean code or assembly.", "items": ["MVP feature list", "Build sprint 1", "Document decisions"]}, {"title": "Test & debug", "hint": "Edge cases, stress tests.", "items": ["Test plan", "Bug list and fixes", "Verify acceptance criteria"]}, {"title": "Deploy & document", "hint": "README, demo, manual.", "items": ["README / manual", "Live demo ready", "Submit / present"]}]}}}, "non_academic": {"label": "Non-academic", "streams": {"portfolio": {"label": "Portfolio & career building", "subjects": ["Personal branding", "Open source contribution", "Case studies / redesign", "Other"], "focus": "Show skills to employers with real work", "deliverables": "Portfolio pieces, case studies, public contributions", "steps": [{"title": "Define the MVP", "hint": "Smallest shareable version.", "items": ["One-sentence goal", "MVP checklist", "Public deadline for yourself"]}, {"title": "Build in public", "hint": "Share progress for accountability.", "items": ["Pick channel (LinkedIn / X / blog)", "Post first update", "Collect feedback"]}, {"title": "Ship it", "hint": "Publish imperfectly.", "items": ["Publish / launch", "Ask 3 people for feedback", "Log metrics"]}, {"title": "Post-mortem", "hint": "What you learned for interviews.", "items": ["Write short case summary", "What went wrong / right", "Add to portfolio / resume"]}]}, "entrepreneurial": {"label": "Entrepreneurial & side hustles", "subjects": ["E-commerce / dropshipping", "Micro-SaaS or digital tools", "Freelance portfolio", "Other"], "focus": "Revenue or a self-sustaining asset", "deliverables": "Store, tool, client work, or agency start", "steps": [{"title": "Define the MVP", "hint": "Avoid scope creep.", "items": ["Offer in one sentence", "Price or goal", "MVP feature list"]}, {"title": "Build in public", "hint": "Audience before polish.", "items": ["Landing page or profile", "First 3 outreach messages", "Weekly progress note"]}, {"title": "Ship / sell", "hint": "Real users or buyers.", "items": ["First sale or user", "Support / fix loop", "Simple metrics"]}, {"title": "Post-mortem", "hint": "Keep or kill.", "items": ["Revenue / learning summary", "Next experiment", "Portfolio write-up"]}]}, "community": {"label": "Community, social & advocacy", "subjects": ["Grassroots campaign", "Content & media", "Non-profit initiative", "Other"], "focus": "Social impact and organizing people", "deliverables": "Campaign, media piece, or local service", "steps": [{"title": "Define the MVP", "hint": "One event or one deliverable.", "items": ["Impact goal", "Audience", "MVP event or asset"]}, {"title": "Build in public", "hint": "Partners and volunteers.", "items": ["Recruit 1-3 helpers", "Announce date / plan", "Content calendar"]}, {"title": "Ship / host", "hint": "Run the thing.", "items": ["Execute event or publish", "Capture photos / numbers", "Thank participants"]}, {"title": "Post-mortem", "hint": "Impact story.", "items": ["What changed", "Lessons", "Share story publicly"]}]}, "passion": {"label": "Personal growth & passion", "subjects": ["Physical / maker", "Creative endurance", "Self-education curriculum", "Other"], "focus": "Curiosity and skill outside formal class", "deliverables": "Finished creative or learning artifact", "steps": [{"title": "Define the MVP", "hint": "Finishable version.", "items": ["Skill or piece you want", "MVP definition", "Weekly time box"]}, {"title": "Build in public", "hint": "Accountability.", "items": ["Log day 1", "Share a weekly update", "Adjust scope if stuck"]}, {"title": "Ship it", "hint": "Show the work.", "items": ["Finish MVP", "Share with one person", "Celebrate small win"]}, {"title": "Post-mortem", "hint": "Keep the habit or archive.", "items": ["What you learned", "Continue or close", "Optional portfolio note"]}]}}}};
+const PROJECT_STREAMS = {"academic": {"label": "Academic", "streams": {"sciences": {"label": "Sciences (B.Sc / M.Sc)", "subjects": ["Physics","Chemistry","Mathematics","Statistics","Computer Science","Data Science","Botany","Zoology","Microbiology","Biotechnology","Biochemistry","Geology","Environmental Science","Forensic Science","Agriculture","Other"], "focus": "Testing hypotheses and finding empirical truths", "deliverables": "Lab reports, scientific posters, datasets", "steps": [{"title": "Formulate a hypothesis", "hint": "Clear, testable prediction.", "items": ["Write the research question", "State hypothesis and null hypothesis", "Note constraints and safety"]}, {"title": "Design the protocol", "hint": "Controls, variables, equipment, safety.", "items": ["List independent / dependent variables", "List equipment and materials", "Write step-by-step method", "Safety checklist"]}, {"title": "Data collection", "hint": "Repeat trials for validity.", "items": ["Run trial 1 and log raw data", "Repeat trials as planned", "Note anomalies in a lab log"]}, {"title": "Analysis", "hint": "Graphs, stats, error checks.", "items": ["Enter data in Excel or R", "Plot graphs", "Check for outliers / error", "Draft results paragraph"]}, {"title": "Write-up & present", "hint": "IMRAD structure + poster if needed.", "items": ["Introduction draft", "Methods draft", "Results & Discussion", "References / poster / submit"]}]}, "liberal_arts": {"label": "Liberal Arts & Humanities", "subjects": ["English Literature","Economics","Psychology","Political Science","Sociology","History","Geography","Philosophy","Anthropology","Journalism and Mass Communication","Public Policy","International Studies","Linguistics","Fine Arts","Media Studies","Environmental Studies","Modern Languages","Indian Languages","Other"], "focus": "Analyzing text, culture, history, and human behavior", "deliverables": "Critical essays, policy briefs, documentaries", "steps": [{"title": "Define the scope", "hint": "One text, era, or social group.", "items": ["Pick specific focus", "Write 1-sentence scope", "Note word/count limits"]}, {"title": "Literature review", "hint": "What experts already said.", "items": ["Find 5+ scholarly sources", "Summarize each in 3 lines", "Note gaps your project fills"]}, {"title": "Thesis statement", "hint": "Central arguable claim.", "items": ["Draft thesis", "Test: is it arguable?", "Revise with supervisor if needed"]}, {"title": "Evidence & argument", "hint": "Quotes, archives, interviews.", "items": ["Gather primary evidence", "Map evidence to thesis points", "Outline body sections"]}, {"title": "Draft & cite", "hint": "APA / MLA / Chicago.", "items": ["Full draft", "Citation pass", "Proofread and submit"]}]}, "commerce": {"label": "Commerce, Business & Economics", "subjects": ["Finance", "Marketing", "Economics", "HR", "Other"], "focus": "Solving market, financial, or organizational problems", "deliverables": "Business plans, market research, audit reports", "steps": [{"title": "Problem identification", "hint": "Market gap or org problem.", "items": ["Write the problem in one paragraph", "Define success metric", "List stakeholders"]}, {"title": "Market / data mapping", "hint": "Sheets, competitors, surveys.", "items": ["Collect data sources", "Competitor snapshot", "Survey or interview plan"]}, {"title": "Framework application", "hint": "SWOT, PESTEL, etc.", "items": ["Apply SWOT or PESTEL", "Financial or demand model", "Risk list"]}, {"title": "Recommendations", "hint": "Actionable advice.", "items": ["3 concrete recommendations", "Timeline and resources", "Risks and mitigations"]}, {"title": "Executive summary & deck", "hint": "Report + slides.", "items": ["Executive summary", "Slide deck", "Final submit / pitch"]}]}, "engineering": {"label": "Engineering & Technology", "subjects": ["Computer Science and Engineering","Electronics and Communication Engineering","Mechanical Engineering","Civil Engineering","Electrical Engineering","Chemical Engineering","Aerospace Engineering","Information Technology","Electrical and Electronics Engineering","Biotechnology Engineering","Metallurgical and Materials Engineering","Production and Industrial Engineering","Artificial Intelligence and Data Science","Other"], "focus": "Building practical solutions to real-world problems", "deliverables": "Working prototypes, software, design schematics", "steps": [{"title": "Requirements", "hint": "User problem + constraints.", "items": ["User problem statement", "Budget / time / tech constraints", "Acceptance criteria"]}, {"title": "Architecture & design", "hint": "Wireframes, flowcharts, CAD.", "items": ["System diagram", "UI wireframes or CAD sketch", "Tech stack decision"]}, {"title": "Build / prototype", "hint": "Sprints, clean code or assembly.", "items": ["MVP feature list", "Build sprint 1", "Document decisions"]}, {"title": "Test & debug", "hint": "Edge cases, stress tests.", "items": ["Test plan", "Bug list and fixes", "Verify acceptance criteria"]}, {"title": "Deploy & document", "hint": "README, demo, manual.", "items": ["README / manual", "Live demo ready", "Submit / present"]}]}}}, "non_academic": {"label": "Non-academic", "streams": {"portfolio": {"label": "Portfolio & career building", "subjects": ["Personal branding", "Open source contribution", "Case studies / redesign", "Other"], "focus": "Show skills to employers with real work", "deliverables": "Portfolio pieces, case studies, public contributions", "steps": [{"title": "Define the MVP", "hint": "Smallest shareable version.", "items": ["One-sentence goal", "MVP checklist", "Public deadline for yourself"]}, {"title": "Build in public", "hint": "Share progress for accountability.", "items": ["Pick channel (LinkedIn / X / blog)", "Post first update", "Collect feedback"]}, {"title": "Ship it", "hint": "Publish imperfectly.", "items": ["Publish / launch", "Ask 3 people for feedback", "Log metrics"]}, {"title": "Post-mortem", "hint": "What you learned for interviews.", "items": ["Write short case summary", "What went wrong / right", "Add to portfolio / resume"]}]}, "entrepreneurial": {"label": "Entrepreneurial & side hustles", "subjects": ["E-commerce / dropshipping", "Micro-SaaS or digital tools", "Freelance portfolio", "Other"], "focus": "Revenue or a self-sustaining asset", "deliverables": "Store, tool, client work, or agency start", "steps": [{"title": "Define the MVP", "hint": "Avoid scope creep.", "items": ["Offer in one sentence", "Price or goal", "MVP feature list"]}, {"title": "Build in public", "hint": "Audience before polish.", "items": ["Landing page or profile", "First 3 outreach messages", "Weekly progress note"]}, {"title": "Ship / sell", "hint": "Real users or buyers.", "items": ["First sale or user", "Support / fix loop", "Simple metrics"]}, {"title": "Post-mortem", "hint": "Keep or kill.", "items": ["Revenue / learning summary", "Next experiment", "Portfolio write-up"]}]}, "community": {"label": "Community, social & advocacy", "subjects": ["Grassroots campaign", "Content & media", "Non-profit initiative", "Other"], "focus": "Social impact and organizing people", "deliverables": "Campaign, media piece, or local service", "steps": [{"title": "Define the MVP", "hint": "One event or one deliverable.", "items": ["Impact goal", "Audience", "MVP event or asset"]}, {"title": "Build in public", "hint": "Partners and volunteers.", "items": ["Recruit 1-3 helpers", "Announce date / plan", "Content calendar"]}, {"title": "Ship / host", "hint": "Run the thing.", "items": ["Execute event or publish", "Capture photos / numbers", "Thank participants"]}, {"title": "Post-mortem", "hint": "Impact story.", "items": ["What changed", "Lessons", "Share story publicly"]}]}, "passion": {"label": "Personal growth & passion", "subjects": ["Physical / maker", "Creative endurance", "Self-education curriculum", "Other"], "focus": "Curiosity and skill outside formal class", "deliverables": "Finished creative or learning artifact", "steps": [{"title": "Define the MVP", "hint": "Finishable version.", "items": ["Skill or piece you want", "MVP definition", "Weekly time box"]}, {"title": "Build in public", "hint": "Accountability.", "items": ["Log day 1", "Share a weekly update", "Adjust scope if stuck"]}, {"title": "Ship it", "hint": "Show the work.", "items": ["Finish MVP", "Share with one person", "Celebrate small win"]}, {"title": "Post-mortem", "hint": "Keep the habit or archive.", "items": ["What you learned", "Continue or close", "Optional portfolio note"]}]}}}};
 function ensureProjects(){ if(!Array.isArray(state.projects)) state.projects=[]; return state.projects; }
 function getProject(id){ if(id==null||id==="") return null; return ensureProjects().find(p=>String(p.id)===String(id)); }
 
@@ -9160,9 +9190,20 @@ function projectSummaryText(p){
   if(p.prompt) lines.push('Prompt: '+p.prompt);
   lines.push('Progress: '+pct+'%');
   lines.push('');
+  if(p.selfMember && (p.selfMember.name||p.selfMember.responsibilities)){
+    lines.push('You: '+(p.selfMember.name||'')+(p.selfMember.role?(' ('+p.selfMember.role+')'):''));
+    if(p.selfMember.responsibilities) lines.push('  Responsibilities: '+p.selfMember.responsibilities);
+    if(p.selfMember.deadline) lines.push('  Deadline: '+p.selfMember.deadline);
+    lines.push('');
+  }
   if(p.team && p.team.length){
     lines.push('Team:');
-    p.team.forEach(m=>lines.push('- '+(m.name||'')+(m.role?(' ('+m.role+')'):'')+(m.email?(' · '+m.email):'')+(m.phone?(' · '+m.phone):'')));
+    p.team.forEach(m=>{
+      lines.push('- '+(m.name||'')+(m.role?(' ('+m.role+')'):''));
+      if(m.responsibilities) lines.push('  Responsibilities: '+m.responsibilities);
+      if(m.deadline) lines.push('  Deadline: '+m.deadline);
+      if(m.email||m.phone) lines.push('  '+(m.email||'')+(m.phone?(' · '+m.phone):''));
+    });
     lines.push('');
   }
   (p.phases||[]).forEach((ph,i)=>{
@@ -9479,11 +9520,52 @@ function viewProjectDetail(p){
     ${p.prompt?`<p style="font-size:.82rem;color:var(--muted);margin:10px 0 0"><b>Prompt:</b> ${escapeHtml(p.prompt)}</p>`:''}
   </div>
 
-  ${(p.teamMode==='group' && (p.team||[]).length)?`
   <div class="card">
-    <div style="font-weight:700;margin-bottom:8px">Team</div>
-    ${(p.team||[]).map(m=>`<div style="font-size:.9rem;padding:4px 0;border-bottom:1px solid var(--line)">${escapeHtml(m.name)}${m.role?(' · '+escapeHtml(m.role)):''}${m.email?(' · '+escapeHtml(m.email)):''}</div>`).join('')}
-  </div>`:''}
+    <div style="font-weight:700;margin-bottom:4px">People & responsibilities</div>
+    <p style="font-size:.8rem;color:var(--muted);margin:0 0 12px">Add yourself and teammates. Set role, what they own, and their deadline. Available in every phase.</p>
+    <div style="font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">You (student)</div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <input id="projSelfName" placeholder="Your name" value="${escapeHtml((p.selfMember&&p.selfMember.name)||(state.profile&&state.profile.name)||'')}" style="flex:1;min-width:100px">
+      <input id="projSelfRole" placeholder="Your role" value="${escapeHtml((p.selfMember&&p.selfMember.role)||'')}" style="flex:1;min-width:90px">
+    </div>
+    <textarea id="projSelfResp" rows="2" placeholder="Your responsibilities on this project" style="width:100%;margin-bottom:8px">${escapeHtml((p.selfMember&&p.selfMember.responsibilities)||'')}</textarea>
+    <div class="row" style="gap:8px;margin-bottom:14px;align-items:center">
+      <label style="font-size:.8rem;white-space:nowrap">Your deadline</label>
+      <input type="date" id="projSelfDeadline" value="${escapeHtml((p.selfMember&&p.selfMember.deadline)||'')}" style="flex:1">
+      <button type="button" class="btn sm" data-action="proj-self-save">Save me</button>
+    </div>
+    <div style="font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase;margin:8px 0 6px">Teammates</div>
+    ${(p.team||[]).map((m,mi)=>`<div style="padding:10px 0;border-bottom:1px solid var(--line)">
+      <div style="font-weight:700">${escapeHtml(m.name||'Teammate')}${m.role?(' · '+escapeHtml(m.role)):''}</div>
+      <div style="font-size:.82rem;color:var(--muted);margin-top:2px">${m.responsibilities?escapeHtml(m.responsibilities):'No responsibilities set'}${m.deadline?(' · Due '+escapeHtml(m.deadline)):''}</div>
+      <div style="font-size:.78rem;margin-top:2px">${m.email?escapeHtml(m.email):''}${m.phone?(' · '+escapeHtml(m.phone)):''}</div>
+      <div class="row" style="gap:6px;margin-top:6px">
+        <button type="button" class="btn ghost sm" data-action="proj-team-edit" data-idx="${mi}">Edit</button>
+        <button type="button" class="btn ghost sm" data-action="proj-team-del" data-idx="${mi}">Remove</button>
+      </div>
+      ${state.projectTeamEditIdx===mi?`<div style="margin-top:10px;padding:12px;background:var(--bg);border-radius:12px">
+        <input class="ptName" placeholder="Name" value="${escapeHtml(m.name||'')}" style="width:100%;margin-bottom:6px">
+        <input class="ptRole" placeholder="Role (e.g. Researcher)" value="${escapeHtml(m.role||'')}" style="width:100%;margin-bottom:6px">
+        <textarea class="ptResp" rows="2" placeholder="Responsibilities" style="width:100%;margin-bottom:6px">${escapeHtml(m.responsibilities||'')}</textarea>
+        <input type="date" class="ptDeadline" value="${escapeHtml(m.deadline||'')}" style="width:100%;margin-bottom:6px">
+        <input class="ptEmail" placeholder="Email" value="${escapeHtml(m.email||'')}" style="width:100%;margin-bottom:6px">
+        <input class="ptPhone" placeholder="Phone" value="${escapeHtml(m.phone||'')}" style="width:100%;margin-bottom:6px">
+        <button type="button" class="btn sm" data-action="proj-team-save-edit" data-idx="${mi}">Save teammate</button>
+      </div>`:''}
+    </div>`).join('')||'<div class="empty" style="margin-bottom:8px">No teammates yet — add below.</div>'}
+    ${state.projectTeamAdding?`<div style="margin-top:10px;padding:12px;background:var(--bg);border-radius:12px;border:1px solid var(--line)">
+      <input id="ptNewName" placeholder="Name" style="width:100%;margin-bottom:6px">
+      <input id="ptNewRole" placeholder="Role" style="width:100%;margin-bottom:6px">
+      <textarea id="ptNewResp" rows="2" placeholder="Responsibilities" style="width:100%;margin-bottom:6px"></textarea>
+      <input type="date" id="ptNewDeadline" style="width:100%;margin-bottom:6px">
+      <input id="ptNewEmail" placeholder="Email" style="width:100%;margin-bottom:6px">
+      <input id="ptNewPhone" placeholder="Phone" style="width:100%;margin-bottom:6px">
+      <div class="row" style="gap:8px">
+        <button type="button" class="btn sm" data-action="proj-team-save-new">Save teammate</button>
+        <button type="button" class="btn ghost sm" data-action="proj-team-cancel-new">Cancel</button>
+      </div>
+    </div>`:`<button type="button" class="btn ghost sm" data-action="proj-team-add" style="margin-top:8px">+ Add teammate</button>`}
+  </div>
 
   <div class="card" style="padding:10px">
     <div style="font-size:.72rem;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Phases</div>
@@ -11509,6 +11591,66 @@ function wireView(){
       const pr=getProject(state.projectId); if(!pr) return;
       shareProjectTeamInvite(pr);
     });
+    else if(action==='proj-self-save') el.addEventListener('click', ()=>{
+      const pr=getProject(state.projectId); if(!pr) return;
+      pr.selfMember={
+        name:(document.getElementById('projSelfName')?.value||'').trim(),
+        role:(document.getElementById('projSelfRole')?.value||'').trim(),
+        responsibilities:(document.getElementById('projSelfResp')?.value||'').trim(),
+        deadline:document.getElementById('projSelfDeadline')?.value||''
+      };
+      try{saveState();}catch(e){}
+      showAppMessage('Saved', 'Your role and responsibilities are saved.');
+      persistRender();
+    });
+    else if(action==='proj-team-add') el.addEventListener('click', ()=>{ state.projectTeamAdding=true; state.projectTeamEditIdx=null; persistRender(); });
+    else if(action==='proj-team-cancel-new') el.addEventListener('click', ()=>{ state.projectTeamAdding=false; persistRender(); });
+    else if(action==='proj-team-save-new') el.addEventListener('click', ()=>{
+      const pr=getProject(state.projectId); if(!pr) return;
+      if(!pr.team) pr.team=[];
+      const name=(document.getElementById('ptNewName')?.value||'').trim();
+      if(!name){ showAppMessage('Name needed','Enter a teammate name.'); return; }
+      pr.team.push({
+        name,
+        role:(document.getElementById('ptNewRole')?.value||'').trim(),
+        responsibilities:(document.getElementById('ptNewResp')?.value||'').trim(),
+        deadline:document.getElementById('ptNewDeadline')?.value||'',
+        email:(document.getElementById('ptNewEmail')?.value||'').trim(),
+        phone:(document.getElementById('ptNewPhone')?.value||'').trim()
+      });
+      pr.teamMode=pr.teamMode||'group';
+      state.projectTeamAdding=false;
+      try{saveState();}catch(e){}
+      showAppMessage('Teammate added', name);
+      persistRender();
+    });
+    else if(action==='proj-team-edit') el.addEventListener('click', ()=>{ state.projectTeamEditIdx=Number(el.dataset.idx); state.projectTeamAdding=false; persistRender(); });
+    else if(action==='proj-team-del') el.addEventListener('click', ()=>{
+      const pr=getProject(state.projectId); if(!pr||!pr.team) return;
+      pr.team.splice(Number(el.dataset.idx),1);
+      state.projectTeamEditIdx=null;
+      try{saveState();}catch(e){}
+      persistRender();
+    });
+    else if(action==='proj-team-save-edit') el.addEventListener('click', ()=>{
+      const pr=getProject(state.projectId); if(!pr||!pr.team) return;
+      const idx=Number(el.dataset.idx);
+      const scope=el.parentElement;
+      const name=(scope.querySelector('.ptName')?.value||'').trim();
+      if(!name){ showAppMessage('Name needed',''); return; }
+      pr.team[idx]={
+        name,
+        role:(scope.querySelector('.ptRole')?.value||'').trim(),
+        responsibilities:(scope.querySelector('.ptResp')?.value||'').trim(),
+        deadline:scope.querySelector('.ptDeadline')?.value||'',
+        email:(scope.querySelector('.ptEmail')?.value||'').trim(),
+        phone:(scope.querySelector('.ptPhone')?.value||'').trim()
+      };
+      state.projectTeamEditIdx=null;
+      try{saveState();}catch(e){}
+      showAppMessage('Teammate updated', name);
+      persistRender();
+    });
     else if(action==='proj-custom-add') el.addEventListener('click', ()=>{
       const pr=getProject(state.projectId); if(!pr) return;
       const text=(document.getElementById('projCustomNew')?.value||'').trim();
@@ -11536,6 +11678,9 @@ function wireView(){
       persistRender();
     });
 
+    else if(action==='home-toggle') el.addEventListener('click', ()=>{
+      homeSectionToggle(el.dataset.key||'');
+    });
     else if(action==='open-project') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
       const raw=el.getAttribute('data-id')||el.dataset.id;
