@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="254">
+<meta name="snapback-build" content="256">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -9092,7 +9092,7 @@ function viewSemester(){
 
 const PROJECT_STREAMS = {"academic": {"label": "Academic", "streams": {"sciences": {"label": "Sciences (B.Sc / M.Sc)", "subjects": ["Physics", "Chemistry", "Biology", "Environmental Science", "Other"], "focus": "Testing hypotheses and finding empirical truths", "deliverables": "Lab reports, scientific posters, datasets", "steps": [{"title": "Formulate a hypothesis", "hint": "Clear, testable prediction.", "items": ["Write the research question", "State hypothesis and null hypothesis", "Note constraints and safety"]}, {"title": "Design the protocol", "hint": "Controls, variables, equipment, safety.", "items": ["List independent / dependent variables", "List equipment and materials", "Write step-by-step method", "Safety checklist"]}, {"title": "Data collection", "hint": "Repeat trials for validity.", "items": ["Run trial 1 and log raw data", "Repeat trials as planned", "Note anomalies in a lab log"]}, {"title": "Analysis", "hint": "Graphs, stats, error checks.", "items": ["Enter data in Excel or R", "Plot graphs", "Check for outliers / error", "Draft results paragraph"]}, {"title": "Write-up & present", "hint": "IMRAD structure + poster if needed.", "items": ["Introduction draft", "Methods draft", "Results & Discussion", "References / poster / submit"]}]}, "liberal_arts": {"label": "Liberal Arts & Humanities", "subjects": ["History", "Literature", "Sociology", "Psychology", "Other"], "focus": "Analyzing text, culture, history, and human behavior", "deliverables": "Critical essays, policy briefs, documentaries", "steps": [{"title": "Define the scope", "hint": "One text, era, or social group.", "items": ["Pick specific focus", "Write 1-sentence scope", "Note word/count limits"]}, {"title": "Literature review", "hint": "What experts already said.", "items": ["Find 5+ scholarly sources", "Summarize each in 3 lines", "Note gaps your project fills"]}, {"title": "Thesis statement", "hint": "Central arguable claim.", "items": ["Draft thesis", "Test: is it arguable?", "Revise with supervisor if needed"]}, {"title": "Evidence & argument", "hint": "Quotes, archives, interviews.", "items": ["Gather primary evidence", "Map evidence to thesis points", "Outline body sections"]}, {"title": "Draft & cite", "hint": "APA / MLA / Chicago.", "items": ["Full draft", "Citation pass", "Proofread and submit"]}]}, "commerce": {"label": "Commerce, Business & Economics", "subjects": ["Finance", "Marketing", "Economics", "HR", "Other"], "focus": "Solving market, financial, or organizational problems", "deliverables": "Business plans, market research, audit reports", "steps": [{"title": "Problem identification", "hint": "Market gap or org problem.", "items": ["Write the problem in one paragraph", "Define success metric", "List stakeholders"]}, {"title": "Market / data mapping", "hint": "Sheets, competitors, surveys.", "items": ["Collect data sources", "Competitor snapshot", "Survey or interview plan"]}, {"title": "Framework application", "hint": "SWOT, PESTEL, etc.", "items": ["Apply SWOT or PESTEL", "Financial or demand model", "Risk list"]}, {"title": "Recommendations", "hint": "Actionable advice.", "items": ["3 concrete recommendations", "Timeline and resources", "Risks and mitigations"]}, {"title": "Executive summary & deck", "hint": "Report + slides.", "items": ["Executive summary", "Slide deck", "Final submit / pitch"]}]}, "engineering": {"label": "Engineering & Technology", "subjects": ["Computer Science", "IT", "Mechanical", "Civil", "Electrical", "Other"], "focus": "Building practical solutions to real-world problems", "deliverables": "Working prototypes, software, design schematics", "steps": [{"title": "Requirements", "hint": "User problem + constraints.", "items": ["User problem statement", "Budget / time / tech constraints", "Acceptance criteria"]}, {"title": "Architecture & design", "hint": "Wireframes, flowcharts, CAD.", "items": ["System diagram", "UI wireframes or CAD sketch", "Tech stack decision"]}, {"title": "Build / prototype", "hint": "Sprints, clean code or assembly.", "items": ["MVP feature list", "Build sprint 1", "Document decisions"]}, {"title": "Test & debug", "hint": "Edge cases, stress tests.", "items": ["Test plan", "Bug list and fixes", "Verify acceptance criteria"]}, {"title": "Deploy & document", "hint": "README, demo, manual.", "items": ["README / manual", "Live demo ready", "Submit / present"]}]}}}, "non_academic": {"label": "Non-academic", "streams": {"portfolio": {"label": "Portfolio & career building", "subjects": ["Personal branding", "Open source contribution", "Case studies / redesign", "Other"], "focus": "Show skills to employers with real work", "deliverables": "Portfolio pieces, case studies, public contributions", "steps": [{"title": "Define the MVP", "hint": "Smallest shareable version.", "items": ["One-sentence goal", "MVP checklist", "Public deadline for yourself"]}, {"title": "Build in public", "hint": "Share progress for accountability.", "items": ["Pick channel (LinkedIn / X / blog)", "Post first update", "Collect feedback"]}, {"title": "Ship it", "hint": "Publish imperfectly.", "items": ["Publish / launch", "Ask 3 people for feedback", "Log metrics"]}, {"title": "Post-mortem", "hint": "What you learned for interviews.", "items": ["Write short case summary", "What went wrong / right", "Add to portfolio / resume"]}]}, "entrepreneurial": {"label": "Entrepreneurial & side hustles", "subjects": ["E-commerce / dropshipping", "Micro-SaaS or digital tools", "Freelance portfolio", "Other"], "focus": "Revenue or a self-sustaining asset", "deliverables": "Store, tool, client work, or agency start", "steps": [{"title": "Define the MVP", "hint": "Avoid scope creep.", "items": ["Offer in one sentence", "Price or goal", "MVP feature list"]}, {"title": "Build in public", "hint": "Audience before polish.", "items": ["Landing page or profile", "First 3 outreach messages", "Weekly progress note"]}, {"title": "Ship / sell", "hint": "Real users or buyers.", "items": ["First sale or user", "Support / fix loop", "Simple metrics"]}, {"title": "Post-mortem", "hint": "Keep or kill.", "items": ["Revenue / learning summary", "Next experiment", "Portfolio write-up"]}]}, "community": {"label": "Community, social & advocacy", "subjects": ["Grassroots campaign", "Content & media", "Non-profit initiative", "Other"], "focus": "Social impact and organizing people", "deliverables": "Campaign, media piece, or local service", "steps": [{"title": "Define the MVP", "hint": "One event or one deliverable.", "items": ["Impact goal", "Audience", "MVP event or asset"]}, {"title": "Build in public", "hint": "Partners and volunteers.", "items": ["Recruit 1-3 helpers", "Announce date / plan", "Content calendar"]}, {"title": "Ship / host", "hint": "Run the thing.", "items": ["Execute event or publish", "Capture photos / numbers", "Thank participants"]}, {"title": "Post-mortem", "hint": "Impact story.", "items": ["What changed", "Lessons", "Share story publicly"]}]}, "passion": {"label": "Personal growth & passion", "subjects": ["Physical / maker", "Creative endurance", "Self-education curriculum", "Other"], "focus": "Curiosity and skill outside formal class", "deliverables": "Finished creative or learning artifact", "steps": [{"title": "Define the MVP", "hint": "Finishable version.", "items": ["Skill or piece you want", "MVP definition", "Weekly time box"]}, {"title": "Build in public", "hint": "Accountability.", "items": ["Log day 1", "Share a weekly update", "Adjust scope if stuck"]}, {"title": "Ship it", "hint": "Show the work.", "items": ["Finish MVP", "Share with one person", "Celebrate small win"]}, {"title": "Post-mortem", "hint": "Keep the habit or archive.", "items": ["What you learned", "Continue or close", "Optional portfolio note"]}]}}}};
 function ensureProjects(){ if(!Array.isArray(state.projects)) state.projects=[]; return state.projects; }
-function getProject(id){ return ensureProjects().find(p=>p.id===id); }
+function getProject(id){ if(id==null||id==="") return null; return ensureProjects().find(p=>String(p.id)===String(id)); }
 
 function buildProjectPhases(kind, stream, title){
   const meta=(PROJECT_STREAMS[kind]&&PROJECT_STREAMS[kind].streams[stream])||null;
@@ -9296,17 +9296,18 @@ function viewProjects(){
   ${list.length? list.map(p=>{
     const pct=projectProgress(p);
     const streamLabel = (PROJECT_STREAMS[p.kind]&&PROJECT_STREAMS[p.kind].streams[p.stream]&&PROJECT_STREAMS[p.kind].streams[p.stream].label)||p.stream||'';
-    return `<button class="card" data-action="open-project" data-id="${p.id}" style="text-align:left;width:100%;cursor:pointer;border:1px solid var(--line);background:var(--card);margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;gap:10px">
-        <div>
+    return `<div class="card" style="margin-bottom:10px;border:1px solid var(--line)">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+        <div style="flex:1;min-width:0">
           <div style="font-size:.72rem;font-weight:700;color:var(--muted);text-transform:uppercase">${p.kind==='academic'?'Academic':'Non-academic'} · ${escapeHtml(streamLabel)}</div>
           <div style="font-weight:800;font-size:1.05rem;margin-top:4px">${escapeHtml(p.title)}</div>
           ${p.deadline?`<div style="font-size:.8rem;color:var(--muted);margin-top:4px">Due ${escapeHtml(p.deadline)}</div>`:''}
         </div>
-        <div style="font-weight:800;color:var(--pine)">${pct}%</div>
+        <div style="font-weight:800;color:var(--pine);flex-shrink:0">${pct}%</div>
       </div>
       <div style="margin-top:10px;height:8px;background:var(--line);border-radius:99px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--pine)"></div></div>
-    </button>`;
+      <button type="button" class="btn" data-action="open-project" data-id="${p.id}" style="width:100%;margin-top:12px">Open project →</button>
+    </div>`;
   }).join('') : `<div class="card empty">No projects yet. Tap <b>+ New project</b>.</div>`}`;
 }
 function viewProjectWizard(){
@@ -9499,20 +9500,31 @@ function viewProjectDetail(p){
     <h2 style="margin:6px 0 4px;font-size:1.15rem;line-height:1.3">${escapeHtml(ph.title)}</h2>
     ${ph.blurb?`<p style="font-size:.88rem;color:var(--muted);margin:0 0 14px;line-height:1.45">${escapeHtml(ph.blurb)}</p>`:''}
 
-    ${isPlan?`<div style="font-size:.8rem;background:var(--gold-soft);border:1px solid var(--gold);border-radius:10px;padding:8px 10px;margin-bottom:12px">Planning: check an item to <b>include it in your plan</b>. It will not be marked finished until you complete it in Execution / later phases.</div>`:''}
+    <div style="font-size:.8rem;background:var(--gold-soft);border:1px solid var(--gold);border-radius:10px;padding:8px 10px;margin-bottom:12px">Tap a step to open a notes box. <b>Save</b> your details. Use <b>Mark step done</b> only when that step is finished — it will not strike through just from opening it.</div>
 
     ${(ph.items||[]).length? (ph.items||[]).map((it,ii)=>{
-      if(isPlan){
-        return `<label style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer">
-          <input type="checkbox" data-action="proj-plan-item" data-phase="${pi}" data-idx="${ii}" ${it.planned||it.done?'checked':''} style="margin-top:3px;width:18px;height:18px;flex-shrink:0">
-          <span style="flex:1;line-height:1.4;${it.planned||it.done?'font-weight:600;color:var(--pine)':''}">${escapeHtml(it.text)}</span>
-          ${(it.planned||it.done)?'<span style="font-size:.72rem;color:var(--pine);flex-shrink:0">In plan</span>':''}
-        </label>`;
-      }
-      return `<label style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line);cursor:pointer">
-        <input type="checkbox" data-action="proj-phase-item" data-phase="${pi}" data-idx="${ii}" ${it.done?'checked':''} style="margin-top:3px;width:18px;height:18px;flex-shrink:0">
-        <span style="flex:1;line-height:1.4;${it.done?'text-decoration:line-through;opacity:.55':''}">${escapeHtml(it.text)}</span>
-      </label>`;
+      const editKey = pi+'-'+ii;
+      const isOpen = state.projectEditKey===editKey;
+      const hasNote = !!(it.note&&String(it.note).trim());
+      const statusLabel = it.done ? 'Done' : (hasNote ? 'Saved' : (isPlan ? 'Tap to plan' : 'Tap to add details'));
+      return `<div style="padding:12px 0;border-bottom:1px solid var(--line)">
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <button type="button" class="btn ghost sm" data-action="proj-item-open" data-phase="${pi}" data-idx="${ii}" style="flex:1;text-align:left;padding:8px 10px;border:1px solid var(--line);background:${isOpen?'var(--pine-soft)':'var(--card)'}">
+            <div style="font-weight:700;font-size:.95rem;line-height:1.35">${escapeHtml(it.text)}</div>
+            <div style="font-size:.75rem;color:var(--muted);margin-top:4px">${statusLabel}${hasNote && !isOpen ? ' · ' + escapeHtml(String(it.note).slice(0,60))+(String(it.note).length>60?'…':'') : ''}</div>
+          </button>
+        </div>
+        ${isOpen?`<div style="margin-top:10px;padding:12px;background:var(--bg);border-radius:12px;border:1px solid var(--line)">
+          <label style="font-size:.8rem;font-weight:600">Your notes / details for this step</label>
+          <textarea id="projItemNote" rows="3" placeholder="Type here… e.g. topic title, professor name, what you decided…" style="width:100%;margin-top:6px;padding:10px;border-radius:10px;border:1px solid var(--line);font:inherit">${escapeHtml(it.note||'')}</textarea>
+          <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+            <button type="button" class="btn sm" data-action="proj-item-save" data-phase="${pi}" data-idx="${ii}">Save</button>
+            <button type="button" class="btn ghost sm" data-action="proj-item-close">Close</button>
+            <button type="button" class="btn ghost sm" data-action="proj-item-done" data-phase="${pi}" data-idx="${ii}">${it.done?'Mark not done':'Mark step done'}</button>
+          </div>
+          <p style="font-size:.75rem;color:var(--muted);margin:8px 0 0">Save stores your notes. “Mark step done” is optional when this step is truly finished.</p>
+        </div>`:''}
+      </div>`;
     }).join('') : ''}
 
     ${ph.id==='execution'?`
@@ -11379,6 +11391,49 @@ function wireView(){
       try{saveState();}catch(e){}
       persistRender();
     });
+    else if(action==='proj-item-open') el.addEventListener('click', ()=>{
+      const key=el.dataset.phase+'-'+el.dataset.idx;
+      state.projectEditKey = (state.projectEditKey===key) ? null : key;
+      persistRender();
+    });
+    else if(action==='proj-item-close') el.addEventListener('click', ()=>{
+      state.projectEditKey=null;
+      persistRender();
+    });
+    else if(action==='proj-item-save') el.addEventListener('click', ()=>{
+      const pr=getProject(state.projectId); if(!pr||!pr.phases) return;
+      const ph=pr.phases[Number(el.dataset.phase)];
+      const idx=Number(el.dataset.idx);
+      if(!ph||!ph.items||!ph.items[idx]) return;
+      const note=(document.getElementById('projItemNote')?.value||'').trim();
+      ph.items[idx].note=note;
+      if(note) ph.items[idx].planned=true;
+      // Map common initiation fields up to project profile when relevant
+      const label=(ph.items[idx].text||'').toLowerCase();
+      if(label.indexOf('professor')>=0 || label.indexOf('instructor')>=0) pr.professor=note||pr.professor;
+      if(label.indexOf('course')>=0) pr.courseName=note||pr.courseName;
+      if(label.indexOf('topic')>=0 || label.indexOf('prompt')>=0 || label.indexOf('hypothesis')>=0) {
+        if(note && !pr.prompt) pr.prompt=note;
+      }
+      if(label.indexOf('deadline')>=0 && note && /^\d{4}-\d{2}-\d{2}/.test(note)) pr.deadline=note.slice(0,10);
+      try{saveState();}catch(e){}
+      showAppMessage('Saved', 'Details saved for this step. You can edit anytime.');
+      state.projectEditKey=null;
+      persistRender();
+    });
+    else if(action==='proj-item-done') el.addEventListener('click', ()=>{
+      const pr=getProject(state.projectId); if(!pr||!pr.phases) return;
+      const ph=pr.phases[Number(el.dataset.phase)];
+      const idx=Number(el.dataset.idx);
+      if(!ph||!ph.items||!ph.items[idx]) return;
+      // Save note if open
+      const noteEl=document.getElementById('projItemNote');
+      if(noteEl) ph.items[idx].note=(noteEl.value||'').trim();
+      ph.items[idx].done=!ph.items[idx].done;
+      try{saveState();}catch(e){}
+      showAppMessage(ph.items[idx].done?'Step done':'Step reopened', ph.items[idx].text||'');
+      persistRender();
+    });
     else if(action==='proj-plan-item') el.addEventListener('change', ()=>{
       const pr=getProject(state.projectId); if(!pr||!pr.phases) return;
       const ph=pr.phases[Number(el.dataset.phase)];
@@ -11481,7 +11536,15 @@ function wireView(){
       persistRender();
     });
 
-    else if(action==='open-project') el.addEventListener('click', ()=>{ state.projectId=el.dataset.id; state.projectWizard=null; persistRender(); });
+    else if(action==='open-project') el.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const raw=el.getAttribute('data-id')||el.dataset.id;
+      state.projectId=raw;
+      state.projectWizard=null;
+      const found=getProject(raw);
+      if(!found){ showAppMessage('Could not open', 'Project not found. Try refreshing.'); return; }
+      persistRender();
+    });
     else if(action==='close-project') el.addEventListener('click', ()=>{ state.projectId=null; persistRender(); });
     else if(action==='proj-pick-stream') el.addEventListener('click', ()=>{ if(!state.projectWizard) state.projectWizard={}; state.projectWizard.stream=el.dataset.stream; state.projectWizard.step='details'; persistRender(); });
     else if(action==='proj-step') el.addEventListener('click', ()=>{ const pr=getProject(state.projectId); if(!pr) return; pr.currentStep=Number(el.dataset.idx)||0; try{saveState();}catch(e){} persistRender(); });
