@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="260">
+<meta name="snapback-build" content="262">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -3230,14 +3230,32 @@ const BD_TEMPLATES={
   flow:{name:'Group Flow', desc:'A short goal round, one longer flow block, then a quick reflection on how it went.', phases:[{label:'Goal round',min:2},{label:'Flow block',min:45},{label:'Reflection',min:3}]}
 };
 function bdSelectTemplate(key){
+  if(!BD_TEMPLATES[key]) return;
+  if(!state.bodyDouble) state.bodyDouble={history:[]};
   const bd=state.bodyDouble;
-  bd.templateKey=key; bd.stage='goal'; bd.goal=''; bd.phaseIndex=0;
+  bd.templateKey=key; bd.stage='goal'; bd.phaseIndex=0;
   bd.remaining=BD_TEMPLATES[key].phases[0].min*60; bd.running=false;
+  // Prefer linked technique task title as goal
+  try{
+    const tid=state.techniqueTaskId;
+    const task=(state.tasks||[]).find(x=>String(x.id)===String(tid));
+    bd.goal = task ? (task.title||'') : (bd.goal||'');
+  }catch(e){ bd.goal=bd.goal||''; }
   persistRender();
 }
 function bdConfirmGoal(){
   const bd=state.bodyDouble;
-  bd.goal=document.getElementById('bdGoalInput').value.trim();
+  if(!bd) return;
+  let g=(document.getElementById('bdGoalInput')&&document.getElementById('bdGoalInput').value||'').trim();
+  if(!g){
+    try{
+      const tid=state.techniqueTaskId;
+      const task=(state.tasks||[]).find(x=>String(x.id)===String(tid));
+      if(task) g=task.title||'';
+    }catch(e){}
+  }
+  if(!g){ showAppMessage('Add a goal','Pick a task above or type a goal for this session.'); return; }
+  bd.goal=g;
   bd.stage='running';
   persistRender();
 }
@@ -6613,17 +6631,19 @@ function settingsSectionToggle(key){
   persistRender();
 }
 function tasksPanelOpen(key){
-  // Default: nothing open — only headers visible until student taps
-  return state.tasksPanel === key;
+  // Default empty string = all collapsed (only headers)
+  const cur = state.tasksPanel == null ? '' : String(state.tasksPanel);
+  return cur === String(key);
 }
 function tasksPanelSwitch(key){
-  const cur = state.tasksPanel;
-  // Tap same header again → collapse all
-  if(cur === key){
-    state.tasksPanel = null;
+  key = String(key || '');
+  const cur = state.tasksPanel == null ? '' : String(state.tasksPanel);
+  // Tap same header again → collapse
+  if(cur === key && key){
+    state.tasksPanel = '';
     state.showAddTask = false;
     try{saveState();}catch(e){}
-    persistRender();
+    try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
     return;
   }
   // Leaving Add task with draft
@@ -6639,7 +6659,7 @@ function tasksPanelSwitch(key){
   if(key === 'done'){ state.filter = 'done'; state.listMode = 'all'; }
   if(key === 'open'){ state.filter = 'all'; state.listMode = 'all'; }
   try{saveState();}catch(e){}
-  persistRender();
+  try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
 }
 function homeSectionOpen(key){
   if(!state.homeOpen) state.homeOpen={};
@@ -9919,32 +9939,33 @@ function viewBodyDouble(){
 
   if(bd.stage==='pick'){
     return `
-    <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">Work alongside... yourself, with structure</div><h1>Body Doubling</h1><p>Real body doubling works because of a ritual: declare a goal out loud, work inside a fixed block, check out at the end. These three session styles borrow that structure so you get the accountability without needing to book or match with anyone.</p></div>
-    <div class="grid3">
-      ${Object.entries(BD_TEMPLATES).map(([key,t])=>`
-  ${techniqueTaskPickerHtml(state.techniqueTaskId||'')}
-  <div class="card">
-        <h3>${t.name}</h3>
-        <p style="color:var(--muted);font-size:.85rem;margin:4px 0 10px">${t.desc}</p>
-        <p style="font-size:.76rem;color:var(--muted)">${t.phases.map(p=>`${p.label} (${p.min}m)`).join(' → ')}</p>
-        <button class="btn sm" data-tpl="${key}" style="margin-top:8px">Start ${t.name}</button>
+    <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">Work alongside yourself, with structure</div><h1>Body Doubling</h1>
+    <p>Pick <b>one</b> session style. Then choose a task (or write a goal) and start. You do not need other people — the timer and check-out give the same kind of accountability.</p></div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      ${Object.entries(BD_TEMPLATES).map(([key,tpl])=>`
+      <div class="card" style="border:1px solid var(--line)">
+        <h3 style="margin:0 0 6px">${escapeHtml(tpl.name)}</h3>
+        <p style="color:var(--muted);font-size:.88rem;margin:0 0 8px">${escapeHtml(tpl.desc)}</p>
+        <p style="font-size:.78rem;color:var(--muted);margin:0 0 12px"><b>Flow:</b> ${tpl.phases.map(p=>escapeHtml(p.label)+' ('+p.min+'m)').join(' → ')}</p>
+        <button type="button" class="btn" data-action="bd-pick" data-key="${key}" style="width:100%">Choose ${escapeHtml(tpl.name)}</button>
       </div>`).join('')}
     </div>
-    ${bd.history.length ? `<div class="card">
+    ${bd.history.length ? `<div class="card" style="margin-top:14px">
       <h3>Recent sessions</h3>
-      ${bd.history.map(h=>`<div class="deadline-row"><span class="badge ${h.done?'low':'medium'}">${h.done?'Done':'Partial'}</span><span style="flex:1">${escapeHtml(h.goal||'(no goal set)')} <span style="color:var(--muted)">· ${h.template} · ${h.date}</span>${h.note?`<div style="font-size:.76rem;color:var(--muted)">${escapeHtml(h.note)}</div>`:''}</span></div>`).join('')}
+      ${bd.history.map(h=>`<div class="deadline-row"><span class="badge ${h.done?'low':'medium'}">${h.done?'Done':'Partial'}</span><span style="flex:1">${escapeHtml(h.goal||'(no goal set)')} <span style="color:var(--muted)">· ${escapeHtml(h.template||'')} · ${escapeHtml(h.date||'')}</span>${h.note?`<div style="font-size:.76rem;color:var(--muted)">${escapeHtml(h.note)}</div>`:''}</span></div>`).join('')}
     </div>` : ''}`;
   }
 
   if(bd.stage==='goal'){
     const t=BD_TEMPLATES[bd.templateKey];
     return `
-    <div class="pagehead"><div class="eyebrow">${t.name}</div><h1>What's the one goal?</h1><p>Naming it out loud (even just to yourself) is part of what makes body doubling work.</p></div>
-    <div class="card">
-      <label>Today's goal for this session</label>
-      <input id="bdGoalInput" placeholder="e.g. Draft the outline for chapter 2" onkeydown="if(event.key==='Enter'){bdConfirmGoal()}">
+    <div class="pagehead"><button class="btn ghost sm" data-action="bd-back-pick" style="margin-bottom:8px">← Change style</button><div class="eyebrow">${escapeHtml(t.name)}</div><h1>Task for this technique</h1><p>Pick an existing task or type one goal for this session.</p></div>
+    ${techniqueTaskPickerHtml(state.techniqueTaskId||'')}
+    <div class="card" style="margin-top:12px">
+      <label>Session goal (edit if needed)</label>
+      <input id="bdGoalInput" placeholder="e.g. Draft the outline for chapter 2" value="${escapeHtml(bd.goal||'')}" onkeydown="if(event.key==='Enter'){bdConfirmGoal()}">
       <div class="row" style="margin-top:12px">
-        <button class="btn" id="bdConfirmGoalBtn">Begin session</button>
+        <button type="button" class="btn" id="bdConfirmGoalBtn">Begin session</button>
         <button class="btn ghost" id="bdCancelBtn">Back</button>
       </div>
     </div>`;
@@ -10859,10 +10880,10 @@ function viewSettings(){
       </div>
 <button class="btn sm" id="saveProfileBtn" style="margin-top:10px">Save profile / name</button>
       <button class="btn ghost sm" id="logoutBtn" style="margin-top:10px;margin-left:8px">Log out</button>
+      </div>`:''}
     </div>
 
-    
-    <div class="card" style="border-color:var(--gold)">
+    <div class="card" style="border-color:var(--gold);margin-top:16px">
       <button type="button" class="btn ghost" data-action="settings-toggle" data-key="nudge" style="width:100%;text-align:left;padding:0;border:none;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <h3 style="margin:0;display:flex;align-items:center;gap:8px"><span style="font-size:1.35rem">⏰</span> Nudge</h3>
         <span style="color:var(--muted)">${settingsSectionOpen('nudge')?'▾':'▸'}</span>
@@ -10910,11 +10931,10 @@ function viewSettings(){
       </details>
     </div>
 
-    `:''}
-      </div>
-
     <div class="card">
-      <h3 style="margin:0 0 6px">Calendar Sync</h3>
+      <details>
+        <summary style="cursor:pointer;font-weight:800;font-size:1.05rem;list-style:none">Calendar Sync</summary>
+        <div style="margin-top:10px">
       <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Imports events into SnapBack as busy blocks. For live refresh, tap Sync. Sync also runs automatically when you open SnapBack if a calendar is connected.</p>
       <button type="button" class="btn sm" id="syncGcalBtn" style="margin-top:6px">Sync Google Calendar</button>
       <p style="font-size:.75rem;color:var(--muted);margin:8px 0">Or paste a published <b>.ics</b> link (Google “Secret address”, Outlook “Publish calendar”, Apple Calendar public URL):</p>
@@ -10924,8 +10944,14 @@ function viewSettings(){
 
     </div>
 
+            </div>
+      </details>
+    </div>
+
     <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
-      <h3 style="margin:0 0 6px">Account</h3>
+      <details>
+        <summary style="cursor:pointer;font-weight:800;font-size:1.05rem;list-style:none">Account</summary>
+        <div style="margin-top:10px">
       ${authStatusHtml()}
       <div style="margin-top:12px">
         <button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google</button>
@@ -10946,8 +10972,15 @@ function viewSettings(){
         <button class="btn sm" id="saveSyncBtn">Save &amp; start live sync</button>
         <button class="btn ghost sm" id="pullSyncBtn">Pull from cloud now</button>
       </div>
-      <div style="margin:16px 0;padding:12px;border:1px solid var(--line);border-radius:12px">
-        <div style="font-weight:800;margin-bottom:6px">Import tasks from other apps</div>
+        <button class="btn ghost sm" id="exportBackupBtn" style="margin-top:10px">Export file backup</button>
+        </div>
+      </details>
+    </div>
+
+    <div class="card">
+      <details>
+        <summary style="cursor:pointer;font-weight:800;font-size:1.05rem;list-style:none">Import tasks from other apps</summary>
+        <div style="margin-top:10px">
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">
           Works with <b>CSV export</b> from Todoist, TickTick, Microsoft To Do, Things (via CSV), OmniFocus (CSV), Google Tasks (via takeout/CSV tools), and similar.
           Export a CSV in that app, then upload it here.
@@ -10957,8 +10990,9 @@ function viewSettings(){
         <textarea id="taskCsvPaste" rows="4" placeholder="Content,Due Date,Priority,Description&#10;Finish lab report,2026-09-01,2,Chapter 4" style="width:100%;margin-top:6px"></textarea>
         <button class="btn sm" id="taskCsvImportBtn" style="margin-top:8px">Preview &amp; import</button>
         <div id="taskCsvStatus" style="font-size:.85rem;margin-top:8px;color:var(--muted)"></div>
-      </div>
-      <button class="btn ghost sm" id="exportBackupBtn">Export file backup</button>
+        </div>
+      </details>
+    </div>
         <label class="btn ghost sm" style="display:inline-block;cursor:pointer">
           Import file
           <input type="file" id="importBackupInput" accept="application/json,.json" style="display:none">
@@ -11866,7 +11900,9 @@ function wireView(){
       try{saveState();}catch(e){}
       persistRender();
     });
-    else if(action==='tasks-panel') el.addEventListener('click', ()=>{ tasksPanelSwitch(el.dataset.panel || 'open'); });
+    else if(action==='bd-pick') el.addEventListener('click', (ev)=>{ try{ev.preventDefault();ev.stopPropagation();}catch(e){} const k=el.getAttribute('data-key')||el.dataset.key; if(k) bdSelectTemplate(k); });
+    else if(action==='bd-back-pick') el.addEventListener('click', ()=>{ if(!state.bodyDouble) state.bodyDouble={}; state.bodyDouble.stage='pick'; state.bodyDouble.templateKey=null; persistRender(); });
+    else if(action==='tasks-panel') el.addEventListener('click', (ev)=>{ try{ev.preventDefault();ev.stopPropagation();}catch(e){} const pan=el.getAttribute('data-panel')||el.dataset.panel||'open'; tasksPanelSwitch(pan); });
     else if(action==='home-toggle') el.addEventListener('click', ()=>{
       homeSectionToggle(el.dataset.key||'');
     });
@@ -12798,14 +12834,35 @@ function wireView(){
     main.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>switchTimerMode(b.dataset.mode)));
     const fpPlay=document.getElementById('fpPlaySound');
     if(fpPlay) fpPlay.addEventListener('click', ()=>{
-      if(ambientNode){ stopSoundscape(); state.settings.ambientOn=false; }
-      else { state.settings.ambientOn=true; startSoundscape(); }
-      persistRender();
+      try{
+        if(!state.settings) state.settings={};
+        const ctx=ensureAudio();
+        if(ctx && ctx.state==='suspended') try{ ctx.resume(); }catch(e){}
+        if(ambientNode || state.settings.ambientOn){
+          try{ stopSoundscape(); }catch(e){}
+          try{ stopAmbientNode(); }catch(e){}
+          state.settings.ambientOn=false;
+          showAppMessage('Sound off','Soundscape stopped.');
+        } else {
+          state.settings.ambientSource='noise';
+          state.settings.ambientOn=true;
+          const sel=document.getElementById('fpNoiseColor');
+          if(sel && sel.value) state.settings.noiseColor=sel.value;
+          startAmbient();
+          if(!ambientNode) showAppMessage('Tap Play again','Browser may need a second tap to allow audio.');
+          else showAppMessage('Playing', String(state.settings.noiseColor||'noise'));
+        }
+        try{saveState();}catch(e){}
+        persistRender();
+      }catch(err){ console.error(err); showAppMessage('Sound error', String(err&&err.message||err)); }
     });
     const fpNoise=document.getElementById('fpNoiseColor');
     if(fpNoise) fpNoise.addEventListener('change', ()=>{
+      if(!state.settings) state.settings={};
       state.settings.noiseColor=fpNoise.value;
-      if(ambientNode){ stopAmbientNode(); startAmbient(); }
+      state.settings.ambientSource='noise';
+      try{ stopAmbientNode(); }catch(e){}
+      if(state.settings.ambientOn) startAmbient();
       debouncedSave();
     });
   }
