@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="258">
+<meta name="snapback-build" content="260">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -5312,7 +5312,14 @@ function authStatusHtml(){
   }
 }
 
-function persistRender(){ saveState(); render(); try{ renderTourOverlay(); }catch(e){}
+function persistRender(){
+  try{
+    if(!state._calAutoSyncScheduled){
+      state._calAutoSyncScheduled=true;
+      setTimeout(function(){ try{ autoCalendarSyncIfConfigured(); }catch(e){} }, 1000);
+    }
+  }catch(e){}
+ saveState(); render(); try{ renderTourOverlay(); }catch(e){}
   try{
     if(state.profile && !state.profile.audience){
       state.profile.audience = 'student';
@@ -5724,6 +5731,26 @@ function renderTourOverlay(){
   }catch(e){ console.warn('tour render', e); }
 }
 
+
+
+async function autoCalendarSyncIfConfigured(){
+  try{
+    if(state._calAutoSynced) return;
+    const s=state.settings||{};
+    const icsUrl=(s.icsUrl||s.calendarIcsUrl||'').trim();
+    if(icsUrl && icsUrl.indexOf('http')===0){
+      state._calAutoSynced=true;
+      if(typeof syncIcsCalendarUrl==='function'){
+        Promise.resolve(syncIcsCalendarUrl(icsUrl)).catch(function(){});
+      }
+      return;
+    }
+    if(typeof window.syncGoogleCalendar==='function' && s.calendarAutoSync!==false && s.googleCalendarConnected){
+      state._calAutoSynced=true;
+      try{ window.syncGoogleCalendar(true); }catch(e){}
+    }
+  }catch(e){}
+}
 
 function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
   try{ consumePendingNudge(); }catch(e){}
@@ -6575,12 +6602,23 @@ function wizardPickWhy(code){ /* legacy no-op kept for old buttons */ wizardPick
 function wizardGo(){ wizardGoRecommended(); }
 
 
+function settingsSectionOpen(key){
+  if(!state.settingsOpen) state.settingsOpen={};
+  return !!state.settingsOpen[key];
+}
+function settingsSectionToggle(key){
+  if(!state.settingsOpen) state.settingsOpen={};
+  state.settingsOpen[key]=!state.settingsOpen[key];
+  try{saveState();}catch(e){}
+  persistRender();
+}
 function tasksPanelOpen(key){
-  const cur = state.tasksPanel != null ? state.tasksPanel : 'open';
-  return cur === key;
+  // Default: nothing open — only headers visible until student taps
+  return state.tasksPanel === key;
 }
 function tasksPanelSwitch(key){
-  const cur = state.tasksPanel != null ? state.tasksPanel : 'open';
+  const cur = state.tasksPanel;
+  // Tap same header again → collapse all
   if(cur === key){
     state.tasksPanel = null;
     state.showAddTask = false;
@@ -6588,6 +6626,7 @@ function tasksPanelSwitch(key){
     persistRender();
     return;
   }
+  // Leaving Add task with draft
   if(cur === 'add'){
     const title = (document.getElementById('newTitle')?.value || '').trim();
     const notes = (document.getElementById('newNotes')?.value || '').trim();
@@ -6870,11 +6909,11 @@ function taskCard(t){
     <div style="display:flex;flex-wrap:wrap;gap:8px">
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
         <button type="button" class="btn sm" data-action="task-start" data-id="${t.id}">Start</button>
-        <button type="button" class="btn sm" data-action="task-complete" data-id="${t.id}">Completed</button>
-        <button type="button" class="btn ghost sm" data-action="start-task-edit" data-id="${t.id}">Edit</button>
+        <button type="button" class="btn sm" data-action="task-complete" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">Completed</button>
+        <button type="button" class="btn ghost sm" data-action="start-task-edit" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">Edit</button>
       </div>
-      <button type="button" class="btn ghost sm" data-action="quick-done" data-id="${t.id}">${t.done?'Undo done':'Done'}</button>
-      <button type="button" class="btn ghost sm" data-action="task-menu" data-id="${t.id}">More</button>
+      <button type="button" class="btn ghost sm" data-action="quick-done" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">${t.done?'Undo done':'Done'}</button>
+      <button type="button" class="btn ghost sm" data-action="task-menu" style="padding:6px 12px;min-height:32px;line-height:1.2" data-id="${t.id}">More</button>
     </div>
   </li>`;
 }
@@ -6911,9 +6950,10 @@ function tasksViewToolbar(){
 
 function viewTasks(){
   if(state.tasksPanel === 'done') state.filter = 'done';
-  else if(state.tasksPanel === 'open' || state.tasksPanel == null){
+  else if(state.tasksPanel === 'open'){
     if(state.filter === 'done') state.filter = 'all';
   }
+  // tasksPanel null → no list body shown (headers only)
   let list=state.tasks||[];
   const f=state.filter||'all';
   const q=(state.taskSearch||'').trim().toLowerCase();
@@ -10577,15 +10617,22 @@ function viewHelp(){
 }
 
 function viewStudyTools(){
+  if(!state.studyToolOpen) state.studyToolOpen = {};
   return `
-  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">Free, organized by what you're trying to do</div><h1>Study Tools</h1><p>External tools, opened in a new tab — grouped by task so you're not hunting for the right one.</p></div>
-  ${STUDY_TOOLS.map(cat=>`<div class="card">
-    <h3>${escapeHtml(cat.category)}</h3>
-    ${cat.tools.map(t=>`<div class="deadline-row">
-      <span style="flex:1"><b>${escapeHtml(t.name)}</b><div style="font-size:.78rem;color:var(--muted)">${escapeHtml(t.desc)}</div></span>
-      <a href="${t.url}" target="_blank" rel="noopener"><button class="btn ghost sm">Open &#8599;</button></a>
-    </div>`).join('')}
-  </div>`).join('')}
+  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">Free, organized by what you're trying to do</div><h1>Study Tools</h1><p>Tap a category to expand or collapse. Tools open in a new tab.</p></div>
+  ${STUDY_TOOLS.map((cat,ci)=>{
+    const open = !!state.studyToolOpen[ci];
+    return `<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
+    <button type="button" class="btn ghost" data-action="study-tool-toggle" data-idx="${ci}" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <span style="font-weight:800">${escapeHtml(cat.category)}</span>
+      <span style="color:var(--muted);flex-shrink:0">${open?'▾':'▸'}</span>
+    </button>
+    ${open?`<div style="padding:0 16px 14px">${cat.tools.map(tool=>`<div class="deadline-row">
+      <span style="flex:1"><b>${escapeHtml(tool.name)}</b><div style="font-size:.78rem;color:var(--muted)">${escapeHtml(tool.desc)}</div></span>
+      <a href="${tool.url}" target="_blank" rel="noopener"><button class="btn ghost sm">Open &#8599;</button></a>
+    </div>`).join('')}</div>`:''}
+  </div>`;
+  }).join('')}
   `;
 }
 
@@ -10765,7 +10812,11 @@ function viewSettings(){
       <button class="btn ghost sm" id="gotoHelpBtn" type="button">Help &amp; FAQ</button>
     </p>
     <div class="card">
-      <h3 style="margin:0 0 6px">Your profile</h3>
+      <button type="button" class="btn ghost" data-action="settings-toggle" data-key="profile" style="width:100%;text-align:left;padding:0;border:none;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <h3 style="margin:0">Your profile</h3>
+        <span style="color:var(--muted)">${settingsSectionOpen('profile')?'▾':'▸'}</span>
+      </button>
+      ${settingsSectionOpen('profile')?`<div>
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">${L('profileBlurb')}</p>
       <div class="field"><label>${L('audienceTitle')}</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
@@ -10778,27 +10829,45 @@ function viewSettings(){
         </div>
         <div style="font-size:.78rem;color:var(--muted);margin-top:6px">${L('audienceHint')}</div>
       </div>
+      <div class="field" style="margin-top:10px"><label>Your full name</label>
+        <input id="profileFullName" placeholder="e.g. Uma Sharma" value="${escapeHtml((state.profile&&state.profile.fullName)||'')}">
+      </div>
       <div class="field" style="margin-top:10px"><label>Display name (shown on Home)</label>
         <input id="profileName" placeholder="e.g. Uma" value="${escapeHtml((state.profile&&state.profile.name)||'')}">
       </div>
-      <p style="font-size:.78rem;color:var(--muted);margin:4px 0 0">This is <b>not</b> your Google account name. Clear “Student” and type your name, then tap <b>Save profile</b> below.</p>
+      <div class="field" style="margin-top:10px"><label>Email ID</label>
+        <input id="profileEmail" type="email" placeholder="you@email.com" value="${escapeHtml((state.profile&&state.profile.email)||'')}">
+      </div>
+      <div class="field" style="margin-top:10px"><label>Phone number</label>
+        <input id="profilePhone" type="tel" placeholder="Optional" value="${escapeHtml((state.profile&&state.profile.phone)||'')}">
+      </div>
       <div class="field" style="margin-top:10px"><label>Local login username (optional change)</label>
         <input id="localUsernameEdit" placeholder="Only if you use username login" value="${escapeHtml((()=>{ try{ const a=getLocalAuth(); return a&&a.username||''; }catch(e){ return ''; } })())}">
       </div>
-
-      ${(state.profile&&state.profile.email)?`<p style="font-size:.85rem;color:var(--muted);margin:6px 0 0">Google: <b>${escapeHtml(state.profile.email)}</b></p>`:''}
       <div class="row" style="margin-top:8px">
         <div class="field"><label>${L('grade')}</label><input id="profileGrade" placeholder="${L('gradePh')}" value="${escapeHtml((state.profile&&state.profile.grade)||'')}"></div>
-        <div class="field"><label>School / college</label><input id="profileSchool" placeholder="Optional" value="${escapeHtml((state.profile&&state.profile.school)||'')}"></div>
+        <div class="field"><label>School / college / workplace</label><input id="profileSchool" placeholder="School, college, or workplace" value="${escapeHtml((state.profile&&state.profile.school)||'')}"></div>
       </div>
       <div class="field" style="margin-top:8px"><label>Notes</label><input id="profileNotes" placeholder="Anything helpful" value="${escapeHtml((state.profile&&state.profile.notes)||'')}"></div>
-      <button class="btn sm" id="saveProfileBtn" style="margin-top:10px">Save profile / name</button>
+            <div style="margin:12px 0;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:12px">
+        <div style="font-weight:700;margin-bottom:6px">Share your contact information to receive updated versions / bug fixes?</div>
+        <p style="font-size:.78rem;color:var(--muted);margin:0 0 10px">(Your details shall not be forwarded beyond. It will not be used for marketing or any other purposes. It shall remain confidential and used strictly for the purposes of sharing updates only.)</p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <label style="display:inline-flex;align-items:center;gap:6px"><input type="radio" name="profileShareContact" id="profileShareYes" value="yes" ${(state.profile&&state.profile.shareContact==='yes')?'checked':''}> Yes</label>
+          <label style="display:inline-flex;align-items:center;gap:6px"><input type="radio" name="profileShareContact" id="profileShareNo" value="no" ${!(state.profile&&state.profile.shareContact==='yes')?'checked':''}> No</label>
+        </div>
+      </div>
+<button class="btn sm" id="saveProfileBtn" style="margin-top:10px">Save profile / name</button>
       <button class="btn ghost sm" id="logoutBtn" style="margin-top:10px;margin-left:8px">Log out</button>
     </div>
 
     
     <div class="card" style="border-color:var(--gold)">
-      <h3 style="margin:0 0 4px;display:flex;align-items:center;gap:8px"><span style="font-size:1.35rem">⏰</span> Nudge</h3>
+      <button type="button" class="btn ghost" data-action="settings-toggle" data-key="nudge" style="width:100%;text-align:left;padding:0;border:none;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <h3 style="margin:0;display:flex;align-items:center;gap:8px"><span style="font-size:1.35rem">⏰</span> Nudge</h3>
+        <span style="color:var(--muted)">${settingsSectionOpen('nudge')?'▾':'▸'}</span>
+      </button>
+      ${settingsSectionOpen('nudge')?`<div>
       <p style="font-size:.84rem;color:var(--muted);margin:0 0 14px">Daily alarm. Opens a math stop-screen so it is harder to dismiss by accident.</p>
       <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${(state.wakeAlarm&&state.wakeAlarm.time)||'07:00'}"></div>
       <div class="field" style="margin-top:8px"><label>One-time date (optional)</label>
@@ -10827,32 +10896,29 @@ function viewSettings(){
         <button class="btn ghost" id="testWakeBtn" type="button">Preview</button>
         ${(state.wakeAlarm&&state.wakeAlarm.enabled)?`<button class="btn ghost" id="turnOffWakeBtn" type="button">Turn off</button>`:''}
       </div>
-    </div>
+    </div>`:''}
+      </div>
 
     <div class="card">
-      <h3 style="margin:0 0 6px">Website link (for students)</h3>
-      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Shown on the sign-in screen and Help so people can open the web app without asking you. Use your GitHub Pages URL.</p>
+      <details>
+        <summary style="cursor:pointer;font-weight:800;font-size:1.05rem;list-style:none">Webapp Link</summary>
+        <p style="font-size:.8rem;color:var(--muted);margin:10px 0 8px">Use this link to access your SnapBack app account on your computer.</p>
       <div class="field"><label>SnapBack website URL</label>
         <input id="publicWebUrlInput" placeholder="https://username.github.io/repo/" value="${escapeHtml((state.settings&&state.settings.publicWebUrl)||DEFAULT_PUBLIC_WEB_URL||'')}">
       </div>
-      <button type="button" class="btn sm" id="savePublicWebUrlBtn" style="margin-top:8px">Save website link</button>
+      <button type="button" class="btn sm" id="savePublicWebUrlBtn" style="margin-top:8px">Save webapp link</button>
+      </details>
     </div>
 
-    <div class="card">
-      <h3 style="margin:0 0 6px">Your contact (for teacher/admin)</h3>
-      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Optional. Saved so the app owner can see who is using SnapBack (name / email / phone) in Firebase → app_users.</p>
-      <div class="field"><label>Name</label><input id="adminContactName" value="${escapeHtml((state.profile&&state.profile.name)||'')}" placeholder="Your name"></div>
-      <div class="field"><label>Email</label><input id="adminContactEmail" type="email" value="${escapeHtml((state.profile&&state.profile.email)||'')}" placeholder="you@email.com"></div>
-      <div class="field"><label>Phone</label><input id="adminContactPhone" type="tel" value="${escapeHtml((state.profile&&state.profile.phone)||'')}" placeholder="Optional phone"></div>
-      <button type="button" class="btn sm" id="saveAdminContactBtn" style="margin-top:8px">Save contact for admin</button>
-    </div>
+    `:''}
+      </div>
 
     <div class="card">
-      <h3 style="margin:0 0 6px">Calendar sync (read-only)</h3>
-      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Imports events into SnapBack as busy blocks. Does not write back to Google/Outlook. Live refresh when you tap Sync (auto every open is optional later).</p>
+      <h3 style="margin:0 0 6px">Calendar Sync</h3>
+      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Imports events into SnapBack as busy blocks. For live refresh, tap Sync. Sync also runs automatically when you open SnapBack if a calendar is connected.</p>
       <button type="button" class="btn sm" id="syncGcalBtn" style="margin-top:6px">Sync Google Calendar</button>
       <p style="font-size:.75rem;color:var(--muted);margin:8px 0">Or paste a published <b>.ics</b> link (Google “Secret address”, Outlook “Publish calendar”, Apple Calendar public URL):</p>
-      <input id="icsUrlInput" placeholder="https://…/calendar.ics" value="${escapeHtml((state.settings&&state.settings.icsUrl)||'')}" style="width:100%">
+      <input id="icsUrlInput" value="${escapeHtml((state.settings&&state.settings.icsUrl)||'')}" placeholder="https://…/calendar.ics" value="${escapeHtml((state.settings&&state.settings.icsUrl)||'')}" style="width:100%">
       <button type="button" class="btn ghost sm" id="syncIcsBtn" style="margin-top:8px">Sync ICS / Outlook feed</button>
       <p style="font-size:.72rem;color:var(--muted);margin:8px 0 0">Last sync: ${state.settings&&state.settings.calendarLastSync ? new Date(state.settings.calendarLastSync).toLocaleString() : 'never'} ${state.settings&&state.settings.calendarLastSource ? '('+state.settings.calendarLastSource+')' : ''}</p>
 
@@ -10952,14 +11018,15 @@ function viewSettings(){
     </div>
   </details>
 
-  <div class="setgroup"><h4>Install app</h4>
+  <div class="setgroup"><details><summary style="cursor:pointer;font-weight:800;list-style:none">Install app</summary><div style="margin-top:8px">
       ${(typeof isNativeApp==='function' && isNativeApp()) ? `<p style="color:var(--muted);font-size:.85rem">You already have the phone app installed.</p>`
         : isAppInstalled() ? `<p style="color:var(--muted);font-size:.85rem">Already installed on this device.</p>`
         : deferredInstallPrompt ? `<button class="btn" id="settingsInstallBtn">Install SnapBack</button>`
         : isIOSDevice ? `<p style="color:var(--muted);font-size:.85rem">Tap the Share icon in Safari, then "Add to Home Screen".</p>`
         : `<p style="color:var(--muted);font-size:.85rem">On a phone browser, use Install if offered. For full alarms, use the SnapBack APK.</p>`}
     </div>
-    <div class="setgroup"><h4>Delete data</h4>
+    </div></details></div>
+    <div class="setgroup"><details><summary style="cursor:pointer;font-weight:800;list-style:none">Delete data</summary><div style="margin-top:8px">
       <p style="color:var(--muted);font-size:.85rem;margin:0 0 12px">Clear everything, or only chosen items.</p>
       <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:360px">
         <div style="width:100%">${deleteControl('reset', null, 'Reset All')}</div>
@@ -10985,7 +11052,8 @@ function viewSettings(){
         </div>
       </div>
     </div>
-    <div class="setgroup"><h4>Share an Update</h4>
+    </div></details></div>
+    <div class="setgroup"><details><summary style="cursor:pointer;font-weight:800;list-style:none">Share an Update</summary><div style="margin-top:8px">
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Pick a range and what to include, then edit the preview if you want. Share buttons send <b>exactly</b> what is in the box.</p>
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <button type="button" class="btn ghost sm" id="shareRangeToday">Today</button>
@@ -11009,6 +11077,7 @@ function viewSettings(){
         <button type="button" class="btn" id="shareCopyBtn">Copy text</button>
       </div>
     </div>
+    </div></details></div>
     <div class="savedmsg" id="savedMsg"></div>
   </div>`;
   } catch(err){
@@ -11227,8 +11296,18 @@ function wireView(){
     const gcal=document.getElementById('syncGcalBtn');
     if(gcal) gcal.onclick=function(){ syncGoogleCalendarReadonly(); };
     const icsb=document.getElementById('syncIcsBtn');
+    const setAl=document.getElementById('setAlarmSound');
+    if(setAl && !setAl._wired){ setAl._wired=true; setAl.addEventListener('change', function(){
+      if(!state.settings) state.settings={}; state.settings.alarmSound=setAl.value;
+      if(!state.wakeAlarm) state.wakeAlarm={}; state.wakeAlarm.sound=setAl.value;
+      try{saveState();}catch(e){}
+      showAppMessage('Sound saved','Used for Nudge.');
+    }); }
     if(icsb) icsb.onclick=function(){
       const u=(document.getElementById('icsUrlInput')&&document.getElementById('icsUrlInput').value)||'';
+      if(!state.settings) state.settings={};
+      state.settings.icsUrl=String(u||'').trim();
+      try{saveState();}catch(e){}
       syncIcsCalendarUrl(u);
     };
 
@@ -11777,6 +11856,16 @@ function wireView(){
       persistRender();
     });
 
+    else if(action==='settings-toggle') el.addEventListener('click', ()=>{
+      settingsSectionToggle(el.dataset.key||'');
+    });
+    else if(action==='study-tool-toggle') el.addEventListener('click', ()=>{
+      if(!state.studyToolOpen) state.studyToolOpen={};
+      const i=String(el.dataset.idx);
+      state.studyToolOpen[i]=!state.studyToolOpen[i];
+      try{saveState();}catch(e){}
+      persistRender();
+    });
     else if(action==='tasks-panel') el.addEventListener('click', ()=>{ tasksPanelSwitch(el.dataset.panel || 'open'); });
     else if(action==='home-toggle') el.addEventListener('click', ()=>{
       homeSectionToggle(el.dataset.key||'');
@@ -12161,7 +12250,8 @@ function wireView(){
       }
       state.filter=nf;
       state.listMode='all';
-      state.tasksPanel = (nf==='done') ? 'done' : 'open';
+      if(nf==='done') state.tasksPanel = 'done';
+      else if(state.tasksPanel === 'done') state.tasksPanel = 'open';
       state.showAddTask=false;
       state.taskSearch='';
       try{ const si=document.getElementById('taskSearchInput'); if(si) si.value=''; }catch(e){}
@@ -13260,10 +13350,15 @@ function wireView(){
     const saveProfile=document.getElementById('saveProfileBtn');
     if(saveProfile) saveProfile.addEventListener('click', ()=>{
       if(!state.profile) state.profile={};
+      state.profile.fullName=(document.getElementById('profileFullName')?.value||'').trim();
       state.profile.name=(document.getElementById('profileName')?.value||'').trim();
+      const em=(document.getElementById('profileEmail')?.value||'').trim();
+      if(em) state.profile.email=em;
+      state.profile.phone=(document.getElementById('profilePhone')?.value||'').trim();
       state.profile.grade=(document.getElementById('profileGrade')?.value||'').trim();
       state.profile.school=(document.getElementById('profileSchool')?.value||'').trim();
       state.profile.notes=(document.getElementById('profileNotes')?.value||'').trim();
+      state.profile.shareContact=document.getElementById('profileShareYes')?.checked?'yes':'no';
       try{
         const nu=(document.getElementById('localUsernameEdit')?.value||'').trim();
         const la=getLocalAuth();
