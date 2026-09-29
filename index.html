@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="269">
+<meta name="snapback-build" content="270">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -6827,12 +6827,12 @@ function tasksPanelOpen(key){
 }
 function tasksPanelSwitch(key){
   key = String(key || '');
-  const cur = state.tasksPanel == null ? '' : String(state.tasksPanel);
-  // Tap same header again → collapse
+  const cur = state.tasksPanel == null || state.tasksPanel === undefined ? '' : String(state.tasksPanel);
+  // Tap same header again → collapse all (headers only)
   if(cur === key && key){
     state.tasksPanel = '';
     state.showAddTask = false;
-    try{saveState();}catch(e){}
+    try{ saveState(); }catch(e){}
     try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
     return;
   }
@@ -7569,6 +7569,7 @@ function viewTasks(){
       <input type="search" id="taskSearchInput" placeholder="Search…" value="${escapeHtml(state.taskSearch||'')}" style="flex:1;min-width:0">
       <button type="button" class="btn sm" id="taskSearchGoBtn">Go</button>
     </div>
+    ${tasksPanelOpen('open')?`
     <div class="filters" style="margin:0">
       <button data-filter="all" class="${f==='all'?'active':''}">All open</button>
       <button data-filter="today" class="${f==='today'?'active':''}">Today</button>
@@ -7589,16 +7590,16 @@ function viewTasks(){
       <p style="font-size:.75rem;color:var(--muted);margin:0 0 8px">Tap a mode to change how the list below is shown.</p>
       ${modeBanner||tasksViewToolbar()}
     </div>
-  </div>`:`
-  <div class="card" style="padding:10px 12px;margin-bottom:10px">
-    <div class="row" style="gap:8px">
+    `:`
+    <div class="row" style="gap:8px;flex-wrap:wrap">
       <div class="field" style="margin:0"><label>From</label><input type="date" id="completedFrom" value="${state.completedFrom||''}"></div>
       <div class="field" style="margin:0"><label>To</label><input type="date" id="completedTo" value="${state.completedTo||''}"></div>
       <button type="button" class="btn ghost sm" id="clearCompletedRange" style="align-self:flex-end">Clear</button>
     </div>
-  </div>`}
-
+    `}
+  </div>
   <ul class="tasklist">${modeBody||''}${items}</ul>
+  `:''}
   `;
 }
 
@@ -12507,6 +12508,7 @@ function wireView(){
       state.listMode='all';
       if(nf==='done') state.tasksPanel = 'done';
       else if(state.tasksPanel === 'done') state.tasksPanel = 'open';
+      // If panels were collapsed (''), keep them collapsed — do not force open
       state.showAddTask=false;
       state.taskSearch='';
       try{ const si=document.getElementById('taskSearchInput'); if(si) si.value=''; }catch(e){}
