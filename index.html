@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="270">
+<meta name="snapback-build" content="271">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -544,8 +544,7 @@ function autoLocalSnapshot(json){
     let list = [];
     try{ list = JSON.parse(localStorage.getItem(AUTO_SNAP_KEY)||'[]')||[]; }catch(e){ list=[]; }
     if(!Array.isArray(list)) list=[];
-    list.unshift({ at: new Date().toISOString(), size: (json||'').length, data: json });
-    list = list.slice(0, 5);
+    list = [{ at: new Date().toISOString(), size: (json||'').length, data: json }];
     localStorage.setItem(AUTO_SNAP_KEY, JSON.stringify(list));
     localStorage.setItem(AUTO_SNAP_META, JSON.stringify({ lastAt: now, count: list.length }));
   }catch(e){
@@ -565,14 +564,15 @@ function restoreAutoSnapshot(index){
   try{
     const incoming = JSON.parse(item.data);
     if(!incoming || typeof incoming!=='object'){ showAppMessage('Invalid snapshot', 'Could not read that automatic backup.'); return; }
-    showAppMessage('Restore automatic backup?', 'From '+ (item.at||'unknown time') +'. This replaces data on this device.', {
+    var whenLabel = item.at ? new Date(item.at).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}) : 'the recent safety copy';
+    showAppMessage('Restore safety copy?', 'Put the app back to how it was at '+whenLabel+'. Your current data on this device will be replaced.', {
       ok:'Restore', cancel:'Cancel',
       onOk: function(){
         try{
           Object.keys(incoming).forEach(function(k){ state[k]=incoming[k]; });
           saveState();
           persistRender();
-          showAppMessage('Restored', 'Automatic backup applied.');
+          showAppMessage('Restored', 'Your data was restored from the automatic safety copy.');
         }catch(e){ showAppMessage('Restore failed', String(e&&e.message||e)); }
       }
     });
@@ -11183,28 +11183,30 @@ function viewSettings(){
     </details>
 
     <details class="setgroup">
-      <summary>Backup &amp; restore (automatic + optional file)</summary>
+      <summary>Backup &amp; restore</summary>
       <div class="setgroup-body">
-        <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px;line-height:1.45">
           <b>Automatic (no action needed):</b><br>
           • Your data is saved on this device as you work.<br>
-          • SnapBack also keeps <b>automatic local safety snapshots</b> in the background.<br>
-          • If you <b>sign in with Google</b>, changes are also backed up to <b>your</b> private cloud copy and sync across devices.
+          • SnapBack keeps one <b>recent safety copy</b> in the background (updated automatically).<br>
+          • If you <b>sign in with Google</b>, your data is also stored in <b>your</b> private cloud and can open on other devices.
         </p>
-        <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">
-          <b>Still recommended:</b> Sign in with Google so a reinstall or new phone does not depend only on this browser.
-          Manual file export below is an extra safety net (e.g. before clearing browser data).
+        <p style="font-size:.85rem;margin:0 0 14px;line-height:1.45">
+          <b>Strongly recommended:</b> Sign in with Google so a reinstall or new phone does not depend only on this browser.
         </p>
-        <p style="font-size:.88rem;font-weight:700;margin:0 0 6px">Automatic snapshots on this device</p>
-        <div id="autoSnapList" style="font-size:.82rem;color:var(--muted);margin-bottom:12px"></div>
-        <p style="font-size:.88rem;font-weight:700;margin:0 0 6px">Optional: export a file copy</p>
+        <p style="font-size:.88rem;font-weight:700;margin:0 0 6px">Last automatic safety copy</p>
+        <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px;line-height:1.4">
+          If something goes wrong on this device, you can put the app back to this recent automatic copy. This replaces what is currently on this device.
+        </p>
+        <div id="autoSnapList" style="font-size:.85rem;margin-bottom:14px"></div>
+        <p style="font-size:.88rem;font-weight:700;margin:0 0 6px">Optional: save a file copy</p>
         <p style="font-size:.82rem;color:var(--muted);margin:0 0 8px">
-          Downloads <b>snapback-backup-YYYY-MM-DD.json</b> (usually Downloads). Keep it in Drive/OneDrive or email it to yourself.
+          Downloads a backup file (usually to Downloads). Keep it in Drive, OneDrive, or email it to yourself.
         </p>
-        <button type="button" class="btn" id="exportBackupBtn" style="width:100%;margin-bottom:14px">Export SnapBack backup (JSON)</button>
-        <p style="font-size:.88rem;font-weight:700;margin:0 0 6px">Restore from a file you exported</p>
+        <button type="button" class="btn" id="exportBackupBtn" style="width:100%;margin-bottom:14px">Export SnapBack backup</button>
+        <p style="font-size:.88rem;font-weight:700;margin:0 0 6px">Restore from a file</p>
         <p style="font-size:.82rem;color:var(--muted);margin:0 0 8px">
-          Only for a SnapBack JSON backup. Not for Todoist CSV (use Import tasks from other apps).
+          Use only a backup file that was exported from SnapBack.
         </p>
         <label class="btn ghost" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;width:100%;justify-content:center">
           Choose backup file &amp; restore
@@ -13582,17 +13584,15 @@ function wireView(){
     if(snapBox){
       const snaps=typeof getAutoSnapshots==='function'?getAutoSnapshots():[];
       if(!snaps.length){
-        snapBox.innerHTML='No snapshots yet — they appear automatically after you use the app for a few minutes.';
+        snapBox.innerHTML='<span style="color:var(--muted)">No safety copy yet — it appears automatically after you use the app for a short while.</span>';
       } else {
-        snapBox.innerHTML=snaps.map(function(s,i){
-          const when=s.at?new Date(s.at).toLocaleString():('Snapshot '+(i+1));
-          return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:6px 0;padding:8px;border:1px solid var(--line);border-radius:10px">'
-            +'<span>'+when+'</span>'
-            +'<button type="button" class="btn ghost sm" data-auto-snap="'+i+'">Restore</button></div>';
-        }).join('');
-        snapBox.querySelectorAll('[data-auto-snap]').forEach(function(btn){
-          btn.addEventListener('click', function(){ restoreAutoSnapshot(Number(btn.getAttribute('data-auto-snap'))); });
-        });
+        const s=snaps[0];
+        const when=s.at?new Date(s.at).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'Recent';
+        snapBox.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--card)">'
+          +'<span>Saved <b>'+when+'</b></span>'
+          +'<button type="button" class="btn sm" data-auto-snap="0">Restore this copy</button></div>';
+        const btn=snapBox.querySelector('[data-auto-snap]');
+        if(btn) btn.addEventListener('click', function(){ restoreAutoSnapshot(0); });
       }
     }
     const imp=document.getElementById('importBackupInput'); if(imp) imp.addEventListener('change', e=>{ if(e.target.files[0]) importBackupFile(e.target.files[0]); });
