@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="265">
+<meta name="snapback-build" content="269">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -410,18 +410,18 @@ details.setgroup .setgroup-body{margin-top:12px}
 .tour-overlay{position:fixed;inset:0;z-index:2147483000;pointer-events:none}
 .tour-dim{position:absolute;inset:0;background:rgba(0,0,0,.45);pointer-events:auto}
 .tour-card{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);width:min(440px,calc(100% - 20px));
-  background:#1a221e;color:#f2f0ea;border:2px solid #3d9b7a;
-  border-radius:16px;padding:18px 18px 16px;box-shadow:0 16px 48px rgba(0,0,0,.55);pointer-events:auto;z-index:2147483001}
-.tour-card h3{margin:0 0 8px;font-size:1.15rem;color:#fff}
-.tour-card p{margin:0 0 14px;font-size:.92rem;line-height:1.5;color:#c5cdc8}
-.tour-card p b{color:#fff}
-.tour-progress{font-size:.78rem;color:#8a968f;margin-bottom:10px}
+  background:#0f1613;color:#ffffff;border:2px solid #4caf8a;
+  border-radius:16px;padding:18px 18px 16px;box-shadow:0 16px 48px rgba(0,0,0,.6);pointer-events:auto;z-index:2147483001}
+.tour-card h3{margin:0 0 8px;font-size:1.2rem;color:#ffffff;font-weight:800}
+.tour-card p{margin:0 0 14px;font-size:.95rem;line-height:1.55;color:#f0f4f2}
+.tour-card p b{color:#ffffff}
+.tour-progress{font-size:.8rem;color:#d0ddd6;margin-bottom:10px;font-weight:600}
 .tour-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .tour-actions .spacer{flex:1}
 .tour-actions .btn,
 .tour-actions button{
   pointer-events:auto;cursor:pointer;
-  border-radius:10px;padding:8px 14px;font-size:.9rem;font-weight:600;
+  border-radius:10px;padding:10px 16px;font-size:.92rem;font-weight:700;
   border:1px solid transparent;
 }
 .tour-actions #tourNext{
@@ -506,16 +506,77 @@ async function loadState(){
   return null;
 }
 async function saveState(){
-  const json = JSON.stringify(state);
-  let ok=false;
-  if(hasWidgetStorage){
-    try{ const r = await window.storage.set(STORAGE_KEY, json, false); if(r) ok=true; }
-    catch(e){ /* expected occasionally — falls back to localStorage below, no need to alarm the console */ }
+  try{
+    const json = JSON.stringify(state);
+    let ok=false;
+    if(typeof hasWidgetStorage!=='undefined' && hasWidgetStorage && window.storage){
+      try{
+        const r = window.storage.set(STORAGE_KEY, json, false);
+        if(r && typeof r.then==='function'){
+          r.then(function(v){ if(v) ok=true; }).catch(function(){});
+        } else if(r) ok=true;
+      }catch(e){}
+    }
+    try{
+      localStorage.setItem(STORAGE_KEY, json);
+      ok=true;
+    }catch(e){
+      console.warn('localStorage save failed', e);
+    }
+    // Automatic local safety snapshots (no user action required)
+    try{ autoLocalSnapshot(json); }catch(e){}
+    // Automatic cloud backup when signed in / sync code active
+    try{ if(typeof pushCloudSync==='function') pushCloudSync(); }catch(e){}
+  }catch(e){
+    console.warn('saveState', e);
   }
-  if(!ok){
-    try{ localStorage.setItem(STORAGE_KEY, json); }
-    catch(e){ console.warn('Could not save — both storage methods failed, your latest change may not persist', e); }
+}
+
+const AUTO_SNAP_KEY = 'snapback_auto_snapshots_v1';
+const AUTO_SNAP_META = 'snapback_auto_snap_meta_v1';
+function autoLocalSnapshot(json){
+  try{
+    const now = Date.now();
+    let meta = {};
+    try{ meta = JSON.parse(localStorage.getItem(AUTO_SNAP_META)||'{}')||{}; }catch(e){ meta={}; }
+    // At most one snapshot every 3 minutes, and keep last 5
+    if(meta.lastAt && (now - meta.lastAt) < 3*60*1000) return;
+    let list = [];
+    try{ list = JSON.parse(localStorage.getItem(AUTO_SNAP_KEY)||'[]')||[]; }catch(e){ list=[]; }
+    if(!Array.isArray(list)) list=[];
+    list.unshift({ at: new Date().toISOString(), size: (json||'').length, data: json });
+    list = list.slice(0, 5);
+    localStorage.setItem(AUTO_SNAP_KEY, JSON.stringify(list));
+    localStorage.setItem(AUTO_SNAP_META, JSON.stringify({ lastAt: now, count: list.length }));
+  }catch(e){
+    // Quota or private mode — ignore; primary localStorage still holds live state
   }
+}
+function getAutoSnapshots(){
+  try{
+    const list = JSON.parse(localStorage.getItem(AUTO_SNAP_KEY)||'[]')||[];
+    return Array.isArray(list) ? list : [];
+  }catch(e){ return []; }
+}
+function restoreAutoSnapshot(index){
+  const list = getAutoSnapshots();
+  const item = list[index];
+  if(!item || !item.data){ showAppMessage('No snapshot', 'No automatic backup found for that slot.'); return; }
+  try{
+    const incoming = JSON.parse(item.data);
+    if(!incoming || typeof incoming!=='object'){ showAppMessage('Invalid snapshot', 'Could not read that automatic backup.'); return; }
+    showAppMessage('Restore automatic backup?', 'From '+ (item.at||'unknown time') +'. This replaces data on this device.', {
+      ok:'Restore', cancel:'Cancel',
+      onOk: function(){
+        try{
+          Object.keys(incoming).forEach(function(k){ state[k]=incoming[k]; });
+          saveState();
+          persistRender();
+          showAppMessage('Restored', 'Automatic backup applied.');
+        }catch(e){ showAppMessage('Restore failed', String(e&&e.message||e)); }
+      }
+    });
+  }catch(e){ showAppMessage('Restore failed', String(e&&e.message||e)); }
 }
 let saveDebounceTimer=null;
 function debouncedSave(){
@@ -5017,7 +5078,7 @@ function cloudDocRef(){
   return userDocRef() || legacySyncDocRef();
 }
 function syncPayloadFromState(){
-  const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm'];
+  const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm','projects','bodyDouble','whenThen','techniqueTaskId','filter','listMode','audience','playlist','player','semester'];
   const payload = {};
   keys.forEach(k=>{ if(state[k]!==undefined) payload[k]=state[k]; });
   payload.updatedAt = new Date().toISOString();
@@ -5446,7 +5507,7 @@ function authStatusHtml(){
     }
     return '<div style="padding:12px;border-radius:12px;border:1px solid var(--line);margin-bottom:12px">'
       + '<div style="font-weight:700;margin-bottom:6px">Not signed in with Google</div>'
-      + '<p style="font-size:.85rem;color:var(--muted);margin:0">Use the button below to sign in with Google.</p>'
+      + '<p style="font-size:.85rem;color:var(--muted);margin:0;line-height:1.45">Sign in with Google for automatic backup on Android, iPhone, and computer. Apple ID / Outlook are not available yet.</p>'
       + '</div>';
   } catch(e){
     return '<div class="card"><p>Account section unavailable.</p></div>';
@@ -5604,8 +5665,15 @@ function viewLogin(){
       <p style="color:var(--muted);margin:0">Sign in</p>
     </div>
     <div class="card">
-      <button type="button" class="btn" id="loginGoogleBtn" style="width:100%;margin-bottom:14px">Continue with Google (Gmail)</button>
-      <div style="text-align:center;font-size:.8rem;color:var(--muted);margin:8px 0">or username</div>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px;line-height:1.45">
+        <b>Recommended:</b> Continue with <b>Google</b> so your data is backed up automatically and can open on phone and computer.
+        Works on <b>Android and iPhone</b> (and laptop) if you have a Google account — including many people who mainly use an iPhone.
+      </p>
+      <p style="font-size:.8rem;color:var(--muted);margin:0 0 12px;line-height:1.4">
+        Apple ID and Outlook sign-in are not available in this version yet. If you only have Apple or Microsoft email, you can still use a <b>username + password</b> below (saved on this device), or create a free Google account for cloud backup.
+      </p>
+      <button type="button" class="btn" id="loginGoogleBtn" style="width:100%;margin-bottom:14px">Continue with Google (recommended)</button>
+      <div style="text-align:center;font-size:.8rem;color:var(--muted);margin:10px 0 8px">or use a username on this device only</div>
       <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="Username" value="${hasLocal?escapeHtml(la.username):''}"></div>
       <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="Password"></div>
       <div class="field" id="loginPinField"><label>Recovery PIN (required for new accounts)</label><input id="loginRecoveryPin" type="password" inputmode="numeric" placeholder="4+ digits — needed if you forget password"></div>
@@ -5722,17 +5790,16 @@ function maybeOfferTour(){
 
 
 const TOUR_STEPS = [
-  { title: 'Welcome to SnapBack', body: 'A short guide to the main areas. Use Next and Back. Tap Skip anytime. On phone, open Settings → Take a tour.', view: 'today' },
-  { title: 'Today (Home)', body: 'Tap section titles (Must-Do, Deadlines, Commitments, Spark, Sneak peek, Grove) to expand or collapse so Home stays simple.', view: 'today' },
-  { title: 'Non-negotiable', body: 'Pick one thing that must happen today. You can set a reminder time when you create it.', view: 'today' },
-  { title: 'Tasks', body: 'Open, Completed, and Add task are collapsible panels. Only one stays open at a time. Leaving Add task with unsaved text asks before discarding.', view: 'tasks' },
-  { title: 'Techniques', body: 'Bite Size, Focus Pod, Focus Plate, Eisenhower, and more — each has its own flow and can link to your tasks.', view: 'techniques' },
-  { title: 'Challenges', body: 'When stuck (cannot start, too much, switching tasks), Challenges suggest a technique and walk you through it.', view: 'challenges' },
-  { title: 'Plan & Projects', body: 'Projects use five phases. Add teammates and deadlines. Download a PDF or share on WhatsApp or email.', view: 'projects' },
-  { title: 'Calendar', body: 'Classes and commitments. Share free/busy or details with a link.', view: 'calendar' },
-  { title: 'Journal', body: 'Capture thoughts. Download a PDF of a journal bucket when you need a record.', view: 'journal' },
-  { title: 'Settings & Nudge', body: 'Profile, student vs not-a-student labels, Google sign-in, student web link, and Nudge alarm on phone.', view: 'settings' },
-  { title: 'You are set', body: 'Explore at your pace. Re-open this tour anytime from Settings → Take a tour.', view: 'today' }
+  { title: 'Welcome to SnapBack', body: 'This quick tour shows the main places. Use <b>Next</b> and <b>Back</b>. Tap <b>Skip</b> anytime. You can open the tour again from Settings → Take a tour.', view: 'today' },
+  { title: 'Home (Today)', body: 'Your calm daily screen. <b>Tap a section title</b> to open it; tap again to hide it. Must-do, deadlines, and today’s commitments stay out of the way until you need them.', view: 'today' },
+  { title: 'Tasks', body: 'Use <b>Open</b>, <b>Completed</b>, and <b>Add task</b>. Tap a header to show or hide that panel. Add a task with a title and a date (today or later).', view: 'tasks' },
+  { title: 'Challenges', body: 'When you feel stuck, start from how you feel — for example “I cannot get started”. SnapBack suggests tools that match that situation.', view: 'challenges' },
+  { title: 'Techniques', body: 'Tools like Bite Size, Focus Pod, Focus Plate, and Body Doubling. Usually you pick or create a task, then run the method on its own screen.', view: 'techniques' },
+  { title: 'Focus Pod', body: 'A timer for one focus block. On that screen, choose a soundscape type, set volume, then <b>Play sound</b>. Session-end beeps are under Settings → Sounds & notifications (timers).', view: 'timer' },
+  { title: 'Body Doubling', body: 'Choose one style — Focus Sprint, Guided Cave, or Group Flow — then a task and a goal. The timer walks you through the phases.', view: 'bodydouble' },
+  { title: 'Projects & calendar', body: 'Projects break big work into phases. Calendar holds classes and commitments. You can share busy/free times with a link when needed.', view: 'projects' },
+  { title: 'Settings & Nudge', body: 'Your profile, Google sign-in, and the <b>Nudge</b> alarm (phone). Nudge is the daily alarm with a math stop-screen. Timer sounds are separate under Sounds & notifications (timers).', view: 'settings' },
+  { title: 'You are set', body: 'Explore at your own pace. Re-open this tour anytime from <b>Settings → Take a tour</b>.', view: 'today' }
 ];
 
 function startTour(fromStep){
@@ -7564,7 +7631,7 @@ function exportBackup(){
     a.click();
     a.remove();
     setTimeout(()=>URL.revokeObjectURL(a.href), 2500);
-    showAppMessage('Backup downloaded', 'Saved snapback-backup-'+todayStr()+'.json. Use Import backup on another device to restore.');
+    showAppMessage('Backup saved', 'File: snapback-backup-'+todayStr()+'.json — usually in your Downloads folder. Keep it in Drive/OneDrive or email it to yourself. To restore later: Settings → Backup & restore → Choose backup file & restore.');
   }catch(e){
     showAppMessage('Backup failed', String(e && e.message || e));
   }
@@ -11072,8 +11139,12 @@ function viewSettings(){
       <div class="setgroup-body">
       ${authStatusHtml()}
       <div style="margin-top:12px">
-        <button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google</button>
-        <p style="font-size:.78rem;color:var(--muted);margin:8px 0 0">Use the same Gmail on laptop and phone so your data stays private to you.</p>
+        <button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google (recommended)</button>
+        <p style="font-size:.8rem;color:var(--muted);margin:8px 0 0;line-height:1.45">
+          Best for automatic backup and the same account on laptop and phone (Android or iPhone browser/app).
+          Use any Google account (Gmail or Google account linked to another email).
+          Apple ID and Outlook login are not in this version yet — username login stays on this device only.
+        </p>
       </div>
       <details style="margin-top:12px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Advanced: Firebase config</summary><div class="field"><label>Firebase config</label>
         <textarea id="fbConfigInput" rows="5" placeholder='{ "apiKey": "...", "projectId": "..." }' style="width:100%;font-size:.75rem">${escapeHtml(getFirebaseConfig()?JSON.stringify(getFirebaseConfig(),null,2):'')}</textarea>
@@ -11090,27 +11161,52 @@ function viewSettings(){
         <button class="btn sm" id="saveSyncBtn">Save &amp; start live sync</button>
         <button class="btn ghost sm" id="pullSyncBtn">Pull from cloud now</button>
       </div>
-        <button class="btn ghost sm" id="exportBackupBtn" style="margin-top:10px">Export file backup</button>
       </div>
     </details>
 
     <details class="setgroup">
-      <summary>Import tasks from other apps</summary>
+      <summary>Import tasks (from other apps)</summary>
       <div class="setgroup-body">
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">
-          Bring tasks in from Todoist, TickTick, Microsoft To Do, and similar apps using a <b>CSV</b> export.
+          <b>What this does:</b> Adds tasks from a <b>CSV</b> file exported from Todoist, TickTick, Microsoft To Do, and similar apps.
+          This does <b>not</b> restore a full SnapBack backup.
         </p>
         <div class="field"><label>Choose CSV file</label>
           <input type="file" id="taskCsvInput" accept=".csv,text/csv,text/plain" style="font-size:.85rem;width:100%">
         </div>
         <p style="font-size:.8rem;color:var(--muted);margin:10px 0 4px">Or paste CSV text (include the header row):</p>
         <textarea id="taskCsvPaste" rows="4" placeholder="Content,Due Date,Priority,Description&#10;Finish lab report,2026-09-01,2,Chapter 4" style="width:100%"></textarea>
-        <button type="button" class="btn" id="taskCsvImportBtn" style="margin-top:12px;width:100%">Preview &amp; import</button>
+        <button type="button" class="btn" id="taskCsvImportBtn" style="margin-top:12px;width:100%">Preview &amp; import CSV tasks</button>
         <div id="taskCsvStatus" style="font-size:.85rem;margin-top:8px;color:var(--muted)"></div>
-        <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-        <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Restore a SnapBack backup file (JSON) exported earlier:</p>
-        <label class="btn ghost sm" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
-          Import backup file
+      </div>
+    </details>
+
+    <details class="setgroup">
+      <summary>Backup &amp; restore (automatic + optional file)</summary>
+      <div class="setgroup-body">
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">
+          <b>Automatic (no action needed):</b><br>
+          • Your data is saved on this device as you work.<br>
+          • SnapBack also keeps <b>automatic local safety snapshots</b> in the background.<br>
+          • If you <b>sign in with Google</b>, changes are also backed up to <b>your</b> private cloud copy and sync across devices.
+        </p>
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">
+          <b>Still recommended:</b> Sign in with Google so a reinstall or new phone does not depend only on this browser.
+          Manual file export below is an extra safety net (e.g. before clearing browser data).
+        </p>
+        <p style="font-size:.88rem;font-weight:700;margin:0 0 6px">Automatic snapshots on this device</p>
+        <div id="autoSnapList" style="font-size:.82rem;color:var(--muted);margin-bottom:12px"></div>
+        <p style="font-size:.88rem;font-weight:700;margin:0 0 6px">Optional: export a file copy</p>
+        <p style="font-size:.82rem;color:var(--muted);margin:0 0 8px">
+          Downloads <b>snapback-backup-YYYY-MM-DD.json</b> (usually Downloads). Keep it in Drive/OneDrive or email it to yourself.
+        </p>
+        <button type="button" class="btn" id="exportBackupBtn" style="width:100%;margin-bottom:14px">Export SnapBack backup (JSON)</button>
+        <p style="font-size:.88rem;font-weight:700;margin:0 0 6px">Restore from a file you exported</p>
+        <p style="font-size:.82rem;color:var(--muted);margin:0 0 8px">
+          Only for a SnapBack JSON backup. Not for Todoist CSV (use Import tasks from other apps).
+        </p>
+        <label class="btn ghost" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;width:100%;justify-content:center">
+          Choose backup file &amp; restore
           <input type="file" id="importBackupInput" accept="application/json,.json" style="display:none">
         </label>
         <p id="syncStatus" style="font-size:.8rem;color:var(--muted);margin:8px 0 0"></p>
@@ -11140,9 +11236,15 @@ function viewSettings(){
     </div>
   </details>
 
-  <details class="setgroup"><summary>Sounds &amp; notifications</summary>
+  <details class="setgroup"><summary>Sounds &amp; notifications (timers)</summary>
     <div class="setgroup-body">
-      <div class="field"><label>Sound</label><select id="setAlarmSound">
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">
+        <b>When this is used:</b> short sound when a <b>timer or session ends</b>
+        (Focus Pod work/break, Body Doubling phases, and similar in-app timers).
+        <br><b>Not</b> the daily Nudge alarm — choose that sound under <b>Nudge</b> above.
+        Focus Pod background noise (brown/pink/rain…) is set on the Focus Pod screen.
+      </p>
+      <div class="field"><label>Timer / session end sound</label><select id="setAlarmSound">
           <option value="chime" ${s.alarmSound==='chime'?'selected':''}>Chime</option>
           <option value="bell" ${s.alarmSound==='bell'?'selected':''}>Bell</option>
           <option value="beep" ${s.alarmSound==='beep'?'selected':''}>Beep</option>
@@ -13474,6 +13576,23 @@ function wireView(){
     });
 
     const ex=document.getElementById('exportBackupBtn'); if(ex) ex.addEventListener('click', exportBackup);
+    const snapBox=document.getElementById('autoSnapList');
+    if(snapBox){
+      const snaps=typeof getAutoSnapshots==='function'?getAutoSnapshots():[];
+      if(!snaps.length){
+        snapBox.innerHTML='No snapshots yet — they appear automatically after you use the app for a few minutes.';
+      } else {
+        snapBox.innerHTML=snaps.map(function(s,i){
+          const when=s.at?new Date(s.at).toLocaleString():('Snapshot '+(i+1));
+          return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin:6px 0;padding:8px;border:1px solid var(--line);border-radius:10px">'
+            +'<span>'+when+'</span>'
+            +'<button type="button" class="btn ghost sm" data-auto-snap="'+i+'">Restore</button></div>';
+        }).join('');
+        snapBox.querySelectorAll('[data-auto-snap]').forEach(function(btn){
+          btn.addEventListener('click', function(){ restoreAutoSnapshot(Number(btn.getAttribute('data-auto-snap'))); });
+        });
+      }
+    }
     const imp=document.getElementById('importBackupInput'); if(imp) imp.addEventListener('change', e=>{ if(e.target.files[0]) importBackupFile(e.target.files[0]); });
     
     const gIn=document.getElementById('googleSignInBtn');
