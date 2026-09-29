@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="264">
+<meta name="snapback-build" content="265">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -282,55 +282,50 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 /* Settings */
 .setgroup{margin-bottom:18px}
 
-/* Settings / collapsible consistency */
-details.setgroup, details.settings-block {
+/* Settings — one uniform collapsible style */
+details.setgroup {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: 14px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
+  padding: 0;
+  margin-bottom: 10px;
+  overflow: hidden;
 }
-details.setgroup:nth-of-type(even), .settings-alt {
-  background: #F3F7F5;
-}
-details.setgroup > summary, details.settings-block > summary {
+details.setgroup > summary {
   list-style: none;
   cursor: pointer;
-  font-weight: 800;
-  font-size: 1.02rem;
+  font-weight: 700;
+  font-size: 0.98rem;
   color: var(--ink);
+  text-align: left;
+  padding: 14px 16px;
+  margin: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  background: var(--card);
+  border: none;
 }
-details.setgroup > summary::-webkit-details-marker,
-details.settings-block > summary::-webkit-details-marker { display: none; }
-details.setgroup > summary::after,
-details.settings-block > summary::after {
+details.setgroup:nth-child(even of details.setgroup) > summary,
+details.setgroup.alt > summary {
+  background: #F4F7F5;
+}
+details.setgroup > summary::-webkit-details-marker { display: none; }
+details.setgroup > summary::after {
   content: '▸';
   color: var(--muted);
   font-weight: 600;
+  font-size: 0.9rem;
   flex-shrink: 0;
 }
-details.setgroup[open] > summary::after,
-details.settings-block[open] > summary::after { content: '▾'; }
-.settings-card-btn {
-  width: 100%;
+details.setgroup[open] > summary::after { content: '▾'; }
+details.setgroup > .setgroup-body,
+details.setgroup > div:not(summary) {
+  padding: 0 16px 14px 16px;
+  border-top: 1px solid var(--line);
   text-align: left;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--card);
-  margin-bottom: 10px;
-  font-weight: 800;
-  color: var(--ink);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  cursor: pointer;
 }
-.settings-card-btn.alt { background: #F3F7F5; }
 
 details.setgroup{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:14px}
 details.setgroup>summary{list-style:none;font-weight:700;font-size:.95rem;cursor:pointer;color:var(--ink);padding:4px 0}
@@ -10965,12 +10960,9 @@ function viewSettings(){
       <button class="btn sm" id="startTourBtn" type="button">Take a tour</button>
       <button class="btn ghost sm" id="gotoHelpBtn" type="button">Help &amp; FAQ</button>
     </p>
-    <div class="card">
-      <button type="button" class="btn ghost" data-action="settings-toggle" data-key="profile" class="settings-card-btn" style="margin-bottom:6px">
-        <h3 style="margin:0">Your profile</h3>
-        <span style="color:var(--muted)">${settingsSectionOpen('profile')?'▾':'▸'}</span>
-      </button>
-      ${settingsSectionOpen('profile')?`<div>
+    <details class="setgroup" id="settingsProfileDetails" open>
+      <summary>Your profile</summary>
+      <div class="setgroup-body">
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">${L('profileBlurb')}</p>
       <div class="field"><label>${L('audienceTitle')}</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
@@ -11013,15 +11005,12 @@ function viewSettings(){
       </div>
 <button class="btn sm" id="saveProfileBtn" style="margin-top:10px">Save profile / name</button>
       <button class="btn ghost sm" id="logoutBtn" style="margin-top:10px;margin-left:8px">Log out</button>
-      </div>`:''}
-    </div>
+      </div>
+    </details>
 
-    <div class="card" style="border-color:var(--gold);margin-top:16px">
-      <button type="button" class="btn ghost" data-action="settings-toggle" data-key="nudge" class="settings-card-btn alt" style="margin-bottom:6px">
-        <h3 style="margin:0;display:flex;align-items:center;gap:8px"><span style="font-size:1.35rem">⏰</span> Nudge</h3>
-        <span style="color:var(--muted)">${settingsSectionOpen('nudge')?'▾':'▸'}</span>
-      </button>
-      ${settingsSectionOpen('nudge')?`<div>
+    <details class="setgroup" id="settingsNudgeDetails">
+      <summary>Nudge</summary>
+      <div class="setgroup-body">
       <p style="font-size:.84rem;color:var(--muted);margin:0 0 14px">Daily alarm. Opens a math stop-screen so it is harder to dismiss by accident.</p>
       <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${(state.wakeAlarm&&state.wakeAlarm.time)||'07:00'}"></div>
       <div class="field" style="margin-top:8px"><label>One-time date (optional)</label>
@@ -11050,23 +11039,21 @@ function viewSettings(){
         <button class="btn ghost" id="testWakeBtn" type="button">Preview</button>
         ${(state.wakeAlarm&&state.wakeAlarm.enabled)?`<button class="btn ghost" id="turnOffWakeBtn" type="button">Turn off</button>`:''}
       </div>
-    </div>`:''}
-      </div>
+    </details>
 
-    <div class="card">
-      <details>
-        <summary style="cursor:pointer;font-weight:800;font-size:1.05rem;list-style:none">Webapp Link</summary>
+    <details class="setgroup">
+      <summary>Webapp Link</summary>
         <p style="font-size:.8rem;color:var(--muted);margin:10px 0 8px">Use this link to access your SnapBack app account on your computer.</p>
       <div class="field"><label>SnapBack website URL</label>
         <input id="publicWebUrlInput" placeholder="https://username.github.io/repo/" value="${escapeHtml((state.settings&&state.settings.publicWebUrl)||DEFAULT_PUBLIC_WEB_URL||'')}">
       </div>
       <button type="button" class="btn sm" id="savePublicWebUrlBtn" style="margin-top:8px">Save webapp link</button>
-      </details>
-    </div>
+      </div>
+    </details>
 
-    <div class="card">
-      <details>
-        <summary style="cursor:pointer;font-weight:800;font-size:1.05rem;list-style:none">Calendar Sync</summary>
+    <details class="setgroup">
+      <summary>Calendar Sync</summary>
+      <div class="setgroup-body">
         <div style="margin-top:10px">
       <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Imports events into SnapBack as busy blocks. For live refresh, tap Sync. Sync also runs automatically when you open SnapBack if a calendar is connected.</p>
       <button type="button" class="btn sm" id="syncGcalBtn" style="margin-top:6px">Sync Google Calendar</button>
@@ -11077,14 +11064,12 @@ function viewSettings(){
 
     </div>
 
-            </div>
-      </details>
-    </div>
+      </div>
+    </details>
 
-    <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
-      <details>
-        <summary style="cursor:pointer;font-weight:800;font-size:1.05rem;list-style:none">Account</summary>
-        <div style="margin-top:10px">
+    <details class="setgroup">
+      <summary>Account</summary>
+      <div class="setgroup-body">
       ${authStatusHtml()}
       <div style="margin-top:12px">
         <button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google</button>
@@ -11106,34 +11091,32 @@ function viewSettings(){
         <button class="btn ghost sm" id="pullSyncBtn">Pull from cloud now</button>
       </div>
         <button class="btn ghost sm" id="exportBackupBtn" style="margin-top:10px">Export file backup</button>
-        </div>
-      </details>
-    </div>
+      </div>
+    </details>
 
-    <div class="card">
-      <details>
-        <summary style="cursor:pointer;font-weight:800;font-size:1.05rem;list-style:none">Import tasks from other apps</summary>
-        <div style="margin-top:10px">
-        <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">
-          Import a <b>CSV</b> export from Todoist, TickTick, Microsoft To Do, and similar apps.
+    <details class="setgroup">
+      <summary>Import tasks from other apps</summary>
+      <div class="setgroup-body">
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">
+          Bring tasks in from Todoist, TickTick, Microsoft To Do, and similar apps using a <b>CSV</b> export.
         </p>
-        <div class="field"><label>1. Choose CSV file</label>
+        <div class="field"><label>Choose CSV file</label>
           <input type="file" id="taskCsvInput" accept=".csv,text/csv,text/plain" style="font-size:.85rem;width:100%">
         </div>
         <p style="font-size:.8rem;color:var(--muted);margin:10px 0 4px">Or paste CSV text (include the header row):</p>
         <textarea id="taskCsvPaste" rows="4" placeholder="Content,Due Date,Priority,Description&#10;Finish lab report,2026-09-01,2,Chapter 4" style="width:100%"></textarea>
         <button type="button" class="btn" id="taskCsvImportBtn" style="margin-top:12px;width:100%">Preview &amp; import</button>
         <div id="taskCsvStatus" style="font-size:.85rem;margin-top:8px;color:var(--muted)"></div>
-        </div>
-      </details>
-    </div>
-        <label class="btn ghost sm" style="display:inline-block;cursor:pointer">
-          Import file
+        <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Restore a SnapBack backup file (JSON) exported earlier:</p>
+        <label class="btn ghost sm" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+          Import backup file
           <input type="file" id="importBackupInput" accept="application/json,.json" style="display:none">
         </label>
+        <p id="syncStatus" style="font-size:.8rem;color:var(--muted);margin:8px 0 0"></p>
       </div>
-      <p id="syncStatus" style="font-size:.8rem;color:var(--muted);margin:8px 0 0"></p>
-    </div></div>
+    </details>
+
 
   <details class="setgroup"><summary>Appearance &amp; celebrations</summary>
     <div class="setgroup-body">
@@ -11179,7 +11162,7 @@ function viewSettings(){
     </div>
   </details>
 
-  <details class="setgroup"><summary>Quotes (optional)</summary>
+  <details class="setgroup"><summary>Quotes</summary>
     <div class="setgroup-body">
       <p style="font-size:.85rem;color:var(--muted)">Custom quotes appear in the random quote picker.</p>
       <div class="row"><input id="customQuoteInput" placeholder="Add a quote"><button class="btn sm" id="addQuoteBtn">Add</button></div>
@@ -13332,7 +13315,23 @@ function wireView(){
           const paste=(document.getElementById('taskCsvPaste')&&document.getElementById('taskCsvPaste').value)||'';
           if(String(paste).trim()){ runCsvImport(paste); return; }
           const f=csvIn&&csvIn.files&&csvIn.files[0];
-          if(!f){ showAppMessage('Choose a file or paste CSV', 'Select a .csv file above, or paste CSV text, then tap Preview & import.'); return; }
+          if(!f){
+            // No file yet — open the file picker; when user picks, auto-import
+            if(csvIn){
+              csvIn.onchange = function(){
+                const file=csvIn.files&&csvIn.files[0];
+                if(!file) return;
+                const reader=new FileReader();
+                reader.onload=()=>runCsvImport(String(reader.result||''));
+                reader.onerror=()=>showAppMessage('Could not read file', 'Try pasting the CSV text instead.');
+                reader.readAsText(file);
+              };
+              csvIn.click();
+            } else {
+              showAppMessage('Choose a file or paste CSV', 'Select a .csv file or paste CSV text, then try again.');
+            }
+            return;
+          }
           const reader=new FileReader();
           reader.onload=()=>runCsvImport(String(reader.result||''));
           reader.onerror=()=>showAppMessage('Could not read file', 'Try pasting the CSV text instead.');
