@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="262">
+<meta name="snapback-build" content="264">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -281,6 +281,57 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 
 /* Settings */
 .setgroup{margin-bottom:18px}
+
+/* Settings / collapsible consistency */
+details.setgroup, details.settings-block {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+details.setgroup:nth-of-type(even), .settings-alt {
+  background: #F3F7F5;
+}
+details.setgroup > summary, details.settings-block > summary {
+  list-style: none;
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 1.02rem;
+  color: var(--ink);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+details.setgroup > summary::-webkit-details-marker,
+details.settings-block > summary::-webkit-details-marker { display: none; }
+details.setgroup > summary::after,
+details.settings-block > summary::after {
+  content: '▸';
+  color: var(--muted);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+details.setgroup[open] > summary::after,
+details.settings-block[open] > summary::after { content: '▾'; }
+.settings-card-btn {
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--card);
+  margin-bottom: 10px;
+  font-weight: 800;
+  color: var(--ink);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+.settings-card-btn.alt { background: #F3F7F5; }
+
 details.setgroup{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:14px}
 details.setgroup>summary{list-style:none;font-weight:700;font-size:.95rem;cursor:pointer;color:var(--ink);padding:4px 0}
 details.setgroup>summary::-webkit-details-marker{display:none}
@@ -1513,18 +1564,84 @@ function scheduleCampfirePops(ctx){
   }
   ambientScheduler=setInterval(()=>{ if(Math.random()<0.5) popOnce(); }, 700);
 }
+
+/** Build looping colored-noise AudioBuffer for Focus Pod soundscape */
+function makeNoiseBuffer(ctx, kind){
+  try{
+    const sr = ctx.sampleRate || 44100;
+    const seconds = 2;
+    const n = Math.floor(sr * seconds);
+    const buffer = ctx.createBuffer(1, n, sr);
+    const data = buffer.getChannelData(0);
+    const k = String(kind || 'brown').toLowerCase();
+    let b0=0, b1=0, b2=0, b3=0, b4=0, b5=0, b6=0;
+    let last = 0;
+    for(let i=0; i<n; i++){
+      let white = Math.random()*2 - 1;
+      let out = white;
+      if(k === 'pink'){
+        b0 = 0.99886*b0 + white*0.0555179;
+        b1 = 0.99332*b1 + white*0.0750759;
+        b2 = 0.96900*b2 + white*0.1538520;
+        b3 = 0.86650*b3 + white*0.3104856;
+        b4 = 0.55000*b4 + white*0.5329522;
+        b5 = -0.7616*b5 - white*0.0168980;
+        out = b0+b1+b2+b3+b4+b5+b6 + white*0.5362;
+        out *= 0.11;
+        b6 = white*0.115926;
+      } else if(k === 'brown' || k === 'brownian' || k === 'red'){
+        last = (last + 0.02*white) / 1.02;
+        out = last * 3.5;
+      } else if(k === 'blue'){
+        out = white - last;
+        last = white;
+        out *= 0.35;
+      } else if(k === 'grey' || k === 'gray'){
+        // mild high-shelf-ish via difference blend
+        out = white*0.6 + (white - last)*0.25;
+        last = white;
+      } else {
+        // white
+        out = white * 0.5;
+      }
+      if(out > 1) out = 1;
+      if(out < -1) out = -1;
+      data[i] = out;
+    }
+    return buffer;
+  }catch(e){
+    console.warn('makeNoiseBuffer', e);
+    // minimal fallback buffer
+    try{
+      const n = Math.floor((ctx.sampleRate||44100)*0.5);
+      const buffer = ctx.createBuffer(1, n, ctx.sampleRate||44100);
+      const data = buffer.getChannelData(0);
+      for(let i=0;i<n;i++) data[i] = (Math.random()*2-1)*0.2;
+      return buffer;
+    }catch(e2){ return null; }
+  }
+}
+
 function startAmbient(){
-  const ctx=ensureAudio(); if(!ctx) return;
-  try{ if(ctx.state==='suspended') ctx.resume(); }catch(e){}
+  const ctx=ensureAudio();
+  if(!ctx){ try{ showAppMessage('No audio','This browser blocked sound.'); }catch(e){} return; }
+  const run = function(){
+  try{
   stopAmbientNode();
-  const soundId = state.settings.adaptiveNoise ? pickAdaptiveColor() : state.settings.noiseColor;
+  if(!state.settings) state.settings={};
+  let soundId = state.settings.noiseColor || 'brown';
+  if(state.settings.adaptiveNoise && typeof pickAdaptiveColor==='function'){
+    try{ soundId = pickAdaptiveColor() || soundId; }catch(e){}
+  }
+  soundId = String(soundId||'brown').toLowerCase();
 
   ambientGain=ctx.createGain();
-  ambientGain.gain.value=Math.max(0.2, state.settings.ambientVolume||0.35);
+  const vol = Math.max(0.15, Math.min(1, Number(state.settings.ambientVolume)||0.45));
+  ambientGain.gain.value = vol;
   ambientGain.connect(ctx.destination);
 
   if(soundId==='ocean'){
-    ambientNode=ctx.createBufferSource(); ambientNode.buffer=makeNoiseBuffer(ctx,'brown'); ambientNode.loop=true;
+    ambientNode=ctx.createBufferSource(); ambientNode.buffer=makeNoiseBuffer(ctx,'brown'); if(!ambientNode.buffer) return; ambientNode.loop=true;
     ambientFilter=ctx.createBiquadFilter(); ambientFilter.type='lowpass'; ambientFilter.frequency.value=700;
     ambientNode.connect(ambientFilter); ambientFilter.connect(ambientGain);
     ambientGain.gain.value=Math.max(0.08, state.settings.ambientVolume*0.6);
@@ -1533,12 +1650,12 @@ function startAmbient(){
     ambientLFO.connect(ambientLFOGain); ambientLFOGain.connect(ambientGain.gain);
     ambientLFO.start(); ambientNode.start();
   }else if(soundId==='rain'){
-    ambientNode=ctx.createBufferSource(); ambientNode.buffer=makeNoiseBuffer(ctx,'white'); ambientNode.loop=true;
+    ambientNode=ctx.createBufferSource(); ambientNode.buffer=makeNoiseBuffer(ctx,'white'); if(!ambientNode.buffer) return; ambientNode.loop=true;
     ambientFilter=ctx.createBiquadFilter(); ambientFilter.type='highpass'; ambientFilter.frequency.value=1200;
     ambientNode.connect(ambientFilter); ambientFilter.connect(ambientGain);
     ambientNode.start();
   }else if(soundId==='wind'){
-    ambientNode=ctx.createBufferSource(); ambientNode.buffer=makeNoiseBuffer(ctx,'pink'); ambientNode.loop=true;
+    ambientNode=ctx.createBufferSource(); ambientNode.buffer=makeNoiseBuffer(ctx,'pink'); if(!ambientNode.buffer) return; ambientNode.loop=true;
     ambientFilter=ctx.createBiquadFilter(); ambientFilter.type='lowpass'; ambientFilter.frequency.value=500;
     ambientNode.connect(ambientFilter); ambientFilter.connect(ambientGain);
     ambientLFO=ctx.createOscillator(); ambientLFO.frequency.value=0.07;
@@ -1546,24 +1663,35 @@ function startAmbient(){
     ambientLFO.connect(ambientLFOGain); ambientLFOGain.connect(ambientFilter.frequency);
     ambientLFO.start(); ambientNode.start();
   }else if(soundId==='forest'){
-    ambientNode=ctx.createBufferSource(); ambientNode.buffer=makeNoiseBuffer(ctx,'pink'); ambientNode.loop=true;
+    ambientNode=ctx.createBufferSource(); ambientNode.buffer=makeNoiseBuffer(ctx,'pink'); if(!ambientNode.buffer) return; ambientNode.loop=true;
     ambientFilter=ctx.createBiquadFilter(); ambientFilter.type='lowpass'; ambientFilter.frequency.value=900;
     ambientNode.connect(ambientFilter); ambientFilter.connect(ambientGain);
     ambientGain.gain.value=state.settings.ambientVolume*0.3;
     ambientNode.start();
     scheduleBirdChirps(ctx);
   }else if(soundId==='campfire'){
-    ambientNode=ctx.createBufferSource(); ambientNode.buffer=makeNoiseBuffer(ctx,'brown'); ambientNode.loop=true;
+    ambientNode=ctx.createBufferSource(); ambientNode.buffer=makeNoiseBuffer(ctx,'brown'); if(!ambientNode.buffer) return; ambientNode.loop=true;
     ambientFilter=ctx.createBiquadFilter(); ambientFilter.type='lowpass'; ambientFilter.frequency.value=500;
     ambientNode.connect(ambientFilter); ambientFilter.connect(ambientGain);
     ambientNode.start();
     scheduleCampfirePops(ctx);
   }else{
     // plain colored noise (white/pink/brown/blue/grey)
-    ambientNode=ctx.createBufferSource(); ambientNode.buffer=makeNoiseBuffer(ctx,soundId); ambientNode.loop=true;
+    ambientNode=ctx.createBufferSource();
+    const buf=makeNoiseBuffer(ctx, soundId==='ocean'?'brown':soundId);
+    if(!buf){ showAppMessage('Sound failed','Could not build noise buffer.'); return; }
+    ambientNode.buffer=buf; ambientNode.loop=true;
     ambientNode.connect(ambientGain);
     ambientNode.start();
   }
+  }catch(err){
+    console.warn('startAmbient', err);
+    try{ showAppMessage('Sound failed', String(err&&err.message||err)); }catch(e){}
+  }
+  };
+  if(ctx.state==='suspended'){
+    ctx.resume().then(run).catch(function(){ run(); });
+  } else run();
 }
 function stopAmbientNode(){
   try{
@@ -8387,17 +8515,22 @@ function viewTimer(){
 
   <div class="card">
     <h3 style="margin-top:0">Soundscape</h3>
-    <p style="color:var(--muted);font-size:.82rem;margin-top:-4px">Play background sound while you focus. Full settings are in Settings.</p>
-    <div class="row" style="margin-top:8px;align-items:center">
-      <button class="btn sm" id="fpPlaySound">${s.ambientOn && ambientNode ? 'Stop sound' : 'Play sound'}</button>
-      <select id="fpNoiseColor" style="max-width:140px">
-        <option value="brown" ${s.noiseColor==='brown'?'selected':''}>Brown noise</option>
-        <option value="pink" ${s.noiseColor==='pink'?'selected':''}>Pink noise</option>
-        <option value="white" ${s.noiseColor==='white'?'selected':''}>White noise</option>
-        <option value="rain" ${s.noiseColor==='rain'?'selected':''}>Rain</option>
-        <option value="forest" ${s.noiseColor==='forest'?'selected':''}>Forest</option>
-      </select>
-      <button class="btn ghost sm" data-action="goto-settings">Settings ↗</button>
+    <p style="color:var(--muted);font-size:.82rem;margin-top:-4px">Choose a sound type, set volume, then Play. Everything for this soundscape is here.</p>
+    <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;max-width:360px">
+      <div class="field" style="margin:0"><label>Sound type</label>
+        <select id="fpNoiseColor" style="width:100%">
+          <option value="brown" ${s.noiseColor==='brown'?'selected':''}>Brown noise</option>
+          <option value="pink" ${s.noiseColor==='pink'?'selected':''}>Pink noise</option>
+          <option value="white" ${s.noiseColor==='white'?'selected':''}>White noise</option>
+          <option value="rain" ${s.noiseColor==='rain'?'selected':''}>Rain</option>
+          <option value="forest" ${s.noiseColor==='forest'?'selected':''}>Forest</option>
+        </select>
+      </div>
+      <div class="field" style="margin:0"><label>Volume</label>
+        <input type="range" id="fpAmbientVol" min="0.05" max="1" step="0.05" value="${s.ambientVolume!=null?s.ambientVolume:0.35}" style="width:100%">
+      </div>
+      <button type="button" class="btn" id="fpPlaySound" style="width:100%">${s.ambientOn && ambientNode ? 'Stop sound' : 'Play sound'}</button>
+      <p style="font-size:.78rem;color:var(--muted);margin:0">Choose a type, then Play. Volume is only for this Focus Pod soundscape (not the Nudge alarm).</p>
     </div>
   </div>
   `;
@@ -10833,7 +10966,7 @@ function viewSettings(){
       <button class="btn ghost sm" id="gotoHelpBtn" type="button">Help &amp; FAQ</button>
     </p>
     <div class="card">
-      <button type="button" class="btn ghost" data-action="settings-toggle" data-key="profile" style="width:100%;text-align:left;padding:0;border:none;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <button type="button" class="btn ghost" data-action="settings-toggle" data-key="profile" class="settings-card-btn" style="margin-bottom:6px">
         <h3 style="margin:0">Your profile</h3>
         <span style="color:var(--muted)">${settingsSectionOpen('profile')?'▾':'▸'}</span>
       </button>
@@ -10884,7 +11017,7 @@ function viewSettings(){
     </div>
 
     <div class="card" style="border-color:var(--gold);margin-top:16px">
-      <button type="button" class="btn ghost" data-action="settings-toggle" data-key="nudge" style="width:100%;text-align:left;padding:0;border:none;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <button type="button" class="btn ghost" data-action="settings-toggle" data-key="nudge" class="settings-card-btn alt" style="margin-bottom:6px">
         <h3 style="margin:0;display:flex;align-items:center;gap:8px"><span style="font-size:1.35rem">⏰</span> Nudge</h3>
         <span style="color:var(--muted)">${settingsSectionOpen('nudge')?'▾':'▸'}</span>
       </button>
@@ -10982,13 +11115,14 @@ function viewSettings(){
         <summary style="cursor:pointer;font-weight:800;font-size:1.05rem;list-style:none">Import tasks from other apps</summary>
         <div style="margin-top:10px">
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">
-          Works with <b>CSV export</b> from Todoist, TickTick, Microsoft To Do, Things (via CSV), OmniFocus (CSV), Google Tasks (via takeout/CSV tools), and similar.
-          Export a CSV in that app, then upload it here.
+          Import a <b>CSV</b> export from Todoist, TickTick, Microsoft To Do, and similar apps.
         </p>
-        <input type="file" id="taskCsvInput" accept=".csv,text/csv,text/plain" style="font-size:.85rem">
-        <p style="font-size:.8rem;color:var(--muted);margin:8px 0 0">Or paste CSV below (including the header row):</p>
-        <textarea id="taskCsvPaste" rows="4" placeholder="Content,Due Date,Priority,Description&#10;Finish lab report,2026-09-01,2,Chapter 4" style="width:100%;margin-top:6px"></textarea>
-        <button class="btn sm" id="taskCsvImportBtn" style="margin-top:8px">Preview &amp; import</button>
+        <div class="field"><label>1. Choose CSV file</label>
+          <input type="file" id="taskCsvInput" accept=".csv,text/csv,text/plain" style="font-size:.85rem;width:100%">
+        </div>
+        <p style="font-size:.8rem;color:var(--muted);margin:10px 0 4px">Or paste CSV text (include the header row):</p>
+        <textarea id="taskCsvPaste" rows="4" placeholder="Content,Due Date,Priority,Description&#10;Finish lab report,2026-09-01,2,Chapter 4" style="width:100%"></textarea>
+        <button type="button" class="btn" id="taskCsvImportBtn" style="margin-top:12px;width:100%">Preview &amp; import</button>
         <div id="taskCsvStatus" style="font-size:.85rem;margin-top:8px;color:var(--muted)"></div>
         </div>
       </details>
@@ -11052,7 +11186,7 @@ function viewSettings(){
     </div>
   </details>
 
-  <div class="setgroup"><details><summary style="cursor:pointer;font-weight:800;list-style:none">Install app</summary><div style="margin-top:8px">
+  <details class="setgroup"><summary>Install app</summary><div style="margin-top:8px">
       ${(typeof isNativeApp==='function' && isNativeApp()) ? `<p style="color:var(--muted);font-size:.85rem">You already have the phone app installed.</p>`
         : isAppInstalled() ? `<p style="color:var(--muted);font-size:.85rem">Already installed on this device.</p>`
         : deferredInstallPrompt ? `<button class="btn" id="settingsInstallBtn">Install SnapBack</button>`
@@ -11060,7 +11194,7 @@ function viewSettings(){
         : `<p style="color:var(--muted);font-size:.85rem">On a phone browser, use Install if offered. For full alarms, use the SnapBack APK.</p>`}
     </div>
     </div></details></div>
-    <div class="setgroup"><details><summary style="cursor:pointer;font-weight:800;list-style:none">Delete data</summary><div style="margin-top:8px">
+    <details class="setgroup"><summary>Delete data</summary><div style="margin-top:8px">
       <p style="color:var(--muted);font-size:.85rem;margin:0 0 12px">Clear everything, or only chosen items.</p>
       <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:360px">
         <div style="width:100%">${deleteControl('reset', null, 'Reset All')}</div>
@@ -11087,7 +11221,7 @@ function viewSettings(){
       </div>
     </div>
     </div></details></div>
-    <div class="setgroup"><details><summary style="cursor:pointer;font-weight:800;list-style:none">Share an Update</summary><div style="margin-top:8px">
+    <details class="setgroup"><summary>Share an Update</summary><div style="margin-top:8px">
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Pick a range and what to include, then edit the preview if you want. Share buttons send <b>exactly</b> what is in the box.</p>
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <button type="button" class="btn ghost sm" id="shareRangeToday">Today</button>
@@ -12848,9 +12982,15 @@ function wireView(){
           state.settings.ambientOn=true;
           const sel=document.getElementById('fpNoiseColor');
           if(sel && sel.value) state.settings.noiseColor=sel.value;
-          startAmbient();
-          if(!ambientNode) showAppMessage('Tap Play again','Browser may need a second tap to allow audio.');
-          else showAppMessage('Playing', String(state.settings.noiseColor||'noise'));
+          const volEl=document.getElementById('fpAmbientVol');
+          if(volEl) state.settings.ambientVolume=Number(volEl.value)||0.45;
+          resumeAudioThen(function(){
+            startAmbient();
+            setTimeout(function(){
+              if(ambientNode) showAppMessage('Playing', String(state.settings.noiseColor||'noise')+' soundscape');
+              else showAppMessage('Tap Play again','If still silent, check device volume (not silent mode).');
+            }, 150);
+          });
         }
         try{saveState();}catch(e){}
         persistRender();
@@ -12863,6 +13003,13 @@ function wireView(){
       state.settings.ambientSource='noise';
       try{ stopAmbientNode(); }catch(e){}
       if(state.settings.ambientOn) startAmbient();
+      debouncedSave();
+    });
+    const fpVol=document.getElementById('fpAmbientVol');
+    if(fpVol) fpVol.addEventListener('input', ()=>{
+      if(!state.settings) state.settings={};
+      state.settings.ambientVolume=Number(fpVol.value)||0.35;
+      try{ if(ambientGain) ambientGain.gain.value=Math.max(0.05, state.settings.ambientVolume); }catch(e){}
       debouncedSave();
     });
   }
@@ -13177,15 +13324,22 @@ function wireView(){
         }
       });
     };
-    if(csvBtn) csvBtn.addEventListener('click', ()=>{
-      const paste=document.getElementById('taskCsvPaste')?.value||'';
-      if(paste.trim()){ runCsvImport(paste); return; }
-      const f=csvIn&&csvIn.files&&csvIn.files[0];
-      if(!f){ showAppMessage('Choose a file or paste CSV', 'Upload a .csv export or paste the text first.'); return; }
-      const reader=new FileReader();
-      reader.onload=()=>runCsvImport(String(reader.result||''));
-      reader.readAsText(f);
-    });
+    if(csvBtn){
+      csvBtn.onclick=null;
+      csvBtn.addEventListener('click', (ev)=>{
+        try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
+        try{
+          const paste=(document.getElementById('taskCsvPaste')&&document.getElementById('taskCsvPaste').value)||'';
+          if(String(paste).trim()){ runCsvImport(paste); return; }
+          const f=csvIn&&csvIn.files&&csvIn.files[0];
+          if(!f){ showAppMessage('Choose a file or paste CSV', 'Select a .csv file above, or paste CSV text, then tap Preview & import.'); return; }
+          const reader=new FileReader();
+          reader.onload=()=>runCsvImport(String(reader.result||''));
+          reader.onerror=()=>showAppMessage('Could not read file', 'Try pasting the CSV text instead.');
+          reader.readAsText(f);
+        }catch(err){ showAppMessage('Import error', String(err&&err.message||err)); }
+      });
+    }
 
     
     
