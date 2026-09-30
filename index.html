@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="272">
+<meta name="snapback-build" content="274">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -37,11 +37,17 @@
   --radius:16px;
   --input-bg:#FCFBF8;
 }
-body.dark{
+body/* dark-mode-title-fix */
+.dark h1, .dark h2, .dark h3, .dark .pagehead h1, .dark .eyebrow, .dark summary, .dark label, .dark .setgroup summary {
+  color: var(--ink) !important;
+}
+.dark p, .dark .muted { color: var(--muted) !important; }
+.dark{
+
   --bg:#1A1E1C;
   --panel:#252A27;
-  --ink:#E8E6E0;
-  --muted:#9AA39C;
+  --ink:#F4F2EC;
+  --muted:#B8C2BA;
   --line:#3A403C;
   --pine:#4A9B82;
   --pine-soft:#1E3A32;
@@ -82,7 +88,11 @@ button{font-family:inherit}
 .main{flex:1;min-width:0;padding:28px 32px 70px;max-width:1080px}
 .pagehead{margin-bottom:22px}
 .pagehead .eyebrow{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
-.pagehead h1{font-size:1.6rem}
+.pagehead /* ink-safe-headings */
+h1,h2,h3{color:var(--ink)}
+label{color:var(--ink)}
+summary{color:var(--ink)}
+h1{font-size:1.6rem}
 .pagehead p{color:var(--muted);margin:4px 0 0;font-size:.9rem}
 
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px 22px;margin-bottom:18px}
@@ -1583,19 +1593,46 @@ function stopNativeNudgeAlarm(){
 
 function wakeDismissMath(val){
   const m=state.wakeMath;
-  if(!m){ state.wakeMathOpen=false; stopAlarmRamp(); persistRender(); return; }
+  if(!m){
+    state.wakeMathOpen=false;
+    try{ stopNativeNudgeAlarm(); }catch(e){}
+    try{ stopAlarmRamp(); }catch(e){}
+    try{ if(window._nudgeAudio){ window._nudgeAudio.pause(); window._nudgeAudio=null; } }catch(e){}
+    persistRender();
+    return;
+  }
   if(String(val).trim()===String(m.answer)){
-    stopNativeNudgeAlarm();
-    stopAlarmRamp();
+    forceStopAllNudgeSound();
     state.wakeMathOpen=false;
     state.wakeMath=null;
     setPendingNudge(false);
-    scheduleWakeAlarms();
-    showAppMessage('Stopped', 'Nudge cleared.');
+    try{ scheduleWakeAlarms(); }catch(e){}
+    showAppMessage('Stopped', 'Alarm stopped.');
     persistRender();
   } else {
     showAppMessage('Not quite', 'Try the math again to stop the alarm.');
   }
+}
+function forceStopAllNudgeSound(){
+  try{ stopNativeNudgeAlarm(); }catch(e){}
+  try{ stopAlarmRamp(); }catch(e){}
+  try{ if(typeof stopAlarm==='function') stopAlarm(); }catch(e){}
+  try{
+    const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+    if(plug){
+      if(typeof plug.stopAlarm==='function') plug.stopAlarm();
+      if(typeof plug.stop==='function') plug.stop();
+      if(typeof plug.dismiss==='function') plug.dismiss();
+    }
+  }catch(e){}
+  try{ if(window._nudgeAudio){ window._nudgeAudio.pause(); window._nudgeAudio.currentTime=0; window._nudgeAudio=null; } }catch(e){}
+  try{ if(navigator.vibrate) navigator.vibrate(0); }catch(e){}
+  // Retry native stop a few times (OEM lag)
+  try{
+    setTimeout(function(){ try{ stopNativeNudgeAlarm(); stopAlarmRamp(); }catch(e){} }, 200);
+    setTimeout(function(){ try{ stopNativeNudgeAlarm(); stopAlarmRamp(); }catch(e){} }, 800);
+    setTimeout(function(){ try{ stopNativeNudgeAlarm(); stopAlarmRamp(); }catch(e){} }, 2000);
+  }catch(e){}
 }
 function wakeSnooze(minutes){
   const mins = minutes || 5;
@@ -4119,11 +4156,9 @@ function L(key){
     gradePh: student ? 'e.g. Year 2' : 'e.g. Designer, parent',
     profileBlurb: 'Your name and preferences stay on this device (and in your sync if you use it). Nothing is shared with other users automatically.',
     audienceTitle: 'I am…',
-    audienceStudent: 'A student',
+    audienceStudent: 'I am a student',
     audienceNot: 'Not a student',
-    audienceHint: student
-      ? 'Using school-style labels (classes, school tasks). Change anytime here.'
-      : 'Using general labels (work, commitments). Change anytime here.',
+    audienceHint: '',
     newTaskSchool: student ? 'School / College' : 'Work',
     ctxSchool: student ? 'School / College' : 'Work',
     semesterEyebrow: student ? 'Your class timetable' : 'Your weekly timetable',
@@ -4324,7 +4359,7 @@ function renderMain(){
     try{ wireLoginScreen(); }catch(e){ console.warn(e); }
     return;
   }
-  const views={today:viewToday,tasks:viewTasks,challenges:viewChallenges,planAhead:viewPlanAhead,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
+  const views={today:viewToday,terms:viewTerms,tasks:viewTasks,challenges:viewChallenges,planAhead:viewPlanAhead,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
     eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,
     bodydouble:viewBodyDouble,energyFocus:viewEnergyFocus,ifThen:viewIfThen,ritualBackpack:viewRitualBackpack,ritualCostume:viewRitualCostume,ritualLocation:viewRitualLocation,contextSplit:viewContextSplit,settings:viewSettings,
     habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp,
@@ -4352,6 +4387,37 @@ function renderMain(){
 }
 function renderModal(){
   const root=document.getElementById('modalRoot');
+  if(state.wakeMathOpen && state.wakeMath){
+    const m = state.wakeMath;
+    root.innerHTML = `<div class="overlay" id="wakeMathOverlay" style="background:rgba(0,0,0,.72)">
+      <div class="quotecard" style="text-align:center;max-width:360px">
+        <div class="qeyebrow">Nudge alarm</div>
+        <div class="qtext" style="font-size:1.15rem;margin:8px 0 12px">Solve to stop the alarm</div>
+        <div style="font-size:1.6rem;font-weight:800;margin:12px 0">${m.a} + ${m.b} = ?</div>
+        <input id="wakeMathInput" type="number" inputmode="numeric" placeholder="Answer" style="width:100%;padding:12px;font-size:1.1rem;text-align:center;border-radius:12px;border:1px solid var(--line)">
+        <div class="qactions" style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
+          <button class="btn" id="wakeMathSubmit" style="width:100%">Stop alarm</button>
+          <button class="btn ghost sm" id="wakeMathSnooze5" style="width:100%">Snooze 5 min</button>
+          <button class="btn ghost sm" id="wakeMathForceStop" style="width:100%">Silence now</button>
+        </div>
+      </div>
+    </div>`;
+    const submit = () => {
+      const v = document.getElementById('wakeMathInput')?.value;
+      wakeDismissMath(v);
+    };
+    document.getElementById('wakeMathSubmit')?.addEventListener('click', submit);
+    document.getElementById('wakeMathInput')?.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); });
+    document.getElementById('wakeMathSnooze5')?.addEventListener('click', ()=> wakeSnooze(5));
+    document.getElementById('wakeMathForceStop')?.addEventListener('click', ()=>{
+      try{ forceStopAllNudgeSound(); }catch(e){}
+      state.wakeMathOpen=false; state.wakeMath=null;
+      try{ setPendingNudge(false); }catch(e){}
+      persistRender();
+    });
+    setTimeout(()=>{ try{ document.getElementById('wakeMathInput')?.focus(); }catch(e){} }, 200);
+    return;
+  }
   if(state.breathingOpen){
     const scale = 1 + 0.4*Math.abs(Math.sin((10-state.breathingSecondsLeft)*Math.PI/5));
     const phase = Math.floor((10-state.breathingSecondsLeft)/5)%2===0 ? 'Breathe in' : 'Breathe out';
@@ -5548,6 +5614,7 @@ function authStatusHtml(){
 }
 
 function persistRender(){
+  try{ if(!state._purgedChallengeTasks){ state._purgedChallengeTasks=true; purgeSyntheticChallengeTasks(); } }catch(e){}
   try{
     if(!state._calAutoSyncScheduled){
       state._calAutoSyncScheduled=true;
@@ -5819,6 +5886,38 @@ function maybeOfferTour(){
       showAppMessage('Take a quick tour?', 'Settings → Take a tour walks you through Tasks, Schedule, and Nudge. You can skip anytime.');
     }, 1200);
   }catch(e){}
+}
+
+
+
+function viewTerms(){
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+    <div class="eyebrow">Legal</div>
+    <h1>Terms of use</h1>
+    <p style="color:var(--muted)">Last updated: September 2026</p>
+  </div>
+  <div class="card" style="font-size:.9rem;line-height:1.55;color:var(--ink)">
+    <p><b>SnapBack</b> is a planning and focus tool for students and young adults. By using the app (web or phone), you agree to these terms.</p>
+    <h3 style="margin-top:16px">1. Licence to use</h3>
+    <p>You may use SnapBack for your personal, non-commercial use. We grant you a limited, non-exclusive, non-transferable right to access and use the service.</p>
+    <h3 style="margin-top:16px">2. No copying or republishing the product</h3>
+    <p>You may <b>not</b> copy, reproduce, redistribute, sell, sublicense, reverse engineer (except where law allows), or republish SnapBack — including its screens, flows, text, design, or code — as your own product or service, whether free or paid.</p>
+    <p>You may not scrape the app to build a competing product, or share the application files (APK, source, or website package) for others to redeploy as a separate app.</p>
+    <h3 style="margin-top:16px">3. Your content</h3>
+    <p>You keep ownership of the tasks, notes, and data you enter. You are responsible for what you store. If you sign in with Google, data may sync to your private cloud account under that sign-in.</p>
+    <h3 style="margin-top:16px">4. Not medical advice</h3>
+    <p>SnapBack is a productivity and organisation aid. It does not diagnose or treat ADHD or any condition, and does not replace counselling, coaching, or medical care.</p>
+    <h3 style="margin-top:16px">5. Availability</h3>
+    <p>We aim to keep the service available but do not guarantee uninterrupted access. You are encouraged to use Export backup for an extra copy of your data.</p>
+    <h3 style="margin-top:16px">6. Contact</h3>
+    <p>For questions about these terms, contact the app operator through the channel you received SnapBack from.</p>
+  </div>
+  <div class="card" style="margin-top:12px;font-size:.9rem;line-height:1.55">
+    <h3 style="margin:0 0 8px">Privacy (short)</h3>
+    <p>Data you enter stays on your device unless you sign in (e.g. Google) or use a sync option you enable. We ask you not to put highly sensitive secrets in notes. Automatic local snapshots and optional file export are for your recovery — treat backup files as private.</p>
+  </div>`;
 }
 
 
@@ -6155,18 +6254,34 @@ const CHALLENGE_PATHS = {
 
 
 function ensureTaskForChallenge(challengeId, toolId){
+  // Do NOT create fake "Challenge: …" tasks — those polluted the Tasks list.
+  // Prefer the task the user already linked to a technique, else any open task, else null.
   if(!Array.isArray(state.tasks)) state.tasks=[];
-  const ch = (typeof CHALLENGES!=='undefined' && CHALLENGES.find(c=>c.id===challengeId)) || null;
-  const toolName = toolId || 'work';
-  const title = ch ? ('Challenge: '+(ch.title||challengeId)+' — '+toolName) : ('From challenge — '+toolName);
-  const existing = state.tasks.find(x=>!x.done && x.challengeId===challengeId);
-  if(existing) return existing;
-  const id = uid();
-  const task = {id, title, notes: ch?(ch.desc||''):'', date: todayStr(), time:'', priority:'medium', urgent:false, important:false, tier:'could', frog:false, context:'school', technique: (toolId==='cheese'||toolId==='bitesize')?'bitesize':((toolId==='focus'||toolId==='timer')?'timer':''), challengeId: challengeId||'', meetingUrl:'', reminderLeads:[0], reminderTime:'09:00', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{}, strategic:{}, flip:{}, created:Date.now()};
-  state.tasks.unshift(task);
-  state.filter = 'all';
-  try{ saveState(); }catch(e){}
-  return task;
+  try{
+    if(state.techniqueTaskId){
+      const linked = state.tasks.find(x=>x.id===state.techniqueTaskId && !x.done);
+      if(linked) return linked;
+    }
+  }catch(e){}
+  const byChallenge = state.tasks.find(x=>!x.done && x.challengeId===challengeId && x.title && !/^Challenge:/i.test(x.title||''));
+  if(byChallenge) return byChallenge;
+  const open = state.tasks.filter(x=>!x.done && !x.backburner && !/^Challenge:/i.test(x.title||''));
+  return open[0] || null;
+}
+function purgeSyntheticChallengeTasks(){
+  // One-time cleanup of auto-created challenge rows
+  try{
+    if(!Array.isArray(state.tasks)) return;
+    const before = state.tasks.length;
+    state.tasks = state.tasks.filter(x=>{
+      if(x && x.done) return true;
+      const title = (x && x.title) || '';
+      if(/^Challenge:\s/i.test(title)) return false;
+      if(/^From challenge/i.test(title)) return false;
+      return true;
+    });
+    if(state.tasks.length !== before){ try{ saveState(); }catch(e){} }
+  }catch(e){}
 }
 
 function applyChallengeTool(toolId, challengeId){
@@ -11064,17 +11179,16 @@ function viewSettings(){
     <details class="setgroup" id="settingsProfileDetails" open>
       <summary>Your profile</summary>
       <div class="setgroup-body">
-      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">${L('profileBlurb')}</p>
-      <div class="field"><label>${L('audienceTitle')}</label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
-          <label style="font-size:.9rem;display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--input-bg)">
-            <input type="radio" name="audienceMode" id="audienceStudent" value="student" ${isStudentMode()?'checked':''}> A student
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px"></p>
+      <div class="field"><label>I am…</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px">
+          <label style="font-size:.9rem;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 10px;border:1px solid var(--line);border-radius:12px;background:var(--card);text-align:center;cursor:pointer">
+            <input type="radio" name="audienceMode" id="audienceStudent" value="student" ${isStudentMode()?'checked':''}> I am a student
           </label>
-          <label style="font-size:.9rem;display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--input-bg)">
+          <label style="font-size:.9rem;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 10px;border:1px solid var(--line);border-radius:12px;background:var(--card);text-align:center;cursor:pointer">
             <input type="radio" name="audienceMode" id="audienceNotStudent" value="not_student" ${!isStudentMode()?'checked':''}> Not a student
           </label>
         </div>
-        <div style="font-size:.78rem;color:var(--muted);margin-top:6px">${L('audienceHint')}</div>
       </div>
       <div class="field" style="margin-top:10px"><label>Your full name</label>
         <input id="profileFullName" placeholder="e.g. Uma Sharma" value="${escapeHtml((state.profile&&state.profile.fullName)||'')}">
@@ -11144,11 +11258,11 @@ function viewSettings(){
 
     <details class="setgroup">
       <summary>Webapp Link</summary>
-        <p style="font-size:.8rem;color:var(--muted);margin:10px 0 8px">Use this link to access your SnapBack app account on your computer.</p>
-      <div class="field"><label>SnapBack website URL</label>
-        <input id="publicWebUrlInput" placeholder="https://username.github.io/repo/" value="${escapeHtml((state.settings&&state.settings.publicWebUrl)||DEFAULT_PUBLIC_WEB_URL||'')}">
+        <p style="font-size:.8rem;color:var(--muted);margin:10px 0 8px">Open the same SnapBack on a laptop: tap <b>Copy link</b>, paste in any browser. (A shorter custom domain needs your own domain name later — the link still works as-is.)</p>
+      <div class="field"><label>Your web app link</label>
+        <input id="publicWebUrlInput" readonly value="${escapeHtml((state.settings&&state.settings.publicWebUrl)||DEFAULT_PUBLIC_WEB_URL||'')}" style="font-size:.85rem">
       </div>
-      <button type="button" class="btn sm" id="savePublicWebUrlBtn" style="margin-top:8px">Save webapp link</button>
+      <button type="button" class="btn" id="copyPublicWebUrlBtn" style="margin-top:8px;width:100%">Copy link</button>
       </div>
     </details>
 
@@ -11156,9 +11270,13 @@ function viewSettings(){
       <summary>Calendar Sync</summary>
       <div class="setgroup-body">
         <div style="margin-top:10px">
-      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Imports events into SnapBack as busy blocks. For live refresh, tap Sync. Sync also runs automatically when you open SnapBack if a calendar is connected.</p>
-      <button type="button" class="btn sm" id="syncGcalBtn" style="margin-top:6px">Sync Google Calendar</button>
-      <p style="font-size:.75rem;color:var(--muted);margin:8px 0">Or paste a published <b>.ics</b> link (Google “Secret address”, Outlook “Publish calendar”, Apple Calendar public URL):</p>
+      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px;line-height:1.45">
+        <b>Google sign-in</b> backs up SnapBack data — it does <b>not</b> automatically import every Google Calendar event by itself.
+        For calendar events, paste a published <b>.ics</b> link below (works for Google, Outlook/Hotmail, and many Apple calendars).
+        SnapBack imports those as busy blocks and can refresh when you open the app or tap Sync.
+      </p>
+      <button type="button" class="btn sm" id="syncGcalBtn" style="margin-top:6px">Sync calendar now</button>
+      <p style="font-size:.75rem;color:var(--muted);margin:8px 0">Paste published calendar URL (.ics):</p>
       <input id="icsUrlInput" value="${escapeHtml((state.settings&&state.settings.icsUrl)||'')}" placeholder="https://…/calendar.ics" value="${escapeHtml((state.settings&&state.settings.icsUrl)||'')}" style="width:100%">
       <button type="button" class="btn ghost sm" id="syncIcsBtn" style="margin-top:8px">Sync ICS / Outlook feed</button>
       <p style="font-size:.72rem;color:var(--muted);margin:8px 0 0">Last sync: ${state.settings&&state.settings.calendarLastSync ? new Date(state.settings.calendarLastSync).toLocaleString() : 'never'} ${state.settings&&state.settings.calendarLastSource ? '('+state.settings.calendarLastSource+')' : ''}</p>
@@ -11180,7 +11298,7 @@ function viewSettings(){
           Apple ID and Outlook login are not in this version yet — username login stays on this device only.
         </p>
       </div>
-      <details style="margin-top:12px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Advanced: Firebase config</summary><div class="field"><label>Firebase config</label>
+      <details style="margin-top:12px;display:none" id="devFirebaseBox" data-admin-only="1"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Advanced: Firebase config (admin only — do not use)</summary><div class="field"><label>Firebase config</label>
         <textarea id="fbConfigInput" rows="5" placeholder='{ "apiKey": "...", "projectId": "..." }' style="width:100%;font-size:.75rem">${escapeHtml(getFirebaseConfig()?JSON.stringify(getFirebaseConfig(),null,2):'')}</textarea>
       </div>
       <p style="font-size:.78rem;color:var(--muted);margin:8px 0">Paste config once → Save &amp; start live sync. Firebase Console must have Google sign-in enabled.</p>
@@ -11216,7 +11334,15 @@ function viewSettings(){
     </details>
 
     <details class="setgroup">
-      <summary>Backup &amp; restore</summary>
+      <summary>Terms of use</summary>
+      <div class="setgroup-body">
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Licence, privacy summary, and rules against republishing SnapBack as another product.</p>
+        <button type="button" class="btn" data-action="nav" data-view="terms" style="width:100%">Read Terms of use</button>
+      </div>
+    </details>
+
+        <details class="setgroup">
+      <summary
       <div class="setgroup-body">
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px;line-height:1.45">
           <b>Automatic (no action needed):</b><br>
@@ -12202,6 +12328,7 @@ function wireView(){
     else if(action==='proj-custom-item') el.addEventListener('change', ()=>{ const pr=getProject(state.projectId); if(!pr||!pr.customItems) return; if(pr.customItems[Number(el.dataset.idx)]) pr.customItems[Number(el.dataset.idx)].done=!!el.checked; try{saveState();}catch(e){} persistRender(); });
     else if(action==='proj-custom-del') el.addEventListener('click', ()=>{ const pr=getProject(state.projectId); if(!pr||!pr.customItems) return; pr.customItems.splice(Number(el.dataset.idx),1); try{saveState();}catch(e){} persistRender(); });
     else if(action==='delete-project') el.addEventListener('click', ()=>{ if(!confirm('Delete this project permanently? This cannot be undone.')) return; const id=el.dataset.id; state.projects=(state.projects||[]).filter(x=>x.id!==id); if(state.projectId===id) state.projectId=null; try{saveState();}catch(e){} persistRender(); });
+    else if(action==='nav'){ const v=el.getAttribute('data-view')||'today'; state.view=v; try{persistRender();}catch(e){render();} }
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
     else if(action==='ef-start') el.addEventListener('click', ()=>{
       if(!state.energyFocus) state.energyFocus={items:[], timerSec:600};
@@ -13405,13 +13532,22 @@ function wireView(){
       tSearch.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); state.taskSearch=tSearch.value||''; try{ persistRender(); }catch(e2){ render(); } } });
     }
 
-    const saveWeb=document.getElementById('savePublicWebUrlBtn');
-    if(saveWeb) saveWeb.addEventListener('click', ()=>{
-      if(!state.settings) state.settings={};
-      state.settings.publicWebUrl = (document.getElementById('publicWebUrlInput')?.value||'').trim();
-      try{ saveState(); }catch(e){}
-      showAppMessage('Saved', 'Website link updated on this device. To ship it to everyone, put the same URL in the app build (DEFAULT_PUBLIC_WEB_URL).');
-      persistRender();
+    try{ if(state._forceOpenNudge){ state._forceOpenNudge=false; const nb=document.getElementById('nudgeSettingsBlock'); if(nb) nb.open=true; } }catch(e){}
+    const copyWeb=document.getElementById('copyPublicWebUrlBtn');
+    if(copyWeb) copyWeb.addEventListener('click', ()=>{
+      const v = (document.getElementById('publicWebUrlInput')?.value||DEFAULT_PUBLIC_WEB_URL||'').trim();
+      if(!v){ showAppMessage('No link', 'Web app link is not set yet.'); return; }
+      try{
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(v).then(function(){
+            showAppMessage('Copied', 'Paste this link in a browser on your laptop to open SnapBack.');
+          }).catch(function(){
+            showAppMessage('Your link', v);
+          });
+        } else {
+          showAppMessage('Your link', v);
+        }
+      }catch(e){ showAppMessage('Your link', v); }
     });
     function setAudience(val){
       if(!state.profile) state.profile={};
