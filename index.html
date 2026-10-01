@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="274">
+<meta name="snapback-build" content="281">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -3662,15 +3662,22 @@ function playReminderChime(){
     const AC=window.AudioContext||window.webkitAudioContext;
     if(!AC) return;
     const ctx=new AC();
-    const o=ctx.createOscillator();
-    const g=ctx.createGain();
-    o.type='sine'; o.frequency.value=880;
-    g.gain.value=0.0001;
-    o.connect(g); g.connect(ctx.destination);
-    const t=ctx.currentTime;
-    g.gain.exponentialRampToValueAtTime(0.25, t+0.02);
-    g.gain.exponentialRampToValueAtTime(0.001, t+0.6);
-    o.start(t); o.stop(t+0.65);
+    if(ctx.state==='suspended' && ctx.resume) ctx.resume();
+    function beep(start, freq, dur){
+      const o=ctx.createOscillator();
+      const g=ctx.createGain();
+      o.type='square';
+      o.frequency.value=freq;
+      g.gain.value=0.0001;
+      o.connect(g); g.connect(ctx.destination);
+      g.gain.exponentialRampToValueAtTime(0.35, start+0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, start+dur);
+      o.start(start); o.stop(start+dur+0.02);
+    }
+    const t0=ctx.currentTime+0.02;
+    beep(t0, 880, 0.18);
+    beep(t0+0.28, 988, 0.18);
+    beep(t0+0.56, 1175, 0.28);
   }catch(e){}
 }
 function fireReminder(body){
@@ -3717,11 +3724,11 @@ async function scheduleNativeNotification({key, title, body, when}){
     const { LocalNotifications } = window.Capacitor.Plugins;
     try {
       await LocalNotifications.createChannel({
-        id: 'snapback_alarm',
+        id: 'snapback_reminders_v2',
         name: 'SnapBack Reminders',
+        description: 'Task and class reminders with sound',
         importance: 5,
         visibility: 1,
-        sound: 'default',
         vibration: true
       });
     } catch(e) {}
@@ -3733,8 +3740,7 @@ async function scheduleNativeNotification({key, title, body, when}){
         title: title || 'SnapBack',
         body: body || '',
         schedule: { at: at, allowWhileIdle: true },
-        channelId: 'snapback_alarm',
-        sound: 'default',
+        channelId: 'snapback_reminders_v2',
         smallIcon: 'ic_stat_icon',
         largeIcon: 'ic_launcher',
         actionTypeId: 'OPEN',
@@ -3872,6 +3878,8 @@ async function ensureNativeNotifListeners(){
         if(isWakeNotif(n)){
           setPendingNudge(true);
           triggerWakeMath('notification');
+        } else {
+          try{ playReminderChime(); }catch(e2){}
         }
       }catch(e){ console.warn(e); }
     });
@@ -3921,7 +3929,8 @@ async function scheduleNativeWakeAlarms(){
         if(typeof plug.cancel === 'function') await plug.cancel();
         return 0;
       }
-      const days = Array.isArray(wa.days) ? wa.days : []; if(!days.length){ if(typeof plug.cancel==='function') await plug.cancel(); return 0; }
+      const days = Array.isArray(wa.days) ? wa.days : [];
+      if(!wa.onceDate && !days.length){ if(typeof plug.cancel==='function') await plug.cancel(); return 0; }
       const res = await plug.schedule({
         enabled: true,
         time: wa.time || '07:00',
@@ -4346,6 +4355,7 @@ function renderMain(){
   try{
     const fb = (typeof parseFreeBusyFromHash==='function') ? parseFreeBusyFromHash() : null;
     if(fb){ state.freeBusyPublic = fb; state.view = 'freebusy'; }
+    else { try{ resolveShortShare(); }catch(e){} }
   }catch(e){}
   try{
     if(typeof isPublicShareView==='function' && isPublicShareView()){
@@ -4387,6 +4397,10 @@ function renderMain(){
 }
 function renderModal(){
   const root=document.getElementById('modalRoot');
+  if(!state.wakeMathOpen && !hasLaunchConsent()){
+    root.innerHTML=launchConsentHtml();
+    return;
+  }
   if(state.wakeMathOpen && state.wakeMath){
     const m = state.wakeMath;
     root.innerHTML = `<div class="overlay" id="wakeMathOverlay" style="background:rgba(0,0,0,.72)">
@@ -5890,6 +5904,78 @@ function maybeOfferTour(){
 
 
 
+
+function hasLaunchConsent(){
+  try{
+    const email=((state.profile&&state.profile.email)||'').trim();
+    const phone=((state.profile&&state.profile.phone)||'').trim();
+    return !!(state.settings && state.settings.termsAccepted && (email||phone));
+  }catch(e){ return false; }
+}
+function launchConsentHtml(){
+  const email=escapeHtml((state.profile&&state.profile.email)||'');
+  const phone=escapeHtml((state.profile&&state.profile.phone)||'');
+  return `<div class="overlay" id="launchConsentOverlay" style="background:rgba(20,24,22,.82);z-index:80">
+    <div class="quotecard" style="max-width:440px;text-align:left;max-height:88vh;overflow:auto">
+      <div class="qeyebrow">Before you start</div>
+      <div class="qtext" style="font-size:1.15rem;margin:6px 0 8px">Agree and leave a way to reach you</div>
+      <p style="font-size:.88rem;color:var(--muted);line-height:1.45;margin:0 0 10px">SnapBack is for your personal use. You may not copy or republish the app as another product. Your email or phone is used only to send fixes and updates. It is not used for marketing.</p>
+      <label style="display:flex;gap:10px;align-items:flex-start;margin:8px 0 12px;cursor:pointer">
+        <input type="checkbox" id="launchAgree" style="width:20px;height:20px;margin-top:2px">
+        <span>I agree to the Terms & Conditions</span>
+      </label>
+      <div class="field"><label>Email</label><input id="launchEmail" type="email" placeholder="you@email.com" value="${email}"></div>
+      <div class="field" style="margin-top:8px"><label>Phone</label><input id="launchPhone" type="tel" placeholder="Or a phone number" value="${phone}"></div>
+      <p style="font-size:.78rem;color:var(--muted);margin:8px 0">Enter <b>at least one</b> — email or phone.</p>
+      <button type="button" class="btn" id="launchConsentBtn" style="width:100%;margin-top:8px">OK — continue</button>
+    </div>
+  </div>`;
+}
+
+function hasAgreedTerms(){
+  try{
+    if(state.settings && state.settings.termsAccepted) return true;
+    // Existing users (already using SnapBack before Terms existed) keep Settings.
+    const used =
+      (state.profile && (state.profile.name || state.profile.fullName || state.profile.email)) ||
+      ((state.tasks||[]).length > 0) ||
+      ((state.journal||[]).length > 0) ||
+      (typeof getLocalAuth==='function' && getLocalAuth() && getLocalAuth().username) ||
+      (typeof _currentUser!=='undefined' && _currentUser && _currentUser.uid);
+    if(used){
+      if(!state.settings || typeof state.settings!=='object') state.settings={};
+      state.settings.termsAccepted = true;
+      state.settings.termsAcceptedAt = Date.now();
+      try{ saveState(); }catch(e){}
+      return true;
+    }
+    return false;
+  }catch(e){ return false; }
+}
+function acceptTermsAndContinue(){
+  try{
+    if(!state.settings || typeof state.settings!=='object') state.settings={};
+    state.settings.termsAccepted = true;
+    state.settings.termsAcceptedAt = Date.now();
+    saveState();
+  }catch(e){}
+  state.view = 'settings';
+  try{ persistRender(); }catch(e){ render(); }
+}
+function termsAgreeBar(){
+  if(hasAgreedTerms()){
+    return `<p style="font-size:.85rem;color:var(--muted);margin:12px 0 0">You have agreed to these terms. You can re-read them anytime from Settings.</p>
+      <button type="button" class="btn" data-action="nav" data-view="settings" style="width:100%;margin-top:10px">Back to Settings</button>`;
+  }
+  return `<div id="termsAgreeSticky" style="position:sticky;bottom:0;z-index:20;background:var(--panel);border:2px solid var(--pine);border-radius:14px;padding:14px;margin-top:12px;box-shadow:0 -8px 24px rgba(0,0,0,.12)">
+        <label style="display:flex;align-items:flex-start;gap:10px;margin:0 0 12px;font-size:1rem;line-height:1.4;cursor:pointer;color:var(--ink)">
+          <input type="checkbox" id="termsAgreeCheck" style="margin-top:3px;width:20px;height:20px;flex-shrink:0">
+          <span><b>I agree to the Terms & Conditions</b> and the privacy note above.</span>
+        </label>
+        <button type="button" class="btn" id="termsAgreeBtn" style="width:100%;font-size:1rem;padding:14px">OK — I agree, open Settings</button>
+      </div>`;
+}
+
 function viewTerms(){
   return `
   <div class="pagehead">
@@ -5897,6 +5983,7 @@ function viewTerms(){
     <div class="eyebrow">Legal</div>
     <h1>Terms of use</h1>
     <p style="color:var(--muted)">Last updated: September 2026</p>
+    ${hasAgreedTerms()?'':'<p style="margin-top:8px;padding:10px 12px;background:var(--pine-soft);border-radius:10px;color:var(--ink);font-size:.9rem"><b>Please read and tap I agree</b> at the bottom to continue to Settings.</p>'}
   </div>
   <div class="card" style="font-size:.9rem;line-height:1.55;color:var(--ink)">
     <p><b>SnapBack</b> is a planning and focus tool for students and young adults. By using the app (web or phone), you agree to these terms.</p>
@@ -5917,8 +6004,12 @@ function viewTerms(){
   <div class="card" style="margin-top:12px;font-size:.9rem;line-height:1.55">
     <h3 style="margin:0 0 8px">Privacy (short)</h3>
     <p>Data you enter stays on your device unless you sign in (e.g. Google) or use a sync option you enable. We ask you not to put highly sensitive secrets in notes. Automatic local snapshots and optional file export are for your recovery — treat backup files as private.</p>
+  </div>
+  <div class="card" style="margin-top:12px">
+    ${termsAgreeBar()}
   </div>`;
 }
+
 
 
 const TOUR_STEPS = [
@@ -6094,6 +6185,42 @@ async function autoCalendarSyncIfConfigured(){
 
 function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
   try{ consumePendingNudge(); }catch(e){}
+  try{
+    
+    const launchBtn=document.getElementById('launchConsentBtn');
+    if(launchBtn){
+      launchBtn.addEventListener('click', ()=>{
+        const agreed=!!(document.getElementById('launchAgree')&&document.getElementById('launchAgree').checked);
+        const email=(document.getElementById('launchEmail')?.value||'').trim();
+        const phone=(document.getElementById('launchPhone')?.value||'').trim();
+        if(!agreed){ showAppMessage('Please agree', 'Tick “I agree to the Terms & Conditions”.'); return; }
+        if(!email && !phone){ showAppMessage('Contact needed', 'Enter an email or a phone number so updates can reach you.'); return; }
+        if(email && email.indexOf('@')<1){ showAppMessage('Email', 'That email does not look complete.'); return; }
+        if(!state.profile||typeof state.profile!=='object') state.profile={};
+        if(!state.settings||typeof state.settings!=='object') state.settings={};
+        state.profile.email=email;
+        state.profile.phone=phone;
+        state.profile.shareConsent=true;
+        state.settings.termsAccepted=true;
+        state.settings.termsAcceptedAt=Date.now();
+        try{ saveState(); }catch(e){}
+        try{ if(typeof upsertAdminUserRecord==='function') upsertAdminUserRecord({email:email, phone:phone, source:'launch-consent'}); }catch(e){}
+        try{ persistRender(); }catch(e){ render(); }
+      });
+    }
+
+    const btn=document.getElementById('termsAgreeBtn');
+    const chk=document.getElementById('termsAgreeCheck');
+    if(btn){
+      btn.addEventListener('click', ()=>{
+        if(chk && !chk.checked){
+          showAppMessage('Please agree', 'Tick “I agree to the Terms of use” then tap OK.');
+          return;
+        }
+        acceptTermsAndContinue();
+      });
+    }
+  }catch(e){}
   document.querySelectorAll('#main [data-nav]').forEach(b=>{
     b.addEventListener('click', ()=> setView(b.dataset.nav));
   });
@@ -8262,24 +8389,49 @@ function expandFreeBusyPayload(data){
   }
   return null;
 }
+function newShareId(){
+  const chars='abcdefghijkmnopqrstuvwxyz23456789';
+  let s='';
+  for(let i=0;i<7;i++) s+=chars[Math.floor(Math.random()*chars.length)];
+  return s;
+}
 async function shortenUrl(longUrl){
-  // Free public shortener (no API key). Falls back to long URL on failure.
+  // Short link is on your own SnapBack site (?s=abc1234).
+  // The calendar data is stored in Firebase. No third-party shortener.
   try{
-    const api = 'https://is.gd/create.php?format=json&url=' + encodeURIComponent(longUrl);
-    const res = await fetch(api);
-    if(!res.ok) return longUrl;
-    const j = await res.json();
-    if(j && j.shorturl) return j.shorturl;
-  }catch(e){}
+    const parts=String(longUrl||'').split('?fb=');
+    if(parts.length<2 || !parts[1]) return longUrl;
+    if(typeof initFirebase==='function') initFirebase();
+    if(typeof _db==='undefined' || !_db) return longUrl;
+    const id=newShareId();
+    await _db.collection('publicShares').doc(id).set({
+      fb: parts[1],
+      created: Date.now()
+    });
+    return parts[0]+'?s='+id;
+  }catch(e){
+    return longUrl;
+  }
+}
+async function resolveShortShare(){
   try{
-    const api2 = 'https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl);
-    const res2 = await fetch(api2);
-    if(res2.ok){
-      const text = (await res2.text()).trim();
-      if(text && text.indexOf('http')===0) return text;
-    }
+    const q=new URLSearchParams(String(location.search||''));
+    const id=(q.get('s')||'').trim();
+    if(!id || !/^[a-z0-9]{5,12}$/i.test(id)) return;
+    if(state._shareResolved===id && state.freeBusyPublic) return;
+    if(typeof initFirebase==='function') initFirebase();
+    if(typeof _db==='undefined' || !_db) return;
+    const snap=await _db.collection('publicShares').doc(id).get();
+    if(!snap.exists) return;
+    const fb=snap.data()&&snap.data().fb;
+    if(!fb) return;
+    const json=b64urlDecode(fb);
+    if(!json) return;
+    state.freeBusyPublic=expandFreeBusyPayload(JSON.parse(json));
+    state.view='freebusy';
+    state._shareResolved=id;
+    try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
   }catch(e){}
-  return longUrl;
 }
 function shareWeekFreeBusy(){
   try{
@@ -11176,7 +11328,7 @@ function viewSettings(){
       <button class="btn sm" id="startTourBtn" type="button">Take a tour</button>
       <button class="btn ghost sm" id="gotoHelpBtn" type="button">Help &amp; FAQ</button>
     </p>
-    <details class="setgroup" id="settingsProfileDetails" open>
+    <details class="setgroup" id="settingsProfileDetails">
       <summary>Your profile</summary>
       <div class="setgroup-body">
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px"></p>
@@ -11227,7 +11379,13 @@ function viewSettings(){
       <summary>Nudge</summary>
       <div class="setgroup-body">
       <p style="font-size:.84rem;color:var(--muted);margin:0 0 14px">Daily alarm. Opens a math stop-screen so it is harder to dismiss by accident.</p>
-      <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${(state.wakeAlarm&&state.wakeAlarm.time)||'07:00'}"></div>
+      <div class="field">
+        <div style="font-size:.78rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase">Current time</div>
+        <div id="nudgeNowClock" style="font-size:2.1rem;font-weight:800;letter-spacing:.03em;margin:2px 0 10px;font-variant-numeric:tabular-nums">--:--</div>
+        <label>Alarm time</label>
+        <input type="time" id="wakeTime" value="${(state.wakeAlarm&&state.wakeAlarm.time)||'07:00'}">
+        <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">The clock above always shows the time now. Alarm time is only when Nudge should ring.</p>
+      </div>
       <div class="field" style="margin-top:8px"><label>One-time date (optional)</label>
         <input type="date" id="wakeOnceDate" value="${(state.wakeAlarm&&state.wakeAlarm.onceDate)||''}" min="2000-01-01" max="2100-12-31">
         <div style="font-size:.78rem;color:var(--muted);margin-top:4px">If set, Nudge rings only on this date (at the time above). Leave blank to use weekly days instead.</div>
@@ -11341,8 +11499,8 @@ function viewSettings(){
       </div>
     </details>
 
-        <details class="setgroup">
-      <summary
+    <details class="setgroup">
+      <summary>Backup & restore</summary>
       <div class="setgroup-body">
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px;line-height:1.45">
           <b>Automatic (no action needed):</b><br>
@@ -11468,6 +11626,17 @@ function viewSettings(){
       </div>
     </div>
     </div></details></div>
+    <details class="setgroup"><summary>Report a problem</summary>
+      <div class="setgroup-body">
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px;line-height:1.45">Something not working? Send a note to the person who shared SnapBack with you. Include what you were doing and what you expected.</p>
+        <textarea id="bugReportText" rows="4" placeholder="Example: Task reminder on 2 Oct had no sound." style="width:100%"></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button type="button" class="btn" id="bugReportEmailBtn">Email this report</button>
+          <button type="button" class="btn ghost" id="bugReportCopyBtn">Copy report</button>
+        </div>
+        <p style="font-size:.75rem;color:var(--muted);margin:8px 0 0">Goes to the SnapBack operator. Your tasks stay on your device unless you paste them into the note.</p>
+      </div>
+    </details>
     <details class="setgroup"><summary>Share an Update</summary><div style="margin-top:8px">
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Pick a range and what to include, then edit the preview if you want. Share buttons send <b>exactly</b> what is in the box.</p>
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
@@ -12328,7 +12497,8 @@ function wireView(){
     else if(action==='proj-custom-item') el.addEventListener('change', ()=>{ const pr=getProject(state.projectId); if(!pr||!pr.customItems) return; if(pr.customItems[Number(el.dataset.idx)]) pr.customItems[Number(el.dataset.idx)].done=!!el.checked; try{saveState();}catch(e){} persistRender(); });
     else if(action==='proj-custom-del') el.addEventListener('click', ()=>{ const pr=getProject(state.projectId); if(!pr||!pr.customItems) return; pr.customItems.splice(Number(el.dataset.idx),1); try{saveState();}catch(e){} persistRender(); });
     else if(action==='delete-project') el.addEventListener('click', ()=>{ if(!confirm('Delete this project permanently? This cannot be undone.')) return; const id=el.dataset.id; state.projects=(state.projects||[]).filter(x=>x.id!==id); if(state.projectId===id) state.projectId=null; try{saveState();}catch(e){} persistRender(); });
-    else if(action==='nav'){ const v=el.getAttribute('data-view')||'today'; state.view=v; try{persistRender();}catch(e){render();} }
+    else if(action==='nav') el.addEventListener('click', ()=>{ const v=el.getAttribute('data-view')||'today'; state.view=v; try{persistRender();}catch(e){render();} });
+    else if(action==='accept-terms') el.addEventListener('click', ()=>{ acceptTermsAndContinue(); });
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
     else if(action==='ef-start') el.addEventListener('click', ()=>{
       if(!state.energyFocus) state.energyFocus={items:[], timerSec:600};
@@ -13532,7 +13702,45 @@ function wireView(){
       tSearch.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); state.taskSearch=tSearch.value||''; try{ persistRender(); }catch(e2){ render(); } } });
     }
 
+    try{
+      const clock=document.getElementById('nudgeNowClock');
+      if(clock){
+        const paint=function(){
+          try{
+            const d=new Date();
+            const hh=String(d.getHours()).padStart(2,'0');
+            const mm=String(d.getMinutes()).padStart(2,'0');
+            const ss=String(d.getSeconds()).padStart(2,'0');
+            clock.textContent=hh+':'+mm+':'+ss;
+          }catch(e){}
+        };
+        paint();
+        if(window.__nudgeClockTimer) clearInterval(window.__nudgeClockTimer);
+        window.__nudgeClockTimer=setInterval(paint, 1000);
+      }
+    }catch(e){}
     try{ if(state._forceOpenNudge){ state._forceOpenNudge=false; const nb=document.getElementById('nudgeSettingsBlock'); if(nb) nb.open=true; } }catch(e){}
+    const bugEmail=document.getElementById('bugReportEmailBtn');
+    if(bugEmail) bugEmail.addEventListener('click', ()=>{
+      const note=(document.getElementById('bugReportText')?.value||'').trim();
+      if(!note){ showAppMessage('Add a note', 'Write what went wrong, then tap Email this report.'); return; }
+      const to='vs_uma@hotmail.com';
+      const subject=encodeURIComponent('SnapBack problem report');
+      const body=encodeURIComponent(note+'\n\n— sent from SnapBack');
+      try{ window.open('mailto:'+to+'?subject='+subject+'&body='+body); }catch(e){
+        showAppMessage('Email this to vs_uma@hotmail.com', note);
+      }
+    });
+    const bugCopy=document.getElementById('bugReportCopyBtn');
+    if(bugCopy) bugCopy.addEventListener('click', ()=>{
+      const note=(document.getElementById('bugReportText')?.value||'').trim()||'SnapBack problem report';
+      const text=note+'\n\nPlease email this to vs_uma@hotmail.com';
+      try{
+        if(navigator.clipboard&&navigator.clipboard.writeText){
+          navigator.clipboard.writeText(text).then(function(){ showAppMessage('Copied','Paste it into email or WhatsApp.'); });
+        } else showAppMessage('Your report', text);
+      }catch(e){ showAppMessage('Your report', text); }
+    });
     const copyWeb=document.getElementById('copyPublicWebUrlBtn');
     if(copyWeb) copyWeb.addEventListener('click', ()=>{
       const v = (document.getElementById('publicWebUrlInput')?.value||DEFAULT_PUBLIC_WEB_URL||'').trim();
