@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="281">
+<meta name="snapback-build" content="286">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4370,7 +4370,7 @@ function renderMain(){
     return;
   }
   const views={today:viewToday,terms:viewTerms,tasks:viewTasks,challenges:viewChallenges,planAhead:viewPlanAhead,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
-    eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,
+    eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,nudge:viewNudge,
     bodydouble:viewBodyDouble,energyFocus:viewEnergyFocus,ifThen:viewIfThen,ritualBackpack:viewRitualBackpack,ritualCostume:viewRitualCostume,ritualLocation:viewRitualLocation,contextSplit:viewContextSplit,settings:viewSettings,
     habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp,
     freebusyPreview:viewFreeBusyPreview,
@@ -4641,6 +4641,11 @@ function renderModal(){
   }
 
   
+  // Deadline helper — before the start wizard
+  if(state.dueWizard && state.dueWizard.step){
+    if(renderDueWizard(root)) return;
+  }
+
   // Start Wizard — multi-step ADHD kickstart
   if(state.wizard && state.wizard.step){
     const w = state.wizard;
@@ -5068,6 +5073,7 @@ function goBack(){
   // Grab Bag / One-at-a-time / Tile wall live under Tasks — back should return to Tasks list
   if(state.view==='tasks' && state.listMode && state.listMode!=='all'){
     state.listMode = 'all';
+    if(state.navHistory && state.navHistory.length) state.view = state.navHistory.pop();
     persistRender();
     return;
   }
@@ -5308,7 +5314,19 @@ async function fetchGoogleCalendarEvents(daysAhead){
   daysAhead = daysAhead || 14;
   const token = state._googleAccessToken;
   if(!token){
-    showAppMessage('Connect Google Calendar', 'Sign in with Google again (calendar permission), then tap Sync Google Calendar.');
+    try{
+      if(_auth && _auth.currentUser){
+        const provider = new firebase.auth.GoogleAuthProvider();
+        provider.addScope('https://www.googleapis.com/auth/calendar.readonly');
+        const result = await _auth.signInWithPopup(provider);
+        const fresh = result && result.credential && result.credential.accessToken;
+        if(fresh) state._googleAccessToken = fresh;
+      }
+    }catch(e){}
+  }
+  const useToken = state._googleAccessToken;
+  if(!useToken){
+    showAppMessage('Could not read Google Calendar', 'Sign in with Google again and allow Calendar, or upload a calendar file from Plan → Schedule.');
     return [];
   }
   const timeMin = new Date(); timeMin.setHours(0,0,0,0);
@@ -5317,7 +5335,7 @@ async function fetchGoogleCalendarEvents(daysAhead){
     + '&timeMin=' + encodeURIComponent(timeMin.toISOString())
     + '&timeMax=' + encodeURIComponent(timeMax.toISOString())
     + '&maxResults=100';
-  const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+  const res = await fetch(url, { headers: { Authorization: 'Bearer ' + useToken } });
   if(!res.ok){
     const err = await res.text();
     throw new Error('Google Calendar HTTP '+res.status+': '+err.slice(0,120));
@@ -5373,7 +5391,16 @@ async function syncGoogleCalendarReadonly(){
     showAppMessage('Google Calendar', mapped.length+' event(s) imported (read-only). Shown as busy blocks in schedule.');
   }catch(e){
     console.warn(e);
-    showAppMessage('Calendar sync failed', (e&&e.message)||String(e));
+    const msg = String((e&&e.message)||e||'');
+    if(msg.indexOf('403')>=0 && (msg.indexOf('has not been used')>=0 || msg.indexOf('accessNotConfigured')>=0 || msg.indexOf('SERVICE_DISABLED')>=0)){
+      showAppMessage('Could not read Google Calendar', 'SnapBack could not bring in Google Calendar just now. Download a calendar file from Google or Outlook and use Upload calendar file instead.');
+      return;
+    }
+    if(msg.indexOf('403')>=0){
+      showAppMessage('Calendar permission needed', 'Log out, sign in with Google again, and allow Calendar access when Google asks. Then tap Sync calendar now.');
+      return;
+    }
+    showAppMessage('Calendar sync failed', msg.slice(0,280));
   }
 }
 
@@ -5408,26 +5435,46 @@ function parseIcsEvents(icsText){
   return events;
 }
 
+async function fetchIcsText(url){
+  const attempts = [url];
+  if(/^https?:/i.test(url)){
+    attempts.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+    attempts.push('https://corsproxy.io/?' + encodeURIComponent(url));
+  }
+  let last = 'Failed to fetch';
+  for(let i=0;i<attempts.length;i++){
+    try{
+      const res = await fetch(attempts[i]);
+      if(!res.ok){ last = 'Could not fetch the calendar ('+res.status+').'; continue; }
+      const text = await res.text();
+      if(text && text.indexOf('BEGIN:VEVENT')>=0) return text;
+      last = 'That link is not a calendar file. Copy the ICS link, not the normal Outlook webpage link.';
+    }catch(e){
+      last = (e && e.message) || 'Failed to fetch';
+    }
+  }
+  throw new Error(last);
+}
 async function syncIcsCalendarUrl(url){
   url = String(url||'').trim();
-  if(!url){ showAppMessage('ICS URL needed', 'Paste a published calendar link (.ics) from Google, Outlook, or Apple.'); return; }
+  if(!url){ showAppMessage('ICS link needed', 'Paste the published calendar link that ends in .ics.'); return; }
   try{
-    showAppMessage('Syncing…', 'Fetching calendar feed…');
-    const res = await fetch(url);
-    if(!res.ok) throw new Error('Could not fetch ICS ('+res.status+'). If blocked, try a public “secret address” link.');
-    const text = await res.text();
-    const mapped = parseIcsEvents(text);
-    if(!state.externalBusy) state.externalBusy = [];
-    state.externalBusy = (state.externalBusy||[]).filter(b=>b.source!=='ics').concat(mapped);
+    showAppMessage('Syncing…', 'Reading the calendar link…');
+    const text = await fetchIcsText(url);
+    const result = importIcsText(text, 'ics-url');
+    if(!result.ok){
+      showAppMessage('ICS sync failed', result.message);
+      return;
+    }
     state.settings = state.settings||{};
     state.settings.icsUrl = url;
     state.settings.calendarLastSync = Date.now();
     state.settings.calendarLastSource = 'ics';
     try{ saveState(); }catch(e){}
     try{ persistRender(); }catch(e){}
-    showAppMessage('Calendar feed', mapped.length+' event(s) imported from ICS.');
+    showAppMessage('Calendar imported', 'Added '+result.added+' event(s). Your Schedule is showing '+result.first+'.');
   }catch(e){
-    showAppMessage('ICS sync failed', (e&&e.message)||String(e));
+    showAppMessage('ICS sync failed', ((e&&e.message)||String(e))+' If this keeps happening, download the .ics file and use Upload calendar file.');
   }
 }
 
@@ -5780,18 +5827,18 @@ function viewLogin(){
     </div>
     <div class="card">
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px;line-height:1.45">
-        <b>Recommended:</b> Continue with <b>Google</b> so your data is backed up automatically and can open on phone and computer.
-        Works on <b>Android and iPhone</b> (and laptop) if you have a Google account — including many people who mainly use an iPhone.
+        <b>Recommended:</b> Continue with <b>Google</b> so your tasks are kept and can open on this phone and on a computer.
+        This does <b>not</b> copy your Google or Outlook calendar. Calendar import is separate, under Plan → Your Schedule.
       </p>
       <p style="font-size:.8rem;color:var(--muted);margin:0 0 12px;line-height:1.4">
-        Apple ID and Outlook sign-in are not available in this version yet. If you only have Apple or Microsoft email, you can still use a <b>username + password</b> below (saved on this device), or create a free Google account for cloud backup.
+        Apple ID and Outlook sign-in are not available yet. A username stays on <b>this device only</b>. It does not appear on your other phone or laptop. If you forget the password, the Recovery PIN is the only way back. There is no email reset.
       </p>
       <button type="button" class="btn" id="loginGoogleBtn" style="width:100%;margin-bottom:14px">Continue with Google (recommended)</button>
       <div style="text-align:center;font-size:.8rem;color:var(--muted);margin:10px 0 8px">or use a username on this device only</div>
       <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="Username" value="${hasLocal?escapeHtml(la.username):''}"></div>
       <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="Password"></div>
       <div class="field" id="loginPinField"><label>Recovery PIN (required for new accounts)</label><input id="loginRecoveryPin" type="password" inputmode="numeric" placeholder="4+ digits — needed if you forget password"></div>
-      <p style="font-size:.72rem;color:var(--muted);margin:-4px 0 8px">Required when you <b>Create account</b>. Store it somewhere safe.</p>
+      <p style="font-size:.72rem;color:var(--muted);margin:-4px 0 8px">Required before <b>Create account</b>. Write the PIN down. Without it, a forgotten password cannot be recovered, and this username cannot be opened on another device.</p>
       <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin:12px 0"><input type="checkbox" id="loginRemember" checked> Stay signed in</label>
       <button type="button" class="btn" id="loginLocalBtn" style="width:100%">${hasLocal?'Sign in':'Create account'}</button>
       ${hasLocal?'<button type="button" class="btn ghost sm" id="loginCreateBtn" style="width:100%;margin-top:8px">Create new account</button>':''}
@@ -6272,8 +6319,7 @@ function renderTimerOnly(){
 
 function viewPlan(){
   const cards=[
-    {id:'calendar', label:'Your Schedule', desc:'Week & month view', ico:'📅'},
-    {id:'semester', label:'Calendar', desc:'Classes, paste timetable, add to schedule', ico:'🎓'},
+    {id:'calendar', label:'Schedule', desc:'Day, week, or month. Tap a time to add. Tap an event to edit.', ico:'📅'},
     {id:'projects', label:'Projects', desc:'Classes as projects + tasks', ico:'📚'},
     {id:'money', label:'Money', desc:'Simple money tracking', ico:'💰'},
     {id:'habits', label:'Healthy Habits', desc:'Sleep, food, movement check-ins', ico:'🌿'},
@@ -6431,19 +6477,18 @@ function applyChallengeTool(toolId, challengeId){
   if(toolId==='plan-ahead' || toolId==='planAhead'){ navigateTo('planAhead'); return; }
   if(toolId==='journal'){ navigateTo('journal'); return; }
   if(toolId==='bugme' || toolId==='bugMe' || toolId==='settings'){
-    navigateTo('settings');
-    showAppMessage('Nudge', 'Scroll to Nudge in Settings. Set a time and a task right away, then Save.');
+    navigateTo('nudge');
     return;
   }
+  if(toolId==='tasks'){ state.listMode='dues-only'; navigateTo('tasks'); return; }
+  if(toolId==='today'){ state.listMode='next-up'; navigateTo('tasks'); return; }
   if(toolId==='calendar'){ navigateTo('calendar'); return; }
-  if(toolId==='today'){ navigateTo('today'); return; }
   if(toolId==='energy-focus' || toolId==='energyFocus'){ navigateTo('energyFocus'); return; }
   if(toolId==='if-then' || toolId==='ifThen'){ navigateTo('ifThen'); return; }
   if(toolId==='ritual-backpack' || toolId==='backpackReset'){ navigateTo('ritualBackpack'); return; }
   if(toolId==='ritual-costume' || toolId==='costumeChange'){ navigateTo('ritualCostume'); return; }
   if(toolId==='ritual-location' || toolId==='oneLocation'){ navigateTo('ritualLocation'); return; }
   if(toolId==='context-split' || toolId==='contextSplit'){ navigateTo('contextSplit'); return; }
-  if(toolId==='tasks'){ state.listMode='all'; navigateTo('tasks'); return; }
   if(toolId==='mustFrog'){ state.listMode='must-frog-pick'; state.filter='all'; navigateTo('tasks'); return; }
 
   // Task-list modes with real UIs
@@ -7084,6 +7129,292 @@ function wizardGoRecommended(){
 function wizardPickWhy(code){ /* legacy no-op kept for old buttons */ wizardPickOption(code); }
 function wizardGo(){ wizardGoRecommended(); }
 
+function openDueWizard(){
+  state.dueWizard = { step:'pick', taskId:null, situation:'', choice:'' };
+  if(state.techniqueTaskId && findTask(state.techniqueTaskId)){
+    state.dueWizard.taskId = state.techniqueTaskId;
+    state.dueWizard.step = 'situation';
+  }
+  persistRender();
+}
+function dueWizardClose(){ state.dueWizard=null; try{ persistRender(); }catch(e){} }
+function dueTask(){
+  const w=state.dueWizard;
+  return w && w.taskId ? findTask(w.taskId) : null;
+}
+function dueSetTask(id){
+  if(!state.dueWizard || !id) return;
+  state.dueWizard.taskId=id;
+  state.dueWizard.step='situation';
+  applyTechniqueTaskId(id);
+  persistRender();
+}
+function dueCreateTask(){
+  const title=(document.getElementById('dueNewTask')&&document.getElementById('dueNewTask').value||'').trim();
+  if(!title){ showAppMessage('Name needed','Type the assignment or deadline.'); return; }
+  if(!Array.isArray(state.tasks)) state.tasks=[];
+  const id=uid();
+  state.tasks.unshift({
+    id, title, notes:'', date:'', time:'', priority:'high', tier:'must', frog:false,
+    context:'school', technique:'dueWizard', done:false, chunks:[], pomodoros:0, created:Date.now()
+  });
+  try{ saveState(); }catch(e){}
+  dueSetTask(id);
+}
+function dueShiftDate(dateStr, days){
+  const d=new Date(String(dateStr||'')+'T12:00:00');
+  if(isNaN(d.getTime())) return '';
+  d.setDate(d.getDate()+days);
+  return toDateStr(d);
+}
+function dueStartFifteen(){
+  const t=dueTask();
+  if(t) applyTechniqueTaskId(t.id);
+  if(!state.settings) state.settings={};
+  state.settings.workMin=15;
+  if(!state.timer) state.timer={};
+  state.timer.mode='work';
+  state.timer.running=false;
+  state.timer.remaining=15*60;
+  state.timer.total=15*60;
+  state.dueWizard=null;
+  showAppMessage('15 minutes', 'Type without editing. When it ends, you may stop.');
+  navigateTo('timer');
+}
+function dueSaveRough(){
+  const t=dueTask();
+  const text=(document.getElementById('dueRough')&&document.getElementById('dueRough').value||'').trim();
+  if(!t){ dueWizardClose(); return; }
+  if(text){
+    t.notes=((t.notes?t.notes+'\n':'')+'Rough version: '+text).slice(0,2000);
+    if(!Array.isArray(t.chunks)) t.chunks=[];
+    t.chunks.push({id:uid(), text:text, done:false});
+  }
+  t.tier='must';
+  try{ saveState(); }catch(e){}
+  showAppMessage('Saved', 'A partial version is better than nothing. Hand that in if the full one will not happen.');
+  dueWizardClose();
+}
+function dueSaveDate(){
+  const t=dueTask();
+  const date=(document.getElementById('dueRealDate')&&document.getElementById('dueRealDate').value)||'';
+  if(!t || !date){ showAppMessage('Need a date','Type or pick the real due date.'); return; }
+  t.date=date;
+  try{ saveState(); }catch(e){}
+  state.dueWizard.step='future';
+  persistRender();
+}
+function dueBuffer(){
+  const t=dueTask();
+  if(!t || !t.date){ showAppMessage('Need the real date','Set the due date first.'); return; }
+  const early=dueShiftDate(t.date,-2);
+  if(!early){ showAppMessage('Need the real date','Set the due date first.'); return; }
+  if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
+  state.studyBlocks.push({
+    id:uid(), date:early, start:'18:00', end:'18:30',
+    label:'Hard stop: '+(t.title||'task')+' (real due '+t.date+')', meetingUrl:'', source:'buffer'
+  });
+  state.calRef=early;
+  state.selectedDay=early;
+  try{ saveState(); }catch(e){}
+  state.dueWizard=null;
+  showAppMessage('Earlier stop saved', 'Treat '+early+' as the deadline. The real date stays on the task.');
+  navigateTo('calendar');
+}
+function dueCopyNote(){
+  const t=dueTask();
+  const course=(document.getElementById('dueCourse')&&document.getElementById('dueCourse').value||'[Course]').trim();
+  const proposed=(document.getElementById('dueProposed')&&document.getElementById('dueProposed').value)||'';
+  const name=(document.getElementById('dueName')&&document.getElementById('dueName').value||'').trim();
+  const title=t?t.title:'[Assignment]';
+  const original=(t&&t.date)||'[date]';
+  const when=proposed||'[a specific time, for example tomorrow 5 pm]';
+  const body='Subject: Extension request: '+course+' - '+title+'\n\nDear Professor,\n\nI am writing to request a short extension on '+title+', due '+original+'. I want the work to meet the standard of the course, and I am behind on my timeline.\n\nMay I submit it by '+when+'? I have already started, and I can share what I have so far.\n\nThank you,\n'+(name||'[Your name]');
+  const box=document.getElementById('dueLetter');
+  if(box) box.value=body;
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(body);
+  }catch(e){}
+  showAppMessage('Copied', 'Paste this into email. Change anything that is not true. Do not ask for an open-ended extension.');
+}
+function dueApplyProposed(){
+  const t=dueTask();
+  const proposed=(document.getElementById('dueProposed')&&document.getElementById('dueProposed').value)||'';
+  if(!t || !proposed){ showAppMessage('Pick a new date','Choose the date you will actually send it.'); return; }
+  t.date=proposed;
+  t.tier='must';
+  try{ saveState(); }catch(e){}
+  showAppMessage('Date updated', 'The task now says '+proposed+'. That is your promise, not an open deadline.');
+}
+function renderDueWizard(root){
+  const w=state.dueWizard;
+  if(!w) return false;
+  const t=dueTask();
+  const cardStart='<div class="overlay" id="dueOverlay"><div class="quotecard" style="max-width:460px;text-align:left;max-height:90vh;overflow:auto">';
+  const cardEnd='<button class="btn ghost" id="dueClose" style="margin-top:12px;width:100%">Close</button></div></div>';
+  if(w.step==='pick'){
+    const open=(state.tasks||[]).filter(x=>!x.done && !x.backburner);
+    root.innerHTML=cardStart+`
+      <div class="qeyebrow">Deadline helper</div>
+      <div style="font-weight:800;font-size:1.12rem;margin-bottom:8px">Which deadline is worrying you?</div>
+      <p style="color:var(--muted);font-size:.9rem;margin:0 0 12px">Choose one you already created, or name it. Then we look at where you actually are.</p>
+      <select id="dueTaskSelect" style="width:100%;margin-bottom:10px"><option value="">— Choose —</option>${open.map(x=>'<option value="'+x.id+'">'+escapeHtml(x.title)+(x.date?' · '+escapeHtml(x.date):'')+'</option>').join('')}</select>
+      <div class="row" style="gap:8px;margin-bottom:12px"><input id="dueNewTask" placeholder="Or type the assignment" style="flex:1"><button class="btn sm" id="dueCreate" type="button">Create</button></div>
+      <button class="btn" id="dueUse" type="button" style="width:100%">Continue</button>
+    `+cardEnd;
+    document.getElementById('dueClose').onclick=dueWizardClose;
+    document.getElementById('dueCreate').onclick=dueCreateTask;
+    document.getElementById('dueUse').onclick=function(){
+      const id=document.getElementById('dueTaskSelect')&&document.getElementById('dueTaskSelect').value;
+      if(!id){ showAppMessage('Choose one','Pick a task or create it.'); return; }
+      dueSetTask(id);
+    };
+    return true;
+  }
+  if(w.step==='situation'){
+    root.innerHTML=cardStart+`
+      <div class="qeyebrow">Deadline helper</div>
+      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">${escapeHtml(t?t.title:'')}</p>
+      <div style="font-weight:800;font-size:1.05rem;margin-bottom:12px">Where are you with this deadline?</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn ghost dueSit" data-s="passed" type="button" style="text-align:left">It has already passed</button>
+        <button class="btn ghost dueSit" data-s="soon" type="button" style="text-align:left">It is today or tomorrow</button>
+        <button class="btn ghost dueSit" data-s="later" type="button" style="text-align:left">It is later, but I am already panicking</button>
+        <button class="btn ghost dueSit" data-s="unknown" type="button" style="text-align:left">I do not know the real date</button>
+      </div>
+    `+cardEnd;
+    document.getElementById('dueClose').onclick=dueWizardClose;
+    document.querySelectorAll('.dueSit').forEach(function(btn){
+      btn.onclick=function(){
+        w.situation=btn.getAttribute('data-s');
+        w.step = (w.situation==='later') ? 'future' : (w.situation==='unknown' ? 'find-date' : 'triage');
+        persistRender();
+      };
+    });
+    return true;
+  }
+  if(w.step==='find-date'){
+    root.innerHTML=cardStart+`
+      <div class="qeyebrow">Find the real date</div>
+      <div style="font-weight:800;margin-bottom:8px">Do not plan until the date is real.</div>
+      <p style="font-size:.9rem;line-height:1.45">Open the course page, the email, or the syllabus. Find the due date. Put it here. That is the whole job for this minute.</p>
+      <div class="field"><label>Real due date</label><input type="date" id="dueRealDate" value="${escapeHtml((t&&t.date)||'')}"></div>
+      <button class="btn" id="dueSaveDate" type="button" style="width:100%;margin-top:8px">Save this date</button>
+    `+cardEnd;
+    document.getElementById('dueClose').onclick=dueWizardClose;
+    document.getElementById('dueSaveDate').onclick=dueSaveDate;
+    return true;
+  }
+  if(w.step==='triage'){
+    root.innerHTML=cardStart+`
+      <div class="qeyebrow">Right now</div>
+      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">${escapeHtml(t?t.title:'')}</p>
+      <div style="font-weight:800;font-size:1.05rem;margin-bottom:8px">A partial version beats a zero. What can you still do?</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn ghost dueCh" data-c="rough" type="button" style="text-align:left">Hand in a rough, unfinished version</button>
+        <button class="btn ghost dueCh" data-c="fifteen" type="button" style="text-align:left">Do 15 minutes of a messy draft, no editing</button>
+        <button class="btn ghost dueCh" data-c="rules" type="button" style="text-align:left">Check the late penalty or if one assignment is dropped</button>
+        <button class="btn ghost dueCh" data-c="ask" type="button" style="text-align:left">Ask for a short extension before I disappear</button>
+      </div>
+    `+cardEnd;
+    document.getElementById('dueClose').onclick=dueWizardClose;
+    document.querySelectorAll('.dueCh').forEach(function(btn){
+      btn.onclick=function(){ w.choice=btn.getAttribute('data-c'); w.step='act'; persistRender(); };
+    });
+    return true;
+  }
+  if(w.step==='future'){
+    root.innerHTML=cardStart+`
+      <div class="qeyebrow">Before it becomes a crisis</div>
+      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">${escapeHtml(t?t.title:'')}${t&&t.date?' · due '+escapeHtml(t.date):''}</p>
+      <div style="font-weight:800;font-size:1.05rem;margin-bottom:8px">Pick one support. Not all of them.</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn ghost dueFu" data-c="early" type="button" style="text-align:left">Put a hard stop 2 days before the real date</button>
+        <button class="btn ghost dueFu" data-c="body" type="button" style="text-align:left">Work beside someone, not alone</button>
+        <button class="btn ghost dueFu" data-c="micro" type="button" style="text-align:left">Turn it into one tiny step</button>
+        <button class="btn ghost dueFu" data-c="office" type="button" style="text-align:left">See if the college allows flexible deadlines</button>
+      </div>
+    `+cardEnd;
+    document.getElementById('dueClose').onclick=dueWizardClose;
+    document.querySelectorAll('.dueFu').forEach(function(btn){
+      btn.onclick=function(){ w.choice=btn.getAttribute('data-c'); w.step='act'; persistRender(); };
+    });
+    return true;
+  }
+  const proposedDefault = t && t.date ? dueShiftDate(t.date, 2) : '';
+  let inner='';
+  if(w.choice==='rough'){
+    inner=`<div class="qeyebrow">Rough version</div>
+      <div style="font-weight:800;margin-bottom:8px">What does a “just enough” version include?</div>
+      <p style="font-size:.9rem">Not the best version. The version that is not a zero. Two lines is enough.</p>
+      <textarea id="dueRough" rows="3" placeholder="Example: intro plus three bullet points" style="width:100%"></textarea>
+      <button class="btn" id="dueRoughSave" type="button" style="width:100%;margin-top:8px">Save this as the version I will hand in</button>`;
+  } else if(w.choice==='fifteen'){
+    inner=`<div class="qeyebrow">15 minutes</div>
+      <div style="font-weight:800;margin-bottom:8px">Open it and type. Do not edit.</div>
+      <p style="font-size:.9rem">Starting is the hard part. For 15 minutes, bad sentences are allowed. When the time ends, you may stop.</p>
+      <button class="btn" id="dueFifteen" type="button" style="width:100%">Start 15 minutes</button>`;
+  } else if(w.choice==='rules'){
+    inner=`<div class="qeyebrow">The actual rule</div>
+      <div style="font-weight:800;margin-bottom:8px">Panic shrinks when the penalty is a number.</div>
+      <p style="font-size:.9rem">Open the syllabus or the course page. Look for a late penalty, a grace day, or “lowest score dropped.” Write what you find.</p>
+      <textarea id="dueRuleNote" rows="3" placeholder="Example: 10% off per day, or one assignment dropped" style="width:100%"></textarea>
+      <button class="btn" id="dueRuleSave" type="button" style="width:100%;margin-top:8px">Save what the rule says</button>`;
+  } else if(w.choice==='ask'){
+    inner=`<div class="qeyebrow">Ask before the silence</div>
+      <div style="font-weight:800;margin-bottom:8px">Ask for a specific time. Not “whenever.”</div>
+      <div class="field"><label>Course</label><input id="dueCourse" placeholder="Course name"></div>
+      <div class="field"><label>I can send it by</label><input type="date" id="dueProposed" value="${escapeHtml(proposedDefault)}"></div>
+      <div class="field"><label>Your name</label><input id="dueName" placeholder="Name"></div>
+      <textarea id="dueLetter" rows="8" style="width:100%;margin-top:8px" placeholder="The note appears here"></textarea>
+      <button class="btn" id="dueCopy" type="button" style="width:100%;margin-top:8px">Write the note and copy it</button>
+      <button class="btn ghost" id="dueApply" type="button" style="width:100%;margin-top:8px">Also put that new date on the task</button>`;
+  } else if(w.choice==='early'){
+    inner=`<div class="qeyebrow">Bring the date closer</div>
+      <div style="font-weight:800;margin-bottom:8px">The real date stays. Your stop is earlier.</div>
+      <p style="font-size:.9rem">${t&&t.date?('Real due date: '+escapeHtml(t.date)+'. A hard stop will be added two days before, on the schedule.'):'This task has no date yet. Go back and set the real date first.'}</p>
+      <button class="btn" id="dueEarly" type="button" style="width:100%">Add the earlier hard stop</button>`;
+  } else if(w.choice==='body'){
+    inner=`<div class="qeyebrow">Do not do this alone</div>
+      <div style="font-weight:800;margin-bottom:8px">Another person in the room makes starting easier.</div>
+      <p style="font-size:.9rem">Sit with a friend, a classmate, or a busy café. Or open Body Doubling here and pick a short sprint. You do not have to explain the whole assignment.</p>
+      <button class="btn" id="dueBody" type="button" style="width:100%">Open Body Doubling</button>`;
+  } else if(w.choice==='micro'){
+    inner=`<div class="qeyebrow">One tiny step</div>
+      <div style="font-weight:800;margin-bottom:8px">Do not write “work on the paper.”</div>
+      <p style="font-size:.9rem">Write one action you can finish in a few minutes. Example: open the file, or find three sources. Bite Size will hold that list.</p>
+      <button class="btn" id="dueMicro" type="button" style="width:100%">Open Bite Size for this task</button>`;
+  } else if(w.choice==='office'){
+    inner=`<div class="qeyebrow">A formal safety net</div>
+      <div style="font-weight:800;margin-bottom:8px">Some colleges allow flexible deadlines for ADHD.</div>
+      <p style="font-size:.9rem">That is a support, not a confession. If you are registered with the disability or accessibility office, you can ask what “flexible deadline” means in this course. If you are not registered, the office can tell you how to start. You do not have to decide today.</p>
+      <button class="btn" id="dueOfficeDone" type="button" style="width:100%">I know what to check</button>`;
+  } else {
+    inner='<p>Choose a step again.</p><button class="btn" id="dueBackSit" type="button">Back</button>';
+  }
+  root.innerHTML=cardStart+inner+cardEnd;
+  document.getElementById('dueClose').onclick=dueWizardClose;
+  const bind=function(id, fn){ const el=document.getElementById(id); if(el) el.onclick=fn; };
+  bind('dueRoughSave', dueSaveRough);
+  bind('dueFifteen', dueStartFifteen);
+  bind('dueRuleSave', function(){
+    const note=(document.getElementById('dueRuleNote')&&document.getElementById('dueRuleNote').value||'').trim();
+    if(t && note){ t.notes=((t.notes?t.notes+'\n':'')+'Rule: '+note).slice(0,2000); try{saveState();}catch(e){} }
+    showAppMessage('Saved', note?'The rule is on the task.':'If you did not find a rule, a short extension note is the next honest step.');
+    dueWizardClose();
+  });
+  bind('dueCopy', dueCopyNote);
+  bind('dueApply', dueApplyProposed);
+  bind('dueEarly', dueBuffer);
+  bind('dueBody', function(){ if(t) applyTechniqueTaskId(t.id); state.dueWizard=null; navigateTo('bodydouble'); });
+  bind('dueMicro', function(){ if(t) applyTechniqueTaskId(t.id); state.dueWizard=null; navigateTo('bitesize'); });
+  bind('dueOfficeDone', dueWizardClose);
+  bind('dueBackSit', function(){ w.step='situation'; persistRender(); });
+  return true;
+}
+
+function wizardGo(){ wizardGoRecommended(); }
+
 
 function settingsSectionOpen(key){
   if(!state.settingsOpen) state.settingsOpen={};
@@ -7491,15 +7822,32 @@ function viewTasks(){
   if(f==='done') mode = 'all';
   // Keep intentional modes: wall / jar / one / spin / pool / spotlight
 
-  let modeBanner = tasksViewToolbar();
-  if((state.listMode||'')==='wall'){
-    modeBanner = `<div class="card" style="padding:10px;margin-bottom:10px;border-left:4px solid var(--pine)"><b>Tile Wall</b> — only tiles below. <button type="button" class="btn ghost sm" data-action="list-mode" data-mode="all">Full list</button></div>`;
-  }
-  if((state.listMode||'')==='jar'){
-    modeBanner = `<div class="card" style="padding:10px;margin-bottom:10px;border-left:4px solid var(--pine)"><b>Grab Bag</b> — list hidden. Pull one task. <button type="button" class="btn ghost sm" data-action="list-mode" data-mode="all">Full list</button></div>`;
-  }
+  let modeBanner = '';
   let modeBody = '';
 
+  if(mode === 'dues-only'){
+    const open = (state.tasks||[]).filter(t=>!t.done && t.date).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+    return `
+    <div class="pagehead">
+      <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+      <h1>What is due</h1>
+      <p>Only dated tasks. Mark one done, or go back and set a date on Tasks if something is missing.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${open.length?open.map(t=>`<div class="card" style="padding:12px"><b>${escapeHtml(t.title)}</b><div style="font-size:.85rem;color:var(--muted);margin-top:4px">${escapeHtml(t.date)}${t.time?' · '+escapeHtml(t.time):''}</div><button class="btn sm" data-action="toggle-done" data-id="${t.id}" style="margin-top:8px">Done</button></div>`).join(''):'<div class="empty">Nothing has a date yet.</div>'}
+    </div>`;
+  }
+  if(mode === 'next-up'){
+    const open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
+    const next = open.find(t=>t.tier==='must') || open.find(t=>t.frog) || open.find(t=>t.date) || open[0];
+    return `
+    <div class="pagehead">
+      <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+      <h1>Do this next</h1>
+      <p>One task. Not the whole list.</p>
+    </div>
+    ${next?`<div class="card" style="padding:20px;text-align:center"><div style="font-size:1.25rem;font-weight:800">${escapeHtml(next.title)}</div><div style="margin-top:14px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="btn" data-action="task-start" data-id="${next.id}">Start</button><button class="btn ghost" data-action="toggle-done" data-id="${next.id}">Done</button></div></div>`:'<div class="empty">No open task yet. Add one, then come back.</div>'}`;
+  }
   if(mode === 'spotlight' || mode === 'batch'){
     let open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
     if(state.spotlightOnlyPlanWeek) open = open.filter(t=>t.planWeek);
@@ -7522,7 +7870,7 @@ function viewTasks(){
           </div>
         </div>`).join('') : '<div class="empty">No open tasks. Add some first.</div>'}
     </div>
-    <button class="btn ghost" data-action="list-mode" data-mode="all" style="margin-top:14px;width:100%">Show full Tasks list</button>`;
+    <button class="btn ghost" data-action="go-back" style="margin-top:14px;width:100%">Back</button>`;
   }
 
   if(mode === 'must-frog-pick'){
@@ -7531,7 +7879,7 @@ function viewTasks(){
     <div class="pagehead">
       <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
       <h1>Must-do & Frog</h1>
-      <p>Pick a task, then mark it Must-do (should do today) and/or Frog (do this first). Changes save on that task everywhere in the app.</p>
+      <p>Choose a task you already created. <b>Must-do</b> means it should happen today. <b>Frog</b> means do this one first, before the others. You can mark one task as both.</p>
     </div>
     <div class="card">
       <label>Task</label>
@@ -7543,7 +7891,7 @@ function viewTasks(){
         <button class="btn" id="mfMustBtn">Mark as Must-do</button>
         <button class="btn ghost" id="mfFrogBtn">🐸 Mark as Frog</button>
         <button class="btn" id="mfBothBtn">Must-do + Frog</button>
-        <button class="btn ghost" data-action="list-mode" data-mode="all">Cancel</button>
+        <button class="btn ghost" data-action="go-back">Back</button>
       </div>
     </div>`;
   }
@@ -7553,7 +7901,7 @@ function viewTasks(){
     <div class="pagehead">
       <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
       <h1>Backburner</h1>
-      <p>Park a task so it stops crowding today. Select one and confirm — you do not need the full Tasks list.</p>
+      <p>Choose a task you already created, then tap <b>Move to Backburner</b>. It leaves Today. It is not deleted. Open Tasks and look under parked work if you want it back later.</p>
     </div>
     <div class="card">
       <label>Task to park</label>
@@ -7562,7 +7910,7 @@ function viewTasks(){
         ${open.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}</option>`).join('')}
       </select>
       <button class="btn" id="bbPickConfirm" style="margin-top:12px;width:100%">Move to Backburner</button>
-      <button class="btn ghost" data-action="list-mode" data-mode="all" style="margin-top:8px;width:100%">Cancel</button>
+      <button class="btn ghost" data-action="go-back" style="margin-top:8px;width:100%">Back</button>
     </div>`;
   }
   if(mode === 'wall'){
@@ -7583,7 +7931,7 @@ function viewTasks(){
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px">
       ${tiles || '<div class="empty">No open tasks — add some on Tasks first.</div>'}
     </div>
-    <button class="btn ghost" data-action="list-mode" data-mode="all" style="margin-top:14px;width:100%">Back to full list</button>`;
+    <button class="btn ghost" data-action="go-back" style="margin-top:14px;width:100%">Back</button>`;
   }
   if(mode === 'pool'){
     const open = list.filter(t=>!t.done);
@@ -7601,7 +7949,7 @@ function viewTasks(){
     <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;padding:16px 0">
       ${bubbles || '<div class="empty">No open tasks</div>'}
     </div>
-    <button class="btn ghost" data-action="list-mode" data-mode="all" style="width:100%">Back to full list</button>`;
+    <button class="btn ghost" data-action="go-back" style="width:100%">Back</button>`;
   }
   if(mode === 'spin'){
     const open = list.filter(t=>!t.done);
@@ -7620,7 +7968,7 @@ function viewTasks(){
         : `<p style="color:var(--muted)">${open.length} open task(s) in the wheel</p>
         <button class="btn" data-action="spin-again" ${open.length?'':'disabled'}>Spin</button>`}
     </div>
-    <button class="btn ghost" data-action="list-mode" data-mode="all" style="width:100%;margin-top:12px">Back to full list</button>`;
+    <button class="btn ghost" data-action="go-back" style="width:100%;margin-top:12px">Back</button>`;
   }
 
   const items = list.length ? list.map(taskCard).join('') : (f==='done'
@@ -7705,7 +8053,7 @@ function viewTasks(){
     <div class="pagehead">
       <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
       <h1>Must-do & Frog</h1>
-      <p>Pick a task, then mark it Must-do (should do today) and/or Frog (do this first). Changes save on that task everywhere in the app.</p>
+      <p>Choose a task you already created. <b>Must-do</b> means it should happen today. <b>Frog</b> means do this one first, before the others. You can mark one task as both.</p>
     </div>
     <div class="card">
       <label>Task</label>
@@ -7717,7 +8065,7 @@ function viewTasks(){
         <button class="btn" id="mfMustBtn">Mark as Must-do</button>
         <button class="btn ghost" id="mfFrogBtn">🐸 Mark as Frog</button>
         <button class="btn" id="mfBothBtn">Must-do + Frog</button>
-        <button class="btn ghost" data-action="list-mode" data-mode="all">Cancel</button>
+        <button class="btn ghost" data-action="go-back">Back</button>
       </div>
     </div>`;
   }
@@ -7727,7 +8075,7 @@ function viewTasks(){
     <div class="pagehead">
       <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
       <h1>Backburner</h1>
-      <p>Park a task so it stops crowding today. Select one and confirm — you do not need the full Tasks list.</p>
+      <p>Choose a task you already created, then tap <b>Move to Backburner</b>. It leaves Today. It is not deleted. Open Tasks and look under parked work if you want it back later.</p>
     </div>
     <div class="card">
       <label>Task to park</label>
@@ -7736,7 +8084,7 @@ function viewTasks(){
         ${open.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}</option>`).join('')}
       </select>
       <button class="btn" id="bbPickConfirm" style="margin-top:12px;width:100%">Move to Backburner</button>
-      <button class="btn ghost" data-action="list-mode" data-mode="all" style="margin-top:8px;width:100%">Cancel</button>
+      <button class="btn ghost" data-action="go-back" style="margin-top:8px;width:100%">Back</button>
     </div>`;
   }
   if(mode === 'wall'){
@@ -8087,80 +8435,112 @@ function itemsForDate(dateStr){
     let show=false;
     if(c.scope==='session'){ show = c.date===dateStr; }
     else{ show = c.day===dow && (!c.semStart || dateStr>=c.semStart) && (!c.semEnd || dateStr<=c.semEnd); }
-    if(show) items.push({type:'class',color:'var(--blue)',time:c.start,end:c.end||'',label:c.title+(c.room?' · '+c.room:''),meetingUrl:c.meetingUrl});
+    if(show) items.push({type:'class', kind:'class', id:c.id, color:'var(--blue)', time:c.start, end:c.end||'', label:c.title+(c.room?' · '+c.room:''), meetingUrl:c.meetingUrl});
   });
   state.tasks.filter(t=>t.date===dateStr).forEach(t=>items.push({type:'task',color: t.priority==='high'?'var(--brick)':t.priority==='medium'?'var(--amber)':'var(--pine)',time:t.time||'',label:t.title+' (due)',meetingUrl:t.meetingUrl}));
   state.tasks.filter(t=>t.startDate===dateStr && t.startDate!==t.date).forEach(t=>items.push({type:'taskstart',color:'var(--blue-soft)',time:t.startTime||'',label:'Start: '+t.title,meetingUrl:t.meetingUrl}));
-  state.studyBlocks.filter(b=>b.date===dateStr).forEach(b=>items.push({type:'block',color:'var(--purple)',time:b.start,label:b.label+' ('+b.start+'–'+b.end+')',meetingUrl:b.meetingUrl}));
+  state.studyBlocks.filter(b=>b.date===dateStr).forEach(b=>items.push({type:'block', kind:'block', id:b.id, color:'var(--purple)', time:b.start, end:b.end||'', label:b.label, meetingUrl:b.meetingUrl}));
+  (state.externalBusy||[]).forEach(ev=>{
+    if(ev.date!==dateStr) return;
+    items.push({type:'external',color:'var(--blue)',time:ev.allDay?'':(ev.start||''),end:ev.allDay?'':(ev.end||''),label:(ev.title||'Busy')+(ev.source==='google'?' (Google)':' (calendar)'),meetingUrl:''});
+  });
   if(state.nonNegotiable[dateStr]) items.push({type:'nn',color:'var(--gold)',time:'',label:'★ '+state.nonNegotiable[dateStr].text});
   return items.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
 }
 
-function parseICS(text){
-  const events=[];
-  const blocks=text.replace(/\r\n /g,'').split('BEGIN:VEVENT');
-  for(let i=1;i<blocks.length;i++){
-    const b=blocks[i].split('END:VEVENT')[0];
-    const get=(k)=>{
-      const re=new RegExp('^'+k+'[^:]*:(.+)$','mi');
-      const m=b.match(re);
-      return m?m[1].trim():'';
+function unfoldIcs(text){
+  return String(text||'').replace(/^\uFEFF/, '').replace(/\r\n/g,'\n').replace(/\n[ \t]/g,'');
+}
+function icsProp(block, name){
+  const re = new RegExp('^'+name+'[^:\\n]*:(.*)$','im');
+  const m = block.match(re);
+  if(!m) return '';
+  return m[1].trim().replace(/\\n/g,' ').replace(/\\,/g,',').replace(/\\\\/g,'\\');
+}
+function icsWhen(raw){
+  if(!raw) return null;
+  const value = String(raw).trim();
+  const zulu = /Z$/i.test(value);
+  const digits = value.replace(/[^0-9T]/g,'');
+  const m = digits.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2}))?/);
+  if(!m) return null;
+  if(!m[4]) return { date:m[1]+'-'+m[2]+'-'+m[3], start:'00:00', allDay:true };
+  if(zulu){
+    const dt = new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5]||0));
+    return {
+      date: dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'),
+      start: String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0'),
+      allDay: false
     };
-    const summary=get('SUMMARY').replace(/\\,/g,',').replace(/\\n/g,' ');
-    const location=get('LOCATION').replace(/\\,/g,',');
-    const dtstart=get('DTSTART');
-    const dtend=get('DTEND');
-    const rrule=get('RRULE');
-    if(!dtstart||!summary) continue;
-    // DTSTART may be 20260315T083000 or 20260315T083000Z or with ;TZID=
-    const ds=dtstart.replace(/[^0-9T]/g,'');
-    const date=ds.slice(0,4)+'-'+ds.slice(4,6)+'-'+ds.slice(6,8);
-    let start='';
-    if(ds.includes('T')&&ds.length>=13) start=ds.slice(9,11)+':'+ds.slice(11,13);
-    let end='';
-    if(dtend){
-      const de=dtend.replace(/[^0-9T]/g,'');
-      if(de.includes('T')&&de.length>=13) end=de.slice(9,11)+':'+de.slice(11,13);
-    }
-    if(!end&&start){
-      const [h,m]=start.split(':').map(Number);
-      end=String((h+1)%24).padStart(2,'0')+':'+String(m).padStart(2,'0');
-    }
-    const weekly=/FREQ=WEEKLY/i.test(rrule);
-    let day=0;
-    try{ day=mondayIndex(new Date(date+'T12:00:00')); }catch(e){}
-    events.push({summary, location, date, start, end, weekly, day, rrule});
   }
-  return events;
+  return { date:m[1]+'-'+m[2]+'-'+m[3], start:m[4]+':'+m[5], allDay:false };
+}
+function importIcsText(text, source){
+  const raw = unfoldIcs(text);
+  if(raw.indexOf('BEGIN:VEVENT')<0){
+    return { ok:false, message:'That is not a calendar file. Open the Outlook link in a new tab, save the file that ends in .ics, then tap Upload calendar file.' };
+  }
+  if(!Array.isArray(state.classes)) state.classes=[];
+  if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
+  const tag = source || 'ics-file';
+  state.classes = state.classes.filter(c=>c.source!==tag);
+  state.studyBlocks = state.studyBlocks.filter(b=>b.source!==tag);
+  const parts = raw.split('BEGIN:VEVENT');
+  let added = 0;
+  const dates = [];
+  for(let i=1;i<parts.length;i++){
+    const block = parts[i].split('END:VEVENT')[0];
+    const summary = (icsProp(block,'SUMMARY') || 'Busy').slice(0,140);
+    const loc = icsProp(block,'LOCATION');
+    const start = icsWhen(icsProp(block,'DTSTART'));
+    if(!start || !start.date) continue;
+    const endWhen = icsWhen(icsProp(block,'DTEND'));
+    let end = (endWhen && endWhen.start && !start.allDay) ? endWhen.start : (start.allDay ? '23:59' : '');
+    if(!end && start.start){
+      const bits = start.start.split(':').map(Number);
+      const mins = (bits[0]*60+(bits[1]||0)+60)%(24*60);
+      end = String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0');
+    }
+    const weekly = /FREQ=WEEKLY/i.test(icsProp(block,'RRULE'));
+    if(weekly){
+      let day = 0;
+      try{ day = mondayIndex(new Date(start.date+'T12:00:00')); }catch(e){}
+      state.classes.push({
+        id:uid(), title:summary, day:day, start:start.allDay?'09:00':start.start, end:end||'10:00',
+        room:loc||'', textbook:'', meetingUrl:'', scope:'semester', semStart:start.date, semEnd:'', source:tag
+      });
+    } else {
+      state.studyBlocks.push({
+        id:uid(), date:start.date, start:start.allDay?'00:00':start.start, end:end||'23:59',
+        label:summary, meetingUrl:'', room:loc||'', source:tag
+      });
+    }
+    dates.push(start.date);
+    added++;
+  }
+  if(!added) return { ok:false, message:'The file opened, but SnapBack found no events in it.' };
+  dates.sort();
+  state.calRef = dates[0];
+  state.selectedDay = dates[0];
+  state.calMode = 'list';
+  state.view = 'calendar';
+  try{ saveState(); }catch(e){}
+  return { ok:true, added:added, first:dates[0], last:dates[dates.length-1] };
+}
+function parseICS(text){
+  return [];
 }
 function importICSFile(file){
   const reader=new FileReader();
   reader.onload=()=>{
     try{
-      const events=parseICS(String(reader.result||''));
-      if(!events.length){ showAppMessage('No events found', 'That calendar file had nothing we could import.'); return; }
-      let added=0;
-      events.forEach(ev=>{
-        if(ev.weekly){
-          state.classes.push({
-            id:uid(), title:ev.summary, day:ev.day, start:ev.start||'09:00', end:ev.end||'10:00',
-            room:ev.location||'', textbook:'', meetingUrl:'',
-            scope:'semester', semStart:ev.date||todayStr(), semEnd:''
-          });
-        }else{
-          // one-off → study block / appointment on master calendar
-          state.studyBlocks.push({
-            id:uid(), date:ev.date, start:ev.start||'09:00', end:ev.end||'10:00',
-            label:ev.summary, meetingUrl:''
-          });
-        }
-        added++;
-      });
-      persistRender();
-      showAppMessage('Imported', 'Added '+added+' item(s) into SnapBack.');
+      const result = importIcsText(String(reader.result||''), 'ics-file');
+      if(!result.ok){ showAppMessage('Calendar not imported', result.message); return; }
+      showAppMessage('Calendar imported', 'Added '+result.added+' event(s). Showing '+result.first+'.');
+      try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
     }catch(e){
       console.error(e);
-      showAppMessage('Could not read file', 'Try exporting again as a .ics calendar file.');
+      showAppMessage('Could not read file', 'Save the Outlook download as a .ics file, choose it, then tap Upload calendar file.');
     }
   };
   reader.readAsText(file);
@@ -8571,11 +8951,128 @@ function viewFreeBusyPreview(){
   ${viewFreeBusyPublic(data)}`;
 }
 
+function calEventButton(it){
+  const when = it.time ? (it.time+(it.end?'–'+it.end:'')) : 'All day';
+  if(it.kind && it.id!=null){
+    return `<button type="button" data-action="cal-open" data-kind="${it.kind}" data-id="${it.id}" style="display:block;width:100%;text-align:left;margin:4px 0;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);cursor:pointer"><b>${escapeHtml(when)}</b> ${escapeHtml(it.label)}</button>`;
+  }
+  return `<div style="padding:6px 2px;font-size:.9rem"><b>${escapeHtml(when)}</b> ${escapeHtml(it.label)}</div>`;
+}
+function calDraftCard(){
+  const d = state.calDraft;
+  if(!d) return '';
+  return `<div class="card" style="border:2px solid var(--pine)">
+    <h3 style="margin-top:0">${d.id?'Edit this event':'New event'}</h3>
+    <div class="field"><label>Name</label><input id="calDraftTitle" value="${escapeHtml(d.title||'')}" placeholder="Class, meeting, gym…"></div>
+    <div class="row" style="margin-top:8px">
+      <div class="field"><label>Date</label><input type="date" id="calDraftDate" value="${escapeHtml(d.date||todayStr())}"></div>
+      <div class="field"><label>Start</label><input type="time" id="calDraftStart" value="${escapeHtml(d.start||'09:00')}"></div>
+      <div class="field"><label>End</label><input type="time" id="calDraftEnd" value="${escapeHtml(d.end||'10:00')}"></div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div class="field"><label>Repeats</label>
+        <select id="calDraftRepeat">
+          <option value="once" ${d.repeat==='weekly'?'':'selected'}>This day only</option>
+          <option value="weekly" ${d.repeat==='weekly'?'selected':''}>Every week</option>
+        </select>
+      </div>
+      <div class="field"><label>Place</label><input id="calDraftRoom" value="${escapeHtml(d.room||'')}" placeholder="Optional"></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <button type="button" class="btn" id="calDraftSave">Save</button>
+      <button type="button" class="btn ghost" id="calDraftCancel">Cancel</button>
+      ${d.id?'<button type="button" class="btn ghost" id="calDraftDelete">Delete</button>':''}
+    </div>
+  </div>`;
+}
+function openCalDraft(opts){
+  state.calDraft = Object.assign({title:'', date: state.selectedDay||todayStr(), start:'09:00', end:'10:00', repeat:'once', room:'', id:'', kind:''}, opts||{});
+  persistRender();
+}
+function saveCalDraftFromForm(){
+  const title = (document.getElementById('calDraftTitle')&&document.getElementById('calDraftTitle').value||'').trim();
+  if(!title){ showAppMessage('Name needed', 'Type what this event is.'); return; }
+  const date = (document.getElementById('calDraftDate')&&document.getElementById('calDraftDate').value) || todayStr();
+  const start = (document.getElementById('calDraftStart')&&document.getElementById('calDraftStart').value) || '09:00';
+  const end = (document.getElementById('calDraftEnd')&&document.getElementById('calDraftEnd').value) || '10:00';
+  const repeat = (document.getElementById('calDraftRepeat')&&document.getElementById('calDraftRepeat').value) || 'once';
+  const room = (document.getElementById('calDraftRoom')&&document.getElementById('calDraftRoom').value) || '';
+  const d = state.calDraft || {};
+  if(!Array.isArray(state.classes)) state.classes=[];
+  if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
+  if(d.kind==='class' && d.id){
+    state.classes = state.classes.filter(c=>c.id!==d.id);
+  }
+  if(d.kind==='block' && d.id){
+    state.studyBlocks = state.studyBlocks.filter(b=>b.id!==d.id);
+  }
+  if(repeat==='weekly'){
+    let day=0;
+    try{ day=mondayIndex(new Date(date+'T12:00:00')); }catch(e){}
+    state.classes.push({id:uid(), title, day, start, end, room, textbook:'', meetingUrl:'', scope:'semester', semStart:date, semEnd:''});
+  } else {
+    state.studyBlocks.push({id:uid(), date, start, end, label:title, meetingUrl:'', room});
+  }
+  state.calDraft=null;
+  state.selectedDay=date;
+  state.calRef=date;
+  try{ saveState(); }catch(e){}
+  persistRender();
+  showAppMessage('Saved', title+' is on the schedule.');
+}
+function deleteCalDraft(){
+  const d = state.calDraft||{};
+  if(d.kind==='class' && d.id) state.classes = (state.classes||[]).filter(c=>c.id!==d.id);
+  if(d.kind==='block' && d.id) state.studyBlocks = (state.studyBlocks||[]).filter(b=>b.id!==d.id);
+  state.calDraft=null;
+  try{ saveState(); }catch(e){}
+  persistRender();
+}
+function viewNudge(){
+  const native = (typeof isNativeApp==='function' && isNativeApp());
+  const wa = state.wakeAlarm||{};
+  return `
+  <div class="pagehead">
+    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
+    <h1>Nudge</h1>
+    <p>${native?'This alarm can ring when the phone is locked, after you allow alarms.':'On this website or on iPhone, this only rings while SnapBack is open. For a locked phone, use the Android app or the phone Clock.'}</p>
+  </div>
+  <div class="card">
+    <div style="font-size:.78rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase">Current time</div>
+    <div id="nudgeNowClock" style="font-size:2.1rem;font-weight:800;margin:2px 0 10px">--:--</div>
+    <div class="field"><label>Alarm time</label><input type="time" id="wakeTime" value="${escapeHtml(wa.time||'07:00')}"></div>
+    <div class="field" style="margin-top:8px"><label>One-time date</label><input type="date" id="wakeOnceDate" value="${escapeHtml(wa.onceDate||'')}"></div>
+    <div class="field" style="margin-top:8px"><label>Sound</label>
+      <select id="wakeSoundSelect">
+        ${['chime','bell','beep','digital','radar','knock'].map(v=>`<option value="${v}" ${(wa.sound||'chime')===v?'selected':''}>${v}</option>`).join('')}
+      </select>
+    </div>
+    <div style="margin-top:10px;font-size:.85rem">Or repeat on</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
+      ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label style="font-size:.82rem"><input type="checkbox" id="wakeDay${i}" ${(wa.days||[]).indexOf(i)>=0?'checked':''}> ${d}</label>`).join('')}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;max-width:280px">
+      <button class="btn" id="saveWakeBtn" type="button">Save alarm</button>
+      <button class="btn ghost" id="testWakeBtn" type="button">Preview</button>
+      ${wa.enabled?'<button class="btn ghost" id="turnOffWakeBtn" type="button">Turn off</button>':''}
+    </div>
+  </div>`;
+}
 function viewCalendar(){
   const mode=state.calMode||'list';
   const ref=new Date(state.calRef+'T00:00:00');
   let body='';
-  if(mode==='list'){
+  if(mode==='day'){
+    const ds=state.selectedDay||toDateStr(ref);
+    const items=itemsForDate(ds);
+    const hours=[];
+    for(let h=7;h<=21;h++){
+      const hh=String(h).padStart(2,'0')+':00';
+      const at=items.filter(it=>(it.time||'').slice(0,2)===String(h).padStart(2,'0'));
+      hours.push('<div style="display:flex;gap:8px;border-top:1px solid var(--line);padding:6px 0"><button type="button" class="btn ghost sm" data-action="cal-new" data-date="'+ds+'" data-time="'+hh+'" style="width:84px">'+hh+'</button><div style="flex:1">'+(at.map(it=>calEventButton(it)).join('')||'<span style="color:var(--muted);font-size:.8rem">Empty</span>')+'</div></div>');
+    }
+    body='<div style="font-weight:800;margin-bottom:8px">'+ds+'</div>'+hours.join('');
+  } else if(mode==='list'){
     const dow=mondayIndex(ref);
     const monday=new Date(ref); monday.setDate(ref.getDate()-dow);
     const dayNames=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
@@ -8591,14 +9088,8 @@ function viewCalendar(){
             ${dayNames[i]}${isToday?' · Today':''}
             <span style="font-weight:500;color:var(--muted);font-size:.82rem;margin-left:6px">${d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span>
           </div>
-          ${items.length ? items.map(it=>`
-            <div style="padding:10px 12px;border-bottom:1px solid var(--line)">
-              <div style="font-size:.95rem">
-                <span style="font-weight:700;color:var(--ink)">${it.time ? escapeHtml(it.time)+(it.end?'–'+escapeHtml(it.end):'') : 'All day'}</span>
-                <span style="margin-left:8px">${escapeHtml(it.label)}</span>
-              </div>
-              ${it.meetingUrl?`<div style="font-size:.78rem;margin-top:2px"><a href="${escapeHtml(it.meetingUrl)}" target="_blank" rel="noopener">Join link ↗</a></div>`:''}
-            </div>`).join('') : `<div style="padding:8px 12px;font-size:.85rem;color:var(--muted)">Nothing scheduled</div>`}
+          ${items.map(it=>calEventButton(it)).join('')}
+          <button type="button" class="btn ghost sm" data-action="cal-new" data-date="${ds}" style="margin-top:6px">Add on this day</button>
         </div>`);
     }
     body=sections.join('');
@@ -8634,7 +9125,8 @@ function viewCalendar(){
       const isToday=ds===todayStr();
       cols.push(`<div class="weekcol ${isToday?'today':''}" data-day="${ds}">
         <h5>${d.toLocaleDateString(undefined,{weekday:'short'})} ${d.getDate()}</h5>
-        ${items.length ? items.map(it=>`<div class="wk-item" style="background:${it.color}22;border-left-color:${it.color}">${it.time?('<b>'+it.time+'</b> '):''}${escapeHtml(it.label)}${it.meetingUrl?` <a href="${escapeHtml(it.meetingUrl)}" target="_blank" rel="noopener">&#8599;</a>`:''}</div>`).join('') : '<div style="font-size:.7rem;color:var(--muted)">—</div>'}
+        ${items.map(it=>calEventButton(it)).join('')}
+        <button type="button" class="btn ghost sm" data-action="cal-new" data-date="${ds}" style="margin-top:6px">Add</button>
       </div>`);
     }
     body=`<div class="weekgrid">${cols.join('')}</div>`;
@@ -8645,7 +9137,7 @@ function viewCalendar(){
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Week &amp; month at a glance</div>
     <h1>Your Schedule</h1>
-    <p>Classes, deadlines, study blocks, and your non-negotiable — color-coded so nothing hides. Export downloads a standard .ics file you can import into Google Calendar, Apple Calendar, or Outlook — no sign-in or account linking needed.</p>
+    <p>Day, week, or month. Tap an event to edit it. Tap Add to put something on an empty time.</p>
   </div>
   <div class="card">
     <div class="calnav">
@@ -8654,8 +9146,9 @@ function viewCalendar(){
       <button class="btn ghost sm" id="calNext">&rarr;</button>
       <button class="btn ghost sm" id="calToday">Today</button>
       <div class="spacer"></div>
-      <button class="btn ${mode==='list'?'':'ghost'} sm" id="calModeList">List</button>
-      <button class="btn ${mode==='week'?'':'ghost'} sm" id="calModeWeek">Week</button>
+      <button class="btn ${mode==='day'?'':'ghost'} sm" id="calModeDay">Day</button>
+      <button class="btn ${mode==='list'?'':'ghost'} sm" id="calModeList">Week</button>
+      <button class="btn ${mode==='week'?'':'ghost'} sm" id="calModeWeek">Columns</button>
       <button class="btn ${mode==='month'?'':'ghost'} sm" id="calModeMonth">Month</button>
     </div>
     ${body}
@@ -8668,6 +9161,39 @@ function viewCalendar(){
       <span><span class="dotcolor" style="background:var(--gold)"></span>Non-negotiable</span>
     </div>
     ${mode==='month' ? `<div class="agenda"><h3>Agenda — ${state.selectedDay}</h3>${selItems.length ? selItems.map(it=>`<div class="deadline-row"><span class="dotcolor" style="background:${it.color}"></span>${it.time?('<b>'+it.time+'</b>&nbsp;'):''}${escapeHtml(it.label)}${it.meetingUrl?`<a href="${escapeHtml(it.meetingUrl)}" target="_blank" rel="noopener" style="margin-left:8px"><button class="btn ghost sm">Join &#8599;</button></a>`:''}</div>`).join('') : '<div class="empty">Nothing scheduled.</div>'}</div>` : ''}
+  </div>
+  ${calDraftCard()}
+  <div class="card">
+    <h3 style="margin:0 0 6px">Quick add</h3>
+    <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Type a line, paste a timetable, or upload a screenshot. SnapBack writes it in the box. Edit it, then choose Yes or Cancel. Nothing is added until you say Yes.</p>
+    <div class="row" style="margin-bottom:8px">
+      <div class="field"><label>These items are</label>
+        <select id="ttRepeatMode">
+          <option value="weekly">Every week</option>
+          <option value="once">One time only</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" style="margin-bottom:10px;align-items:center">
+      <input type="file" id="ttImageInput" accept="image/*" style="flex:1">
+      <button class="btn sm" id="ttOcrBtn" type="button">Read screenshot</button>
+    </div>
+    <div id="ttOcrStatus" style="font-size:.82rem;color:var(--muted);margin-bottom:8px"></div>
+    <textarea id="ttPaste" rows="4" placeholder="Example: Bio Mon 8:30, Gym Tue 3 to 5" style="width:100%"></textarea>
+    <button class="btn" id="ttParseBtn" type="button" style="margin-top:10px">Check what I read</button>
+    <div id="ttPreview" style="margin-top:12px"></div>
+  </div>
+  <div class="card">
+    <h3>Bring in my calendar</h3>
+    <p style="font-size:.85rem;color:var(--muted);margin-top:0">This copies events into SnapBack. It does not change Google or Outlook.</p>
+    <button type="button" class="btn sm" id="syncGcalBtn">Bring in Google Calendar</button>
+    <p style="font-size:.75rem;color:var(--muted);margin:10px 0 4px">Or paste a calendar link</p>
+    <input id="icsUrlInput" value="${escapeHtml((state.settings&&state.settings.icsUrl)||'')}" placeholder="https://…/calendar.ics" style="width:100%">
+    <button type="button" class="btn ghost sm" id="syncIcsBtn" style="margin-top:8px">Bring in this link</button>
+    <p style="font-size:.75rem;color:var(--muted);margin:10px 0 4px">Or choose a calendar file you downloaded</p>
+    <input type="file" id="icsImportInput" accept=".ics,text/calendar,.txt">
+    <button type="button" class="btn" id="icsUploadBtn" style="margin-top:8px">Upload calendar file</button>
+    <p id="icsImportStatus" style="font-size:.85rem;margin-top:8px"></p>
   </div>
 
   <div class="card">
@@ -8685,8 +9211,10 @@ function viewCalendar(){
       Export a calendar file (<b>.ics</b>) from Google Calendar, Apple Calendar, or Outlook, then choose it here. Weekly repeating events become semester classes; one-off events become appointments on this calendar.<br><br>
       <b>Notion:</b> Notion doesn’t export .ics. Copy the text and paste it under <b>Plan → Calendar → Quick add</b>.
     </p>
-    <input type="file" id="icsImportInput" accept=".ics,text/calendar" style="margin-top:8px">
-    <p style="font-size:.78rem;color:var(--muted);margin-top:8px">How to get a .ics file:<br>
+    <input type="file" id="icsImportInput" accept=".ics,text/calendar,.txt" style="margin-top:8px">
+    <button type="button" class="btn" id="icsUploadBtn" style="margin-top:10px">Upload calendar file</button>
+    <p id="icsImportStatus" style="font-size:.85rem;margin-top:8px;color:var(--pine)"></p>
+    <p style="font-size:.78rem;color:var(--muted);margin-top:8px">Choose the .ics file, then tap <b>Upload calendar file</b>. Choosing the file alone does not import it.<br>
       Google Calendar → Settings → Import &amp; export → Export<br>
       Apple Calendar → File → Export → Export<br>
       Outlook → open calendar → Export to ICS
@@ -10815,32 +11343,32 @@ function viewMindmaps(){
    ============================================================ */
 const STUDY_TOOLS=[
   {category:'Mind maps & concept maps', tools:[
-    {name:'Coggle', desc:'Free, browser-based, unlimited public maps — fastest way to sketch a concept map with no signup friction.', url:'https://coggle.it'},
-    {name:'MindMeister', desc:'Polished radial mind maps, free plan allows up to 3 active maps.', url:'https://www.mindmeister.com'},
-    {name:'draw.io / diagrams.net', desc:'Completely free flowcharts and diagrams, works offline once loaded, no account needed.', url:'https://app.diagrams.net'}
+    {name:'Coggle', desc:'Quick map in the browser.', url:'https://coggle.it'},
+    {name:'MindMeister', desc:'Simple mind maps. Free plan is limited.', url:'https://www.mindmeister.com'},
+    {name:'draw.io / diagrams.net', desc:'Free diagrams. No account needed.', url:'https://app.diagrams.net'}
   ]},
   {category:'Flashcards & spaced repetition', tools:[
-    {name:'Anki', desc:'Free, open-source, the gold standard for spaced-repetition flashcards. Steeper learning curve, huge payoff for exam prep.', url:'https://apps.ankiweb.net'},
-    {name:'Quizlet', desc:'Fast to build a deck, huge library of decks other students already made for common courses.', url:'https://quizlet.com'}
+    {name:'Anki', desc:'Flashcards that come back on a schedule.', url:'https://apps.ankiweb.net'},
+    {name:'Quizlet', desc:'Make a deck, or use one someone already made.', url:'https://quizlet.com'}
   ]},
   {category:'Quizzes & practice tests', tools:[
-    {name:'Kahoot!', desc:'Turn review sessions into a live quiz game — great for group study.', url:'https://kahoot.com'},
-    {name:'Quizlet Learn', desc:'Auto-generates practice questions from your own flashcard deck.', url:'https://quizlet.com'}
+    {name:'Kahoot!', desc:'A live quiz, useful with a group.', url:'https://kahoot.com'},
+    {name:'Quizlet Learn', desc:'Practice questions from your own deck.', url:'https://quizlet.com'}
   ]},
   {category:'Posters & visual design', tools:[
-    {name:'Canva', desc:'Free tier covers posters, infographics, and presentation slides with drag-and-drop templates.', url:'https://www.canva.com'}
+    {name:'Canva', desc:'Posters and slides from templates.', url:'https://www.canva.com'}
   ]},
   {category:'Citations & bibliographies', tools:[
-    {name:'Zotero', desc:'Free citation manager — clips sources from the web and formats a bibliography in one click.', url:'https://www.zotero.org'}
+    {name:'Zotero', desc:'Save sources and build a bibliography.', url:'https://www.zotero.org'}
   ]},
   {category:'Notes & writing', tools:[
-    {name:'Google Docs', desc:'Free, real-time collaborative, autosaves — the safe default for any written assignment.', url:'https://docs.google.com'},
-    {name:'Notion', desc:'Free for individual students — one place for notes, databases, and simple project pages.', url:'https://www.notion.so'},
-    {name:'LexPage', desc:'Clean, distraction-free writing space made for students — great for essays and long-form work.', url:'https://lex.page'}
+    {name:'Google Docs', desc:'Write and share a document.', url:'https://docs.google.com'},
+    {name:'Notion', desc:'Notes and simple project pages.', url:'https://www.notion.so'},
+    {name:'LexPage', desc:'A quiet page for long writing.', url:'https://lex.page'}
   ]},
   {category:'Reading & research', tools:[
-    {name:'LexPage', desc:'Minimal writing + reading environment. Good when you need to focus on long texts without clutter.', url:'https://lex.page'},
-    {name:'Google Scholar', desc:'Find academic papers and citations quickly.', url:'https://scholar.google.com'}
+    {name:'LexPage', desc:'Read a long text without clutter.', url:'https://lex.page'},
+    {name:'Google Scholar', desc:'Find papers and citations.', url:'https://scholar.google.com'}
   ]}
 ];
 /* ============================================================
@@ -10868,19 +11396,21 @@ const TECH_CARDS=[
   {ico:'&#128101;', name:'Body Doubling', when:'Use when: you can\'t make yourself start alone', desc:'A structured "working alongside someone" session — declare a goal, work, check out.', how:['Pick a session style','Set a goal, then start the timer'], id:'bodydouble'}
 ];
 const FAQ_ITEMS=[
-  {q:'Where do I start?', a:'Open Today. It shows your non-negotiable, what is due, and a short list for now. Add tasks under Tasks. Use Challenges if you feel stuck.'},
-  {q:'How do I break a big assignment into steps?', a:'Open Techniques → Bite Size (or Challenges → overwhelmed). Pick the task, add small steps yourself, or use Smart Breakdown. Keep steps under about 15 minutes.'},
-  {q:'How do I set Nudge (alarm)?', a:'Settings → Nudge → turn on → set time and days → Save. When it rings, sound gets louder for about 55 seconds, then a simple math problem stops it. You can snooze 5 or 10 minutes (limited snoozes).'},
-  {q:'Why no notification when the app is closed?', a:'On the website: browsers only remind you while the tab can run. On the Android APK: allow Notifications and set SnapBack to Unrestricted battery; then Local Notifications can fire. For class times, also Export calendar to Google/Apple Calendar for system alarms.'},
-  {q:'How do I allow notifications on Android?', a:'In SnapBack: Settings → Grant permission. On the phone: Settings → Apps → SnapBack → Notifications → On (not Restricted), and Battery → Unrestricted / allow background.'},
-  {q:'Alarms still quiet on Android?', a:'1) Notifications unrestricted. 2) Battery unrestricted. 3) On some phones: Settings → Alarms & reminders → allow SnapBack. 4) Save alarm again after granting permission. 5) Volume on media, not silent. The website cannot match the Clock app; the APK is closer.'},
-  {q:'How do I get classes onto my phone calendar?', a:'Calendar → export calendar file (.ics). Open the file on the phone and add to Google or Apple Calendar.'},
-  {q:'How do laptop and phone stay in sync?', a:'Settings → Account: sign in with the same Google account on both (after Firebase is set up), or use the advanced private sync code on both devices. Same account/code = same data.'},
-  {q:'Does this need internet?', a:'Most features work offline on this device. Cloud sync, Google sign-in, and some exports need internet.'},
-  {q:'Will I lose my data?', a:'Data saves on this device automatically. Clearing site data or uninstalling can wipe local data. Use cloud sync or export backup in Settings if you need a copy.'},
-  {q:'Can this block Instagram?', a:'No. Use a focus app (One Sec, AppBlock, Freedom) for that. Focus Guard only notices when you leave the SnapBack tab.'},
-  {q:'What is Focus Plate vs Eisenhower?', a:'Focus Plate limits how many things count today (1 big, 3 medium, 5 small). Eisenhower sorts by urgent/important. Use either when the list feels too long.'},
-  {q:'How do I import tasks from Todoist or similar?', a:'Settings → Import tasks from other apps → upload a CSV export or paste CSV → Preview & import.'}
+  {q:'I may miss a due date. What do I do?', a:'Challenges → I am afraid I will miss a due date → Deadline helper. It asks where you are, then offers one step: a rough version, 15 minutes with no editing, the late-penalty rule, a short extension note with a specific date, an earlier hard stop, working beside someone, one tiny step, or checking whether the college allows flexible deadlines.'},
+  {q:'What is Must-do?', a:'A task that should happen today. Several tasks can be Must-do. They show on Today under Must do.'},
+  {q:'What is a Frog?', a:'The one task to do first. “Eat the frog” means start with the hardest or most important item so the rest feels easier. Only treat one task as the Frog. A task can be both Must-do and the Frog: it belongs today, and you start with it.'},
+  {q:'What is a Non-negotiable?', a:'The one thing on Focus Plate that you will not drop today, even if the rest of the plate slips. It is not the same as Frog. Frog is which task you start with. Non-negotiable is the one you refuse to skip.'},
+  {q:'What is Backburner?', a:'A place to park a task you are not doing today. It is not deleted. From Challenges → Everything feels like too much → Backburner, choose an existing task and tap Move to Backburner.'},
+  {q:'How do I mark Must-do or Frog?', a:'Challenges → the matching path → Must-do & Frog. Choose a task you already created, then tap Mark as Must-do, Mark as Frog, or both. You can also use More on a task card.'},
+  {q:'How do I break a big assignment into steps?', a:'Open Bite Size from Challenges or Techniques. Choose the task. The text fills in. Add small steps, or use Ask AI. Keep a step under about 15 minutes.'},
+  {q:'How do I set Nudge?', a:'Open Nudge from a challenge, or Settings → Nudge. Set a time and either one date or at least one day, then Save alarm. When it rings, a short math problem stops it. On the Android app it can ring when the phone is locked. On the website or iPhone it only rings while SnapBack is open.'},
+  {q:'Why did Nudge not ring with the phone locked?', a:'The website cannot do that. Use the Android app, allow notifications and alarms, then save Nudge again. Or set the same time in the phone Clock app.'},
+  {q:'How do I see my week?', a:'Plan → Schedule. Use Day, Week, Columns, or Month. Tap an event to edit it. Tap Add on a day, or a time in Day view, to create one.'},
+  {q:'How do I add many classes at once?', a:'Plan → Schedule → Quick add. Type lines, paste a timetable, or upload a screenshot, then Read screenshot. Edit the text. Tap Check what I read, then Yes — save. Cancel adds nothing.'},
+  {q:'How do I bring in Google or Outlook?', a:'Plan → Schedule → Bring in my calendar. This copies events into SnapBack. It does not change Google or Outlook. You can use Google, paste a calendar link, or upload a downloaded calendar file. Tap Upload calendar file after you choose the file.'},
+  {q:'How do laptop and phone stay together?', a:'Sign in with the same Google account on both. A username stays on that one device only and does not appear on the other.'},
+  {q:'Will I lose my work?', a:'Sign in with Google and your work is kept. You can also download a backup file from Settings → Backup.'},
+  {q:'What is Focus Plate?', a:'A limit for today: 1 big thing, 3 medium, 5 small, and one Non-negotiable. Everything else waits.'}
 ];
 
 /* ============================================================
@@ -11068,6 +11598,16 @@ function viewHelp(){
   </div>
 
   <div class="card">
+    <h3>Words used in SnapBack</h3>
+    <p><b>Must-do</b> — a task that should happen today. You can have more than one.</p>
+    <p><b>Frog</b> — the single task you start with. Do this before the others. A task can be Must-do and also the Frog.</p>
+    <p><b>Non-negotiable</b> — the one item on Focus Plate you will not drop today, even if the rest slips. It is not the same as Frog.</p>
+    <p><b>Backburner</b> — parked, not deleted. It leaves Today until you bring it back.</p>
+    <p><b>Nudge</b> — the alarm. Not a quote. Not a reminder badge.</p>
+    <p><b>Schedule</b> — your day, week, and month under Plan.</p>
+  </div>
+
+  <div class="card">
     <h3>How do I…</h3>
     <details class="faqitem" open><summary>Open the website &amp; sync with Gmail</summary>
       <p><b>Website:</b> Open <a href="${escapeHtml(getPublicWebUrl())}" target="_blank" rel="noopener">${escapeHtml(getPublicWebUrl())}</a> in Chrome or Edge.</p>
@@ -11080,20 +11620,15 @@ function viewHelp(){
       <p>If you never set a PIN (older login), use <b>Erase local login on this device</b> on the sign-in screen, then <b>Create account</b> with a new password and PIN, or use <b>Continue with Google</b>.</p>
     </details>
 
-    <details class="faqitem"><summary>Set a task with an alarm</summary>
-      <p>Go to <b>Tasks</b> → fill Title, Due date/time → under <b>Alarm / Reminder</b> pick the time and how many days before you want alerts → <b>Add task</b>. Alerts work while the app/tab is open (browser rules). For phone alarms that fire when the app is closed, export the task to your phone calendar (📅 on the task card).</p>
+    <details class="faqitem"><summary>Set Nudge</summary>
+      <p>Open <b>Nudge</b> from a challenge, or <b>Settings → Nudge</b>. Set a time and either one date or at least one day. Tap <b>Save alarm</b>. A short math problem stops it.</p>
+      <p>On the Android app, Nudge can ring when the phone is locked. On the website or iPhone, it only rings while SnapBack is open.</p>
     </details>
-    <details class="faqitem"><summary>Sync with my smartwatch</summary>
-      <p>SnapBack does not talk to watches directly. Do this:<br>
-      1. On <b>Calendar</b> or a task, use <b>Export</b> / 📅 to download an <b>.ics</b> file.<br>
-      2. Open that file with <b>Google Calendar</b> (Android) or <b>Apple Calendar</b> (iPhone).<br>
-      3. Your watch already syncs with that phone calendar — events appear on the watch after a few minutes.<br>
-      Same idea for class times from <b>Calendar</b>.</p>
+    <details class="faqitem"><summary>Put the week on a watch</summary>
+      <p>Plan → <b>Schedule</b> → export the calendar file. Open that file in Google Calendar or Apple Calendar. The watch follows that phone calendar. SnapBack does not talk to the watch itself.</p>
     </details>
-    <details class="faqitem"><summary>Add my whole weekly timetable at once</summary>
-      <p>Open <b>Calendar</b> → use <b>Paste your timetable</b>. Type or paste lines like:<br>
-      <i>Bio on Mondays at 8:30 room 345, Chemistry at 9:30 same day, Gym Mon/Wed/Fri 4:30</i><br>
-      Review the preview → confirm if classes repeat weekly → save.</p>
+    <details class="faqitem"><summary>Add a weekly timetable</summary>
+      <p>Plan → <b>Schedule</b> → <b>Quick add</b>. Type lines such as <i>Bio Mon 8:30</i>, paste a timetable, or upload a screenshot and tap <b>Read screenshot</b>. Edit the box. Tap <b>Check what I read</b>, then <b>Yes — save</b> or <b>Cancel</b>.</p>
     </details>
     <details class="faqitem"><summary>Use Focus Plate without overloading today</summary>
       <p>Open <b>Focus Plate</b>. Fill only: 1 big, 3 medium, 5 small. Mark one as ★ Non-negotiable. Everything else waits. Use <b>Bite Size</b> at the bottom to break a big item into tiny steps.</p>
@@ -11378,7 +11913,7 @@ function viewSettings(){
     <details class="setgroup" id="settingsNudgeDetails">
       <summary>Nudge</summary>
       <div class="setgroup-body">
-      <p style="font-size:.84rem;color:var(--muted);margin:0 0 14px">Daily alarm. Opens a math stop-screen so it is harder to dismiss by accident.</p>
+      <p style="font-size:.84rem;color:var(--muted);margin:0 0 14px">Alarm with a short math problem, so it is harder to dismiss by accident. ${(typeof isNativeApp==='function' && isNativeApp()) ? 'On this Android app it can ring when the phone is locked, after you allow alarms.' : 'On this website, or on iPhone, it only rings while SnapBack is open. For an alarm when the phone is locked, use the Android app or the phone’s Clock app.'}</p>
       <div class="field">
         <div style="font-size:.78rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase">Current time</div>
         <div id="nudgeNowClock" style="font-size:2.1rem;font-weight:800;letter-spacing:.03em;margin:2px 0 10px;font-variant-numeric:tabular-nums">--:--</div>
@@ -11425,22 +11960,10 @@ function viewSettings(){
     </details>
 
     <details class="setgroup">
-      <summary>Calendar Sync</summary>
+      <summary>Calendar</summary>
       <div class="setgroup-body">
-        <div style="margin-top:10px">
-      <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px;line-height:1.45">
-        <b>Google sign-in</b> backs up SnapBack data — it does <b>not</b> automatically import every Google Calendar event by itself.
-        For calendar events, paste a published <b>.ics</b> link below (works for Google, Outlook/Hotmail, and many Apple calendars).
-        SnapBack imports those as busy blocks and can refresh when you open the app or tap Sync.
-      </p>
-      <button type="button" class="btn sm" id="syncGcalBtn" style="margin-top:6px">Sync calendar now</button>
-      <p style="font-size:.75rem;color:var(--muted);margin:8px 0">Paste published calendar URL (.ics):</p>
-      <input id="icsUrlInput" value="${escapeHtml((state.settings&&state.settings.icsUrl)||'')}" placeholder="https://…/calendar.ics" value="${escapeHtml((state.settings&&state.settings.icsUrl)||'')}" style="width:100%">
-      <button type="button" class="btn ghost sm" id="syncIcsBtn" style="margin-top:8px">Sync ICS / Outlook feed</button>
-      <p style="font-size:.72rem;color:var(--muted);margin:8px 0 0">Last sync: ${state.settings&&state.settings.calendarLastSync ? new Date(state.settings.calendarLastSync).toLocaleString() : 'never'} ${state.settings&&state.settings.calendarLastSource ? '('+state.settings.calendarLastSource+')' : ''}</p>
-
-    </div>
-
+        <p style="font-size:.85rem;color:var(--muted);margin:8px 0">Bring in or export a calendar from Plan → Schedule.</p>
+        <button type="button" class="btn" data-action="nav" data-view="calendar">Open Schedule</button>
       </div>
     </details>
 
@@ -11451,9 +11974,9 @@ function viewSettings(){
       <div style="margin-top:12px">
         <button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google (recommended)</button>
         <p style="font-size:.8rem;color:var(--muted);margin:8px 0 0;line-height:1.45">
-          Best for automatic backup and the same account on laptop and phone (Android or iPhone browser/app).
-          Use any Google account (Gmail or Google account linked to another email).
-          Apple ID and Outlook login are not in this version yet — username login stays on this device only.
+          Sign in with Google to keep your tasks, and to open the same account on a laptop and on the phone.
+          This does not import your calendar, and it is not Outlook or Apple sign-in.
+          A username works on this device only.
         </p>
       </div>
       <details style="margin-top:12px;display:none" id="devFirebaseBox" data-admin-only="1"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Advanced: Firebase config (admin only — do not use)</summary><div class="field"><label>Firebase config</label>
@@ -11503,13 +12026,7 @@ function viewSettings(){
       <summary>Backup & restore</summary>
       <div class="setgroup-body">
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px;line-height:1.45">
-          <b>Automatic (no action needed):</b><br>
-          • Your data is saved on this device as you work.<br>
-          • SnapBack keeps one <b>recent safety copy</b> in the background (updated automatically).<br>
-          • If you <b>sign in with Google</b>, your data is also stored in <b>your</b> private cloud and can open on other devices.
-        </p>
-        <p style="font-size:.85rem;margin:0 0 14px;line-height:1.45">
-          <b>Strongly recommended:</b> Sign in with Google so a reinstall or new phone does not depend only on this browser.
+          Sign in with Google and your work is kept. You can also download a file copy below.
         </p>
         <p style="font-size:.88rem;font-weight:700;margin:0 0 6px">Last automatic safety copy</p>
         <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px;line-height:1.4">
@@ -12623,12 +13140,13 @@ function wireView(){
       if(!p) return;
       if(p.action==='challenge-home'){ state.challengeId=null; persistRender(); return; }
       if(p.action==='start-wizard') openStartWizard();
+      else if(p.action==='due-wizard') openDueWizard();
       else if(p.action==='plan-ahead'){ state.view='planAhead'; persistRender(); }
-      else if(p.action==='mode-spotlight'){ state.listMode='spotlight'; state.spotlightSize=3; state.filter='all'; showAppMessage('Spotlight on', 'Tasks shows only 3 items. Switch to Full list anytime.'); navigateTo('tasks'); }
-      else if(p.action==='mode-batch'){ state.listMode='spotlight'; state.spotlightSize=3; state.filter='all'; showAppMessage('Spotlight', 'Only a few tasks shown.'); navigateTo('tasks'); }
-      else if(p.action==='mode-wall'){ state.listMode='wall'; state.filter='all'; showAppMessage('Tile Wall', 'Tasks as tiles only — less list pressure.'); navigateTo('tasks'); }
+      else if(p.action==='mode-spotlight'){ state.listMode='spotlight'; state.spotlightSize=3; state.filter='all'; navigateTo('tasks'); }
+      else if(p.action==='mode-batch'){ state.listMode='spotlight'; state.spotlightSize=3; state.filter='all'; navigateTo('tasks'); }
+      else if(p.action==='mode-wall'){ state.listMode='wall'; state.filter='all'; navigateTo('tasks'); }
       else if(p.action==='mode-one'){ state.listMode='one'; state.oneAtATimeIndex=0; navigateTo('tasks'); }
-      else if(p.action==='mode-jar'){ state.listMode='jar'; state.jarQueue=null; showAppMessage('Grab Bag', 'List is hidden. Pull one task when ready.'); navigateTo('tasks'); }
+      else if(p.action==='mode-jar'){ state.listMode='jar'; state.jarQueue=null; navigateTo('tasks'); }
       else if(p.action==='mode-pool'){ state.listMode='pool'; navigateTo('tasks'); }
       else if(p.action==='mode-spin'){ state.listMode='spin'; state.spinResult=null; navigateTo('tasks'); }
       else if(p.action==='top-of-mind'){
@@ -12902,16 +13420,32 @@ function wireView(){
       persistRender();
     };
 
+    function markMustFrog(kind){
+      const id=document.getElementById('mfPickSelect')&&document.getElementById('mfPickSelect').value;
+      const task=findTask(id);
+      if(!task){ showAppMessage('Choose a task', 'Open the list and pick a task you already created.'); return; }
+      if(kind==='must' || kind==='both') task.tier='must';
+      if(kind==='frog' || kind==='both') task.frog=true;
+      try{ saveState(); }catch(e){}
+      const what = kind==='both' ? 'Must-do and Frog' : (kind==='frog' ? 'Frog' : 'Must-do');
+      showAppMessage('Saved', task.title+' is marked '+what+'.');
+      persistRender();
+    }
+    const mfMust=document.getElementById('mfMustBtn');
+    if(mfMust) mfMust.onclick=function(){ markMustFrog('must'); };
+    const mfFrog=document.getElementById('mfFrogBtn');
+    if(mfFrog) mfFrog.onclick=function(){ markMustFrog('frog'); };
+    const mfBoth=document.getElementById('mfBothBtn');
+    if(mfBoth) mfBoth.onclick=function(){ markMustFrog('both'); };
+
     const bbConfirm=document.getElementById('bbPickConfirm');
     if(bbConfirm) bbConfirm.onclick=function(){
       const id=document.getElementById('bbPickSelect')?.value||'';
       const task=findTask(id);
       if(!task){ showAppMessage('Pick a task', 'Choose which task to park on the Backburner.'); return; }
       task.backburner=true;
-      state.listMode='all';
-      state.filter='backburner';
       try{ saveState(); }catch(e){}
-      showAppMessage('On Backburner', task.title+' is parked. Open Tasks → Backburner to see it.');
+      showAppMessage('On the Backburner', task.title+' is parked. It is not deleted. It will not crowd Today.');
       persistRender();
     };
 
@@ -12991,7 +13525,30 @@ function wireView(){
     document.getElementById('calToday').addEventListener('click', ()=>{ state.calRef=todayStr(); state.selectedDay=todayStr(); persistRender(); });
     document.getElementById('calModeMonth').addEventListener('click', ()=>{ state.calMode='month'; persistRender(); });
     document.getElementById('calModeWeek').addEventListener('click', ()=>{ state.calMode='week'; persistRender(); });
+    const dayBtn=document.getElementById('calModeDay'); if(dayBtn) dayBtn.addEventListener('click', ()=>{ state.calMode='day'; if(!state.selectedDay) state.selectedDay=todayStr(); state.calRef=state.selectedDay; persistRender(); });
     const listBtn=document.getElementById('calModeList'); if(listBtn) listBtn.addEventListener('click', ()=>{ state.calMode='list'; persistRender(); });
+    main.querySelectorAll('[data-action="cal-new"]').forEach(btn=>btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const date=btn.dataset.date||state.selectedDay||todayStr();
+      openCalDraft({date, start: btn.dataset.time||'09:00', end:'10:00', repeat:'once'});
+    }));
+    main.querySelectorAll('[data-action="cal-open"]').forEach(btn=>btn.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const kind=btn.dataset.kind, id=btn.dataset.id;
+      if(kind==='class'){
+        const c=(state.classes||[]).find(x=>String(x.id)===String(id));
+        if(!c) return;
+        openCalDraft({id:c.id, kind:'class', title:c.title, start:c.start, end:c.end, room:c.room||'', repeat:'weekly', date: state.selectedDay||todayStr()});
+      } else {
+        const b=(state.studyBlocks||[]).find(x=>String(x.id)===String(id));
+        if(!b) return;
+        openCalDraft({id:b.id, kind:'block', title:b.label, date:b.date, start:b.start, end:b.end, room:b.room||'', repeat:'once'});
+      }
+    }));
+    const cds=document.getElementById('calDraftSave'); if(cds) cds.addEventListener('click', saveCalDraftFromForm);
+    const cdc=document.getElementById('calDraftCancel'); if(cdc) cdc.addEventListener('click', ()=>{ state.calDraft=null; persistRender(); });
+    const cdd=document.getElementById('calDraftDelete'); if(cdd) cdd.addEventListener('click', deleteCalDraft);
+
     const freeBtn=document.getElementById('freeSlotBtn');
     if(freeBtn) freeBtn.addEventListener('click', ()=>{
       const ds=document.getElementById('freeSlotDate')?.value || todayStr();
@@ -13033,8 +13590,28 @@ function wireView(){
         });
       });
     });
-    const icsIn=document.getElementById('icsImportInput');
-    if(icsIn) icsIn.addEventListener('change', ()=>{ const f=icsIn.files&&icsIn.files[0]; if(f) importICSFile(f); icsIn.value=''; });
+    function wireIcsFilePicker(inputId, buttonId){
+      const input=document.getElementById(inputId);
+      const btn=document.getElementById(buttonId);
+      const status=document.getElementById('icsImportStatus');
+      if(input && !input._wired){
+        input._wired=true;
+        input.addEventListener('change', ()=>{
+          const f=input.files&&input.files[0];
+          if(status) status.textContent = f ? ('Selected '+f.name+'. Now tap Upload calendar file.') : '';
+        });
+      }
+      if(btn && !btn._wired){
+        btn._wired=true;
+        btn.addEventListener('click', ()=>{
+          const f=input&&input.files&&input.files[0];
+          if(!f){ showAppMessage('Choose the file first', 'Choose the downloaded .ics file, then tap Upload calendar file.'); return; }
+          importICSFile(f);
+        });
+      }
+    }
+    wireIcsFilePicker('icsImportInput','icsUploadBtn');
+    wireIcsFilePicker('icsFileSettings','icsUploadSettingsBtn');
     main.querySelectorAll('[data-day]').forEach(el=>el.addEventListener('click', ()=>{ state.selectedDay=el.dataset.day; persistRender(); }));
     const addClassBtn=document.getElementById('addClassBtn'); if(addClassBtn) addClassBtn.addEventListener('click', addClass);
     if(document.getElementById('addSchedBtn')) wireSchedForm();
@@ -14202,53 +14779,3 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.conflictQueue===undefined) state.conflictQueue=[];
     if(state.conflictPass===undefined) state.conflictPass=[];
     if(state.conflictIdx===undefined) state.conflictIdx=0;
-    if(state.ampmPromptOpen===undefined) state.ampmPromptOpen=false;
-    if(state.ampmPrompt===undefined) state.ampmPrompt=null;
-    if(state.navHistory===undefined) state.navHistory=[];
-    if(state.taskMenuOpen===undefined) state.taskMenuOpen=false;
-    if(state.journal===undefined) state.journal=[];
-    if(!state.journalFiled) state.journalFiled={file:[],do:[],drop:[]};
-    if(!state.profile) state.profile={name:'', grade:'', school:'', notes:''};
-    if(state.challengeId===undefined) state.challengeId=null;
-    if(state.wizard===undefined) state.wizard=null;
-    if(state.appMsg===undefined) state.appMsg=null;
-    if(state.appPrompt===undefined) state.appPrompt=null;
-    if(state.pickTom===undefined) state.pickTom=false;
-    if(state.pickTimer===undefined) state.pickTimer=false;
-    if(state.workSession===undefined) state.workSession=null;
-    if(!state.contextFilter) state.contextFilter='all';
-    if(state.askDateOpen===undefined) state.askDateOpen=false;
-    if(state.sneakTomorrow===undefined) state.sneakTomorrow=false;
-    if(state.dateEditOpen===undefined) state.dateEditOpen=false;
-    if(state.editingTaskId===undefined) state.editingTaskId=null;
-    if(state.dateEditId===undefined) state.dateEditId=null;
-    if(!state.listMode) state.listMode='all'; // all | spotlight | wall | one | jar
-    if(!state.spotlightSize) state.spotlightSize=3;
-    if(state.jarQueue===undefined) state.jarQueue=null;
-    if(state.oneAtATimeIndex===undefined) state.oneAtATimeIndex=0;
-    if(state.topOfMindId===undefined) state.topOfMindId=null;
-    if(!state.timeTrack) state.timeTrack={taskId:null, startedAt:null, accumulated:{}};
-    if(state.backburner===undefined) state.backburner=[];
-    if(!state.wakeAlarm) state.wakeAlarm={enabled:false,time:'07:00',days:[0,1,2,3,4],snoozesMax:2,snoozesLeft:2};
-    if(state.wakeMathOpen===undefined) state.wakeMathOpen=false;
-    if(state.wakeMath===undefined) state.wakeMath=null;
-    if(state.deleteSeriesPrompt===undefined) state.deleteSeriesPrompt=null;
-    if(state.settings.celebrateOnComplete===undefined) state.settings.celebrateOnComplete=true;
-    if(state.settings.celebrateSound===undefined) state.settings.celebrateSound=true;
-    if(!Array.isArray(state.whenThen)) state.whenThen=[];
-    if(!Array.isArray(state.rewardingRoutines)) state.rewardingRoutines=[];
-    if(!Array.isArray(state.strategicPlans)) state.strategicPlans=[];
-    if(!Array.isArray(state.flipScripts)) state.flipScripts=[];
-    if(!state.statsRangeStart){ const d=new Date(); d.setDate(d.getDate()-6); state.statsRangeStart=toDateStr(d); }
-    if(!state.statsRangeEnd) state.statsRangeEnd=todayStr();
-  }
-  if(state.settings.quoteOnLoad && state.lastQuoteShownDate!==todayStr()){
-    state.lastQuoteShownDate=todayStr();
-    state.quoteModalOpen=true;
-    state.quoteIndex=Math.floor(Math.random()*allQuotes().length);
-  }
-  render();
-})();
-</script>
-</body>
-</html>
