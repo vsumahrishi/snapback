@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="287">
+<meta name="snapback-build" content="288">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -3299,13 +3299,14 @@ function setHabitValueToday(habitId, value){
 }
 function addHabit(){
   const nameInput=document.getElementById('newHabitName');
+  if(!nameInput) return;
   const name=nameInput.value.trim();
-  if(!name) return;
-  const iconInput=document.getElementById('newHabitIcon');
-  const icon=iconInput.value.trim()||'&#10003;';
-  const type=document.getElementById('newHabitType').value;
-  state.habits.push({id:uid(),name,icon,type});
-  nameInput.value=''; iconInput.value='';
+  if(!name){ showAppMessage('Name needed','Type the habit.'); return; }
+  const remind=!!(document.getElementById('newHabitRemind')&&document.getElementById('newHabitRemind').checked);
+  const track=!!(document.getElementById('newHabitTrack')&&document.getElementById('newHabitTrack').checked);
+  state.habits.push({id:uid(),name,icon:'',type:'check',remind:remind,track:track});
+  nameInput.value='';
+  showAppMessage('Habit added', track?'It will show in Past 7 days.':'Saved. It will not appear in Past 7 days.');
   persistRender();
 }
 function deleteHabit(id){
@@ -3679,6 +3680,79 @@ function playReminderChime(){
     beep(t0+0.28, 988, 0.18);
     beep(t0+0.56, 1175, 0.28);
   }catch(e){}
+}
+function checkHabitNudges(now){
+  if(typeof ensureHabitPlans==='function') ensureHabitPlans();
+  if(!state.habitNudges) return false;
+  if(!state.notifiedKeys) state.notifiedKeys=[];
+  const today=todayStr();
+  const dow=mondayIndex(new Date(today+'T12:00:00'));
+  let changed=false;
+  function once(key, text, ask){
+    if(state.notifiedKeys.indexOf(key)>=0) return;
+    state.notifiedKeys.push(key);
+    changed=true;
+    if(ask){ state.habitAsk=ask; }
+    fireReminder(text);
+  }
+  const hm=function(hhmm){
+    const p=String(hhmm||'00:00').split(':').map(Number);
+    const d=new Date(); d.setHours(p[0]||0, p[1]||0, 0, 0); return d.getTime();
+  };
+  if(state.habitNudges.water!==false){
+    [8,11,14,17].forEach(function(h){
+      const t=hm(String(h).padStart(2,'0')+':00');
+      if(now>=t && now<t+25*60*1000) once('water:'+today+':'+h, 'Take a sip of water. Hydrate.', null);
+    });
+  }
+  if(state.habitNudges.exercise!==false){
+    (state.exercisePlan||[]).filter(function(r){ return r.day===dow; }).forEach(function(r){
+      const start=hm(r.start);
+      const end=hm(r.end||r.start);
+      if(now>=start-30*60*1000 && now<start) once('expre:'+today+':'+r.id, exerciseCue(r.focus), null);
+      if(now>=end && now<end+45*60*1000){
+        once('expost:'+today+':'+r.id, 'Did you do your '+(r.focus||'session')+'?', {kind:'yesno', log:'exercise', id:r.id, date:today, text:'Did you do your '+(r.focus||'session')+'?'});
+      }
+    });
+  }
+  if(state.habitNudges.meal!==false){
+    const t=hm('19:30');
+    if(now>=t && now<t+40*60*1000) once('meal:'+today, 'Did you eat a real meal today?', {kind:'yesno', log:'meal', date:today, text:'Did you eat a real meal today?'});
+  }
+  if(state.habitNudges.sleep!==false){
+    const t=hm('08:00');
+    if(now>=t && now<t+40*60*1000) once('sleep:'+today, 'Log last night’s sleep.', {kind:'sleep', date:today, text:'How many hours did you sleep?'});
+  }
+  if(state.habitNudges.screen!==false && state.screenPlan){
+    const t=hm(state.screenPlan.nudgeTime||'21:00');
+    const day=(state.screenPlan.days&&state.screenPlan.days[dow])||{};
+    if(now>=t && now<t+30*60*1000){
+      once('screen:'+today, 'Your screen limit today is '+(day.hours||0)+'h '+(day.mins||0)+'m.', null);
+    }
+  }
+  return changed;
+}
+function answerHabitAsk(yes){
+  const a=state.habitAsk; if(!a) return;
+  ensureHabitPlans();
+  if(a.log==='meal') state.mealLog[a.date]=!!yes;
+  if(a.log==='exercise'){
+    if(!state.exerciseLog[a.date]) state.exerciseLog[a.date]={};
+    state.exerciseLog[a.date][a.id]=!!yes;
+  }
+  state.habitAsk=null;
+  try{ saveState(); }catch(e){}
+  persistRender();
+}
+function saveSleepAsk(){
+  const a=state.habitAsk; if(!a) return;
+  ensureHabitPlans();
+  const v=document.getElementById('sleepHours')&&document.getElementById('sleepHours').value;
+  state.sleepLog[a.date]=v||'';
+  state.habitAsk=null;
+  try{ saveState(); }catch(e){}
+  showAppMessage('Sleep saved','That hour count is stored for today.');
+  persistRender();
 }
 function fireReminder(body){
   const canNotify = state.settings.notifyBrowser && ('Notification' in window) && Notification.permission==='granted';
@@ -4117,6 +4191,7 @@ function checkNotifications(){
       r.notified=true; changed=true;
     }
   });
+  try{ if(checkHabitNudges(now)) changed=true; }catch(e){}
   if(changed) saveState();
 }
 
@@ -4430,6 +4505,20 @@ function renderModal(){
       persistRender();
     });
     setTimeout(()=>{ try{ document.getElementById('wakeMathInput')?.focus(); }catch(e){} }, 200);
+    return;
+  }
+  if(state.habitAsk){
+    const a=state.habitAsk;
+    const sleepOpts=['0','1','2','3','4','5','6','7','8','9','10','10+'].map(h=>`<option>${h}</option>`).join('');
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="text-align:left;max-width:380px">
+      <div style="font-weight:800;font-size:1.05rem;margin-bottom:10px">${escapeHtml(a.text||'')}</div>
+      ${a.kind==='sleep'?`<select id="sleepHours" style="width:100%;margin-bottom:10px">${sleepOpts}</select><button class="btn" id="sleepSaveAsk" type="button">Save</button>`:`<div style="display:flex;gap:8px"><button class="btn" id="habitYes" type="button">Yes</button><button class="btn ghost" id="habitNo" type="button">No</button></div>`}
+      <button class="btn ghost sm" id="habitAskClose" type="button" style="margin-top:8px">Not now</button>
+    </div></div>`;
+    const y=document.getElementById('habitYes'); if(y) y.onclick=function(){ answerHabitAsk(true); };
+    const n=document.getElementById('habitNo'); if(n) n.onclick=function(){ answerHabitAsk(false); };
+    const s=document.getElementById('sleepSaveAsk'); if(s) s.onclick=saveSleepAsk;
+    const c=document.getElementById('habitAskClose'); if(c) c.onclick=function(){ state.habitAsk=null; renderModal(); };
     return;
   }
   if(state.breathingOpen){
@@ -5400,7 +5489,11 @@ async function syncGoogleCalendarReadonly(){
       showAppMessage('Calendar permission needed', 'Log out, sign in with Google again, and allow Calendar access when Google asks. Then tap Sync calendar now.');
       return;
     }
-    showAppMessage('Calendar sync failed', msg.slice(0,280));
+    if(msg.indexOf('401')>=0 || /invalid authentication|unauthenticated|auth/i.test(msg)){
+      showAppMessage('Google needs a fresh sign-in', 'Sign out, sign in with Google again, and allow Calendar when Google asks. Or download a calendar file and use Upload calendar file.');
+      return;
+    }
+    showAppMessage('Could not read Google Calendar', 'Download a calendar file and use Upload calendar file. SnapBack only copies events. It does not change Google.');
   }
 }
 
@@ -5463,7 +5556,7 @@ async function syncIcsCalendarUrl(url){
     const text = await fetchIcsText(url);
     const result = importIcsText(text, 'ics-url');
     if(!result.ok){
-      showAppMessage('ICS sync failed', result.message);
+      showAppMessage('Could not read that link', result.message);
       return;
     }
     state.settings = state.settings||{};
@@ -5472,9 +5565,9 @@ async function syncIcsCalendarUrl(url){
     state.settings.calendarLastSource = 'ics';
     try{ saveState(); }catch(e){}
     try{ persistRender(); }catch(e){}
-    showAppMessage('Calendar imported', 'Added '+result.added+' event(s). Your Schedule is showing '+result.first+'.');
+    showAppMessage('Calendar copied', result.first);
   }catch(e){
-    showAppMessage('ICS sync failed', ((e&&e.message)||String(e))+' If this keeps happening, download the .ics file and use Upload calendar file.');
+    showAppMessage('Could not read that link', 'Download the calendar file, then use Upload calendar file.');
   }
 }
 
@@ -7517,7 +7610,7 @@ function viewToday(){
   ${frogTasks.length ? `
   <div class="card" style="border-left:4px solid var(--gold);background:linear-gradient(90deg,var(--gold-soft),#fff 45%)">
     <div class="lbl" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:#8a6a1a;font-weight:800">Today's frog — eat it first</div>
-    ${frogTasks.map(t=>`<div class="mc-item" style="background:transparent;border:none;padding:6px 0"><input type="checkbox" class="check" data-action="toggle-done" data-id="${t.id}"> ${escapeHtml(t.title)}</div>`).join('')}
+    ${frogTasks.map(t=>`<div class="mc-item" style="background:transparent;border:none;padding:6px 0"><button type="button" class="btn ghost sm" data-action="open-task-menu" data-id="${t.id}" style="text-align:left">${escapeHtml(t.title)}</button></div>`).join('')}
   </div>` : ''}
 
   <div class="card" style="padding:0;overflow:hidden">
@@ -7529,11 +7622,11 @@ function viewToday(){
       <div class="mustcould">
         <div class="mc-col">
           <h4 style="color:var(--brick)">Must do (should do)</h4>
-          ${mustToday.length ? mustToday.map(t=>`<div class="mc-item" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="check" data-action="toggle-done" data-id="${t.id}" title="Mark complete"><button type="button" class="btn ghost sm" data-action="open-task-menu" data-id="${t.id}" style="flex:1;text-align:left">${escapeHtml(t.title)}</button></div>`).join('') : '<div class="empty">Nothing marked "must" — tag a task on the Tasks page.</div>'}
+          ${mustToday.length ? mustToday.map(t=>`<div class="mc-item"><button type="button" class="btn ghost sm" data-action="open-task-menu" data-id="${t.id}" style="width:100%;text-align:left">${escapeHtml(t.title)}</button></div>`).join('') : '<div class="empty">Nothing marked "must" — tag a task on the Tasks page.</div>'}
         </div>
         <div class="mc-col">
           <h4 style="color:var(--pine)">Could do</h4>
-          ${couldToday.length ? couldToday.map(t=>`<div class="mc-item" style="display:flex;align-items:center;gap:8px"><input type="checkbox" class="check" data-action="toggle-done" data-id="${t.id}" title="Mark complete"><button type="button" class="btn ghost sm" data-action="open-task-menu" data-id="${t.id}" style="flex:1;text-align:left">${escapeHtml(t.title)}</button></div>`).join('') : '<div class="empty">Nothing here right now.</div>'}
+          ${couldToday.length ? couldToday.map(t=>`<div class="mc-item"><button type="button" class="btn ghost sm" data-action="open-task-menu" data-id="${t.id}" style="width:100%;text-align:left">${escapeHtml(t.title)}</button></div>`).join('') : '<div class="empty">Nothing here right now.</div>'}
         </div>
       </div>
     </div>`:''}
@@ -7749,18 +7842,8 @@ function tasksViewToolbar(){
     pool:'Bubble-style — tap to complete.',
     spin:'Spin to pick the next task so you do not decide.'
   };
-  return `<div class="card" style="padding:10px 12px;margin-bottom:10px;border-left:4px solid var(--pine)">
-    <div style="font-size:.85rem;margin-bottom:4px">List view: <b>${labels[mode]||mode}</b></div>
-    <div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">${tips[mode]||''}</div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px">
-      <button class="btn ${mode==='all'?'':'ghost'} sm" data-action="list-mode" data-mode="all">Full list</button>
-      <button class="btn ${mode==='spotlight'?'':'ghost'} sm" data-action="list-mode" data-mode="spotlight">Spotlight</button>
-      <button class="btn ${mode==='wall'?'':'ghost'} sm" data-action="list-mode" data-mode="wall">Tile Wall</button>
-      <button class="btn ${mode==='one'?'':'ghost'} sm" data-action="list-mode" data-mode="one">One at a time</button>
-      <button class="btn ${mode==='jar'?'':'ghost'} sm" data-action="list-mode" data-mode="jar">Grab Bag</button>
-      <button class="btn ${mode==='pool'?'':'ghost'} sm" data-action="list-mode" data-mode="pool">Pop Pool</button>
-      <button class="btn ${mode==='spin'?'':'ghost'} sm" data-action="list-mode" data-mode="spin">Spin Pick</button>
-    </div>
+  return `<div class="card" style="padding:10px 12px;margin-bottom:10px">
+    <p style="margin:0;font-size:.85rem;color:var(--muted)">Open tasks are listed here. Spotlight, Grab Bag, and the other short lists live under Challenges, not on this page.</p>
   </div>`;
 }
 
@@ -8208,11 +8291,6 @@ function viewTasks(){
       <button type="button" data-action="ctx-filter" data-ctx="school" class="btn ghost sm ${state.contextFilter==='school'?'active':''}">${L('ctxSchool')}</button>
       <button type="button" data-action="ctx-filter" data-ctx="personal" class="btn ghost sm ${state.contextFilter==='personal'?'active':''}">${L('personal')}</button>
     </div>
-    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
-      <div style="font-size:.82rem;font-weight:700;margin-bottom:6px">Focus modes</div>
-      <p style="font-size:.75rem;color:var(--muted);margin:0 0 8px">Tap a mode to change how the list below is shown.</p>
-      ${modeBanner||tasksViewToolbar()}
-    </div>
     `:`
     <div class="row" style="gap:8px;flex-wrap:wrap">
       <div class="field" style="margin:0"><label>From</label><input type="date" id="completedFrom" value="${state.completedFrom||''}"></div>
@@ -8445,7 +8523,13 @@ function itemsForDate(dateStr){
     items.push({type:'external',color:'var(--blue)',time:ev.allDay?'':(ev.start||''),end:ev.allDay?'':(ev.end||''),label:(ev.title||'Busy')+(ev.source==='google'?' (Google)':' (calendar)'),meetingUrl:''});
   });
   if(state.nonNegotiable[dateStr]) items.push({type:'nn',color:'var(--gold)',time:'',label:'★ '+state.nonNegotiable[dateStr].text});
-  return items.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+  const seen={};
+  return items.filter(it=>{
+    const k=(it.time||'')+'|'+(it.label||'').replace(/\s+/g,' ').toLowerCase();
+    if(seen[k]) return false;
+    seen[k]=1;
+    return true;
+  }).sort((a,b)=>(a.time||'').localeCompare(b.time||''));
 }
 
 function unfoldIcs(text){
@@ -8502,6 +8586,10 @@ function importIcsText(text, source){
       end = String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0');
     }
     const weekly = /FREQ=WEEKLY/i.test(icsProp(block,'RRULE'));
+    const key = (start.date||'')+'|'+(start.start||'')+'|'+summary.toLowerCase();
+    const already = (state.studyBlocks||[]).some(b=>(b.date+'|'+(b.start||'')+'|'+(b.label||'').toLowerCase())===key)
+      || (state.classes||[]).some(c=>((c.title||'').toLowerCase()===summary.toLowerCase()) && c.start===(start.allDay?'09:00':start.start));
+    if(already) { dates.push(start.date); added++; continue; }
     if(weekly){
       let day = 0;
       try{ day = mondayIndex(new Date(start.date+'T12:00:00')); }catch(e){}
@@ -8520,12 +8608,23 @@ function importIcsText(text, source){
   }
   if(!added) return { ok:false, message:'The file opened, but SnapBack found no events in it.' };
   dates.sort();
-  state.calRef = dates[0];
-  state.selectedDay = dates[0];
+  let best = dates[0];
+  let bestDiff = Infinity;
+  const todayMs = new Date(todayStr()+'T12:00:00').getTime();
+  dates.forEach(function(ds){
+    const diff = Math.abs(new Date(ds+'T12:00:00').getTime()-todayMs);
+    if(diff<bestDiff){ bestDiff=diff; best=ds; }
+  });
+  state.calRef = best;
+  state.selectedDay = best;
   state.calMode = 'list';
   state.view = 'calendar';
+  try{
+    const nice = new Date(best+'T12:00:00').toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'});
+    state.calNote = 'Brought in '+added+' events. This schedule is showing '+nice+'. Tap an event to change or delete it.';
+  }catch(e){ state.calNote = 'Brought in '+added+' events.'; }
   try{ saveState(); }catch(e){}
-  return { ok:true, added:added, first:dates[0], last:dates[dates.length-1] };
+  return { ok:true, added:added, first: (state.calNote||best), last:dates[dates.length-1] };
 }
 function parseICS(text){
   return [];
@@ -8536,7 +8635,7 @@ function importICSFile(file){
     try{
       const result = importIcsText(String(reader.result||''), 'ics-file');
       if(!result.ok){ showAppMessage('Calendar not imported', result.message); return; }
-      showAppMessage('Calendar imported', 'Added '+result.added+' event(s). Showing '+result.first+'.');
+      showAppMessage('Calendar copied', result.first);
       try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
     }catch(e){
       console.error(e);
@@ -9058,6 +9157,19 @@ function viewNudge(){
     </div>
   </div>`;
 }
+function schedIsOpen(key){
+  if(!state.schedOpen) state.schedOpen={glance:true};
+  return !!state.schedOpen[key];
+}
+function schedBox(key, title, inner){
+  const open = schedIsOpen(key);
+  return `<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
+    <button type="button" class="btn ghost" data-action="sched-toggle" data-key="${key}" style="width:100%;text-align:left;border:none;border-radius:0;padding:14px 16px;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-weight:700">${title}</span><span>${open?'▾':'▸'}</span>
+    </button>
+    ${open?`<div style="padding:0 16px 16px">${inner}</div>`:''}
+  </div>`;
+}
 function viewCalendar(){
   const mode=state.calMode||'list';
   const ref=new Date(state.calRef+'T00:00:00');
@@ -9137,10 +9249,11 @@ function viewCalendar(){
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Week &amp; month at a glance</div>
     <h1>Your Schedule</h1>
-    <p>Day, week, or month. Tap an event to edit it. Tap Add to put something on an empty time.</p>
+    <p>Day, week, or month. Tap an empty day to add something. Tap an event to change or delete it.</p>
+    ${state.calNote?`<p style="background:var(--pine-soft);border-radius:10px;padding:10px 12px">${escapeHtml(state.calNote)}</p>`:''}
   </div>
-  <div class="card">
-    <div class="calnav">
+  ${schedBox('glance','Quick glance', `
+  <div class="calnav">
       <button class="btn ghost sm" id="calPrev">&larr;</button>
       <div style="font-weight:700">${mode==='month'?ref.toLocaleDateString(undefined,{month:'long',year:'numeric'}):'Week of '+state.calRef}</div>
       <button class="btn ghost sm" id="calNext">&rarr;</button>
@@ -9160,21 +9273,15 @@ function viewCalendar(){
       <span><span class="dotcolor" style="background:var(--purple)"></span>Study block</span>
       <span><span class="dotcolor" style="background:var(--gold)"></span>Non-negotiable</span>
     </div>
-    ${mode==='month' ? `<div class="agenda"><h3>Agenda — ${state.selectedDay}</h3>${selItems.length ? selItems.map(it=>`<div class="deadline-row"><span class="dotcolor" style="background:${it.color}"></span>${it.time?('<b>'+it.time+'</b>&nbsp;'):''}${escapeHtml(it.label)}${it.meetingUrl?`<a href="${escapeHtml(it.meetingUrl)}" target="_blank" rel="noopener" style="margin-left:8px"><button class="btn ghost sm">Join &#8599;</button></a>`:''}</div>`).join('') : '<div class="empty">Nothing scheduled.</div>'}</div>` : ''}
-  </div>
+    ${mode==='month' ? `<div class="agenda"><h3>Agenda — ${state.selectedDay}</h3>${selItems.length ? selItems.map(it=>calEventButton(it)).join('') : '<div class="empty">Nothing on this day yet.</div>'}<button type="button" class="btn ghost sm" data-action="cal-new" data-date="${state.selectedDay}" style="margin-top:8px">Add on this day</button></div>` : ''}
+  `)}
   ${calDraftCard()}
-  <div class="card">
-    <h3 style="margin:0 0 6px">Quick add</h3>
-    <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Type a line, paste a timetable, or upload a screenshot. SnapBack writes it in the box. Edit it, then choose Yes or Cancel. Nothing is added until you say Yes.</p>
-    <div class="row" style="margin-bottom:8px">
-      <div class="field"><label>These items are</label>
-        <select id="ttRepeatMode">
-          <option value="weekly">Every week</option>
-          <option value="once">One time only</option>
-        </select>
-      </div>
+  ${schedBox('quick','Quick add', `
+    <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Type a line, paste a timetable, or upload a screenshot. Edit the text, then choose Yes or Cancel. Nothing is added until you say Yes.</p>
+    <div class="field"><label>These items are</label>
+      <select id="ttRepeatMode"><option value="weekly">Every week</option><option value="once">One time only</option></select>
     </div>
-    <div class="row" style="margin-bottom:10px;align-items:center">
+    <div class="row" style="margin:8px 0;align-items:center">
       <input type="file" id="ttImageInput" accept="image/*" style="flex:1">
       <button class="btn sm" id="ttOcrBtn" type="button">Read screenshot</button>
     </div>
@@ -9182,51 +9289,35 @@ function viewCalendar(){
     <textarea id="ttPaste" rows="4" placeholder="Example: Bio Mon 8:30, Gym Tue 3 to 5" style="width:100%"></textarea>
     <button class="btn" id="ttParseBtn" type="button" style="margin-top:10px">Check what I read</button>
     <div id="ttPreview" style="margin-top:12px"></div>
-  </div>
-  <div class="card">
-    <h3>Bring in my calendar</h3>
-    <p style="font-size:.85rem;color:var(--muted);margin-top:0">This copies events into SnapBack. It does not change Google or Outlook.</p>
+  `)}
+  ${schedBox('bring','Bring in my calendar', `
+    <p style="font-size:.85rem;color:var(--muted);margin-top:0">This copies events into SnapBack. It does not change Google, Outlook, or Apple. A Google sign-in, a link, and a downloaded file are the same job — not three different calendars.</p>
     <button type="button" class="btn sm" id="syncGcalBtn">Bring in Google Calendar</button>
     <p style="font-size:.75rem;color:var(--muted);margin:10px 0 4px">Or paste a calendar link</p>
-    <input id="icsUrlInput" value="${escapeHtml((state.settings&&state.settings.icsUrl)||'')}" placeholder="https://…/calendar.ics" style="width:100%">
+    <input id="icsUrlInput" value="${escapeHtml((state.settings&&state.settings.icsUrl)||'')}" placeholder="Paste the calendar link" style="width:100%">
     <button type="button" class="btn ghost sm" id="syncIcsBtn" style="margin-top:8px">Bring in this link</button>
     <p style="font-size:.75rem;color:var(--muted);margin:10px 0 4px">Or choose a calendar file you downloaded</p>
     <input type="file" id="icsImportInput" accept=".ics,text/calendar,.txt">
     <button type="button" class="btn" id="icsUploadBtn" style="margin-top:8px">Upload calendar file</button>
     <p id="icsImportStatus" style="font-size:.85rem;margin-top:8px"></p>
-  </div>
-
-  <div class="card">
-    <h3>Free slots</h3><p style="font-size:.82rem;color:var(--muted);margin:0 0 8px">8:00–18:00 window. Tap a free slot to fill the schedule form.</p>
-    <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">See open times on a day before you add a meeting.</p>
+  `)}
+  ${schedBox('free','Free slots', `
+    <p style="font-size:.85rem;color:var(--muted);margin-top:0">Open times between 8:00 and 18:00.</p>
     <div class="row">
       <div class="field"><label>Day</label><input type="date" id="freeSlotDate" value="${state.selectedDay||todayStr()}"></div>
       <div class="field" style="flex:0 0 auto;align-self:flex-end"><button class="btn sm" id="freeSlotBtn">Show free times</button></div>
     </div>
     <div id="freeSlotResult" style="margin-top:10px;font-size:.9rem"></div>
-  </div>
-  <div class="card">
-    <h3>Import from Google / Apple / Outlook</h3>
-    <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">
-      Export a calendar file (<b>.ics</b>) from Google Calendar, Apple Calendar, or Outlook, then choose it here. Weekly repeating events become semester classes; one-off events become appointments on this calendar.<br><br>
-      <b>Notion:</b> Notion doesn’t export .ics. Copy the text and paste it under <b>Plan → Calendar → Quick add</b>.
-    </p>
-    <input type="file" id="icsImportInput" accept=".ics,text/calendar,.txt" style="margin-top:8px">
-    <button type="button" class="btn" id="icsUploadBtn" style="margin-top:10px">Upload calendar file</button>
-    <p id="icsImportStatus" style="font-size:.85rem;margin-top:8px;color:var(--pine)"></p>
-    <p style="font-size:.78rem;color:var(--muted);margin-top:8px">Choose the .ics file, then tap <b>Upload calendar file</b>. Choosing the file alone does not import it.<br>
-      Google Calendar → Settings → Import &amp; export → Export<br>
-      Apple Calendar → File → Export → Export<br>
-      Outlook → open calendar → Export to ICS
-    </p>
-  </div>
-  <div class="card">
-    <h3>Export to your phone / watch</h3>
-    <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">Download SnapBack’s calendar as .ics and open it in Google/Apple/Outlook so it syncs to your watch.</p>
-    <button class="btn" id="exportIcsBtn2">Export calendar file ↓</button>
-    <button class="btn ghost sm" id="exportWeekGridBtn" style="margin-left:8px">Week grid ↓</button>
-    <button class="btn" id="shareFreeBusyBtn" data-share-calendar="1" style="margin-left:8px">Share Calendar</button>
-  </div>
+  `)}
+  ${schedBox('export','Export calendar', `
+    <p style="font-size:.85rem;color:var(--muted);margin-top:0">Download, print, or share. This does not change the other calendar.</p>
+    <div style="display:flex;flex-direction:column;gap:8px;max-width:280px">
+      <button class="btn" id="exportIcsBtn2" type="button">Export calendar file</button>
+      <button class="btn ghost" id="exportWeekGridBtn" type="button">Print week</button>
+      <button class="btn ghost" id="printMonthBtn" type="button">Print month</button>
+      <button class="btn" id="shareFreeBusyBtn" data-share-calendar="1" type="button">Quick share</button>
+    </div>
+  `)}
 
   `;
 }
@@ -9399,7 +9490,7 @@ function viewTimer(){
       <div class="sessiondots">${dots}</div>
       <div style="color:var(--muted);font-size:.8rem;margin-top:8px">
         ${activeTask ? `${activeTask.pomodoros||0} focus session(s) logged on “${escapeHtml(activeTask.title)}”` : 'Pick a task above to track sessions against it'}
-        ${state.settings.focusGuardOn ? `<div style="margin-top:4px">Focus Guard: away ${t.distractionCount||0} time${(t.distractionCount||0)!==1?'s':''} this session${(t.distractionSeconds||0)?` (${t.distractionSeconds}s total)`:''} · <a href="#" data-action="goto-habits" style="color:var(--pine)">manage in Healthy Habits</a></div>` : ''}
+        ${state.settings.focusGuardOn ? `<div style="margin-top:4px">Focus Guard is on. Away ${t.distractionCount||0} time${(t.distractionCount||0)!==1?'s':''} this session.</div>` : ''}
       </div>
     </div>
   </div>
@@ -9423,6 +9514,11 @@ function viewTimer(){
       <button type="button" class="btn" id="fpPlaySound" style="width:100%">${s.ambientOn && ambientNode ? 'Stop sound' : 'Play sound'}</button>
       <p style="font-size:.78rem;color:var(--muted);margin:0">Choose a type, then Play. Volume is only for this Focus Pod soundscape (not the Nudge alarm).</p>
     </div>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">Focus Guard</h3>
+    <p style="color:var(--muted);font-size:.85rem">If you leave this tab during a focus session, SnapBack notices when you come back. No penalty.</p>
+    <div class="toggle"><span>On during focus sessions</span><label class="switch"><input type="checkbox" id="focusGuardToggle" ${state.settings.focusGuardOn?'checked':''}><span class="slidepill"></span></label></div>
   </div>
   `;
 }
@@ -11225,59 +11321,158 @@ async function downloadJournalBucket(bucket){
   }
 }
 
-function viewHabits(){
-  const today=todayStr();
-  const todayLog=state.habitLog[today]||{};
-  const days=last7Days();
-  return `
-  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">The basics hold everything else up</div><h1>Healthy Habits</h1><p>Focus is hard to sustain on no sleep, no food, no movement, and too much scrolling. Quick daily check-ins — check your phone's own Screen Time / Digital Wellbeing report and log the minutes here.</p></div>
-  <div class="card">
-    <h3>Today</h3>
-    <div class="mustcould" style="grid-template-columns:1fr">
-      ${state.habits.map(h=>`<div class="mc-item" style="justify-content:space-between">
-        <span><span style="margin-right:6px">${h.icon}</span>${escapeHtml(h.name)}</span>
-        ${habitTodayControl(h, todayLog)}
-      </div>`).join('') || '<div class="empty">No habits yet — add one below.</div>'}
-    </div>
-  </div>
-  <div class="card">
-    <h3>Past 7 days</h3>
-    <div style="overflow-x:auto">
-      <table style="width:100%;border-collapse:collapse;font-size:.82rem">
-        <tr><th style="text-align:left;padding:4px 8px"></th>${days.map(d=>`<th style="padding:4px 8px;color:var(--muted);font-weight:600">${new Date(d+'T00:00:00').toLocaleDateString(undefined,{weekday:'short'})}</th>`).join('')}</tr>
-        ${state.habits.map(h=>`<tr>
-          <td style="padding:4px 8px;white-space:nowrap">${h.icon} ${escapeHtml(h.name)}</td>
-          ${days.map(d=>`<td style="text-align:center;padding:4px 8px">${habitHistoryCell(h,d)}</td>`).join('')}
-        </tr>`).join('')}
-      </table>
-    </div>
-  </div>
-  <div class="card">
-    <h3>Add a habit</h3>
-    <div class="row">
-      <div class="field"><label>Icon (emoji, optional)</label><input id="newHabitIcon" placeholder="&#128170;" style="width:100%"></div>
-      <div class="field" style="flex:2"><label>Name</label><input id="newHabitName" placeholder="e.g. Take meds" onkeydown="if(event.key==='Enter'){addHabit()}"></div>
-      <div class="field"><label>Type</label><select id="newHabitType"><option value="check">Yes/No</option><option value="number">Number</option><option value="note">Short note</option></select></div>
-    </div>
-    <button class="btn" id="addHabitBtn">Add habit</button>
-    <div style="margin-top:10px">${state.habits.map(h=>`<div class="classrow"><span style="margin-right:6px">${h.icon}</span>${escapeHtml(h.name)}${deleteControl('habit', h.id, 'Remove')}</div>`).join('')}</div>
-  </div>
-  <div class="card">
-    <h3>Take a breathing pause</h3>
-    <p style="color:var(--muted);font-size:.85rem;margin-top:-4px">A 10-second breathing pause for whenever you notice the urge to check your phone.</p>
-    <button class="btn" id="breatheBtn">Start (10s)</button>
-  </div>
-  <div class="card">
-    <h3>Focus Guard</h3>
-    <p style="color:var(--muted);font-size:.85rem;margin-top:-4px">Notices if you switch away from this tab during a Focus Pod session, and logs it — no penalty, just a nudge when you come back.</p>
-    <div class="toggle"><span>Enable during sessions</span><label class="switch"><input type="checkbox" id="focusGuardToggle" ${state.settings.focusGuardOn?'checked':''}><span class="slidepill"></span></label></div>
-    ${(state.timer.distractionCount||0)>0 ? `<p style="font-size:.82rem;color:var(--muted);margin-top:8px">Current session: away ${state.timer.distractionCount} time${state.timer.distractionCount>1?'s':''}, ${state.timer.distractionSeconds}s total.</p>` : ''}
+function habitSec(key, title, inner){
+  if(!state.habitOpen) state.habitOpen={today:true};
+  const open=!!state.habitOpen[key];
+  return `<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
+    <button type="button" class="btn ghost" data-action="habit-sec" data-key="${key}" style="width:100%;text-align:left;border:none;border-radius:0;padding:14px 16px;display:flex;justify-content:space-between;align-items:center"><span style="font-weight:700">${title}</span><span>${open?'▾':'▸'}</span></button>
+    ${open?`<div style="padding:0 16px 16px">${inner}</div>`:''}
   </div>`;
 }
+function ensureHabitPlans(){
+  if(!Array.isArray(state.exercisePlan)) state.exercisePlan=[];
+  if(!state.screenPlan) state.screenPlan={nudgeTime:'21:00', days:{}};
+  if(!state.habitNudges) state.habitNudges={exercise:true, meal:true, water:true, sleep:true, screen:true};
+  if(!state.mealLog) state.mealLog={};
+  if(!state.sleepLog) state.sleepLog={};
+  if(!state.exerciseLog) state.exerciseLog={};
+}
+function exerciseCue(focus){
+  const f=String(focus||'').toLowerCase();
+  if(f.indexOf('run')>=0) return 'Time to lace up. Your run is in 30 minutes.';
+  if(f.indexOf('yoga')>=0 || f.indexOf('stretch')>=0) return 'Roll out the mat. Yoga is in 30 minutes. Water bottle nearby.';
+  if(f.indexOf('cycl')>=0 || f.indexOf('cardio')>=0) return 'Cardio in 30 minutes. Fill the bottle and find your shoes.';
+  if(f.indexOf('walk')>=0) return 'A walk is in 30 minutes. Comfortable shoes, water, and you are set.';
+  return 'Strength work is in 30 minutes. Water bottle, and a quick space to move.';
+}
+function saveExercisePlan(){
+  ensureHabitPlans();
+  const focusSel=document.getElementById('exFocus');
+  let focus=focusSel?focusSel.value:'Strength training';
+  if(focus==='Other'){
+    focus=(document.getElementById('exOther')&&document.getElementById('exOther').value||'').trim()||'Workout';
+  }
+  const details=(document.getElementById('exDetails')&&document.getElementById('exDetails').value||'').trim();
+  const start=(document.getElementById('exStart')&&document.getElementById('exStart').value)||'07:30';
+  const end=(document.getElementById('exEnd')&&document.getElementById('exEnd').value)||'08:15';
+  const km=(document.getElementById('exKm')&&document.getElementById('exKm').value||'').trim();
+  const days=[];
+  for(let i=0;i<7;i++){ const el=document.getElementById('exDay'+i); if(el&&el.checked) days.push(i); }
+  if(!days.length){ showAppMessage('Pick a day','Choose at least one day for this session.'); return; }
+  days.forEach(function(day){
+    state.exercisePlan=state.exercisePlan.filter(function(r){ return !(r.day===day && r.start===start && r.focus===focus); });
+    state.exercisePlan.push({id:uid(), day:day, start:start, end:end, focus:focus, details:details, km:km});
+  });
+  try{ saveState(); }catch(e){}
+  showAppMessage('Plan saved','Your week table is updated. A reminder can arrive 30 minutes before, if you leave that nudge on.');
+  persistRender();
+}
+function saveScreenPlan(){
+  ensureHabitPlans();
+  const nudge=(document.getElementById('screenNudge')&&document.getElementById('screenNudge').value)||'21:00';
+  state.screenPlan.nudgeTime=nudge;
+  state.screenPlan.days={};
+  for(let i=0;i<7;i++){
+    const h=document.getElementById('scH'+i);
+    const m=document.getElementById('scM'+i);
+    state.screenPlan.days[i]={hours:Number(h&&h.value)||0, mins:Number(m&&m.value)||0};
+  }
+  try{ saveState(); }catch(e){}
+  showAppMessage('Screen plan saved','SnapBack will mention today’s limit at the time you chose.');
+  persistRender();
+}
+function exerciseTableHtml(){
+  ensureHabitPlans();
+  const names=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const rows=state.exercisePlan.slice().sort(function(a,b){ return a.day-b.day || String(a.start).localeCompare(String(b.start)); });
+  if(!rows.length) return '<p style="color:var(--muted)">No sessions yet. Add one and the week table appears here.</p>';
+  const colors=['#dbeafe','#d1fae5','#fef3c7','#ede9fe','#ffe4e6','#e0f2fe','#ffedd5'];
+  return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:separate;border-spacing:0;font-size:.86rem;border-radius:12px;overflow:hidden">
+    <tr>
+      <th style="background:#3b82f6;color:#fff;padding:8px">Day</th>
+      <th style="background:#10b981;color:#fff;padding:8px">Time</th>
+      <th style="background:#f59e0b;color:#fff;padding:8px">Focus</th>
+      <th style="background:#7c3aed;color:#fff;padding:8px">Details</th>
+      <th style="background:#ef4444;color:#fff;padding:8px">Duration</th>
+    </tr>
+    ${rows.map(function(r,i){
+      const bg=colors[r.day%colors.length];
+      let dur='';
+      try{
+        const [sh,sm]=String(r.start).split(':').map(Number);
+        const [eh,em]=String(r.end).split(':').map(Number);
+        const mins=(eh*60+em)-(sh*60+sm);
+        if(mins>0) dur=mins+' min';
+      }catch(e){}
+      const detail=escapeHtml(r.details||'')+(r.km?(' · '+escapeHtml(r.km)+' km'):'');
+      return `<tr style="background:${bg}"><td style="padding:8px;font-weight:700">${names[r.day]||''}</td><td style="padding:8px">${escapeHtml(formatTime12(r.start))} – ${escapeHtml(formatTime12(r.end))}</td><td style="padding:8px">${escapeHtml(r.focus||'')}</td><td style="padding:8px">${detail}</td><td style="padding:8px">${dur}</td></tr>`;
+    }).join('')}
+  </table></div>
+  <button type="button" class="btn ghost sm" id="exClear" style="margin-top:8px">Clear plan</button>`;
+}
+function viewHabits(){
+  ensureHabitPlans();
+  const names=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const focuses=['Strength training','Running','Yoga','Cycling or cardio','Bodyweight','Walking','Sport','Other'];
+  const today=todayStr();
+  const dow=mondayIndex(new Date(today+'T12:00:00'));
+  const screenToday=(state.screenPlan.days&&state.screenPlan.days[dow])||{hours:0,mins:0};
+  const tracked=(state.habits||[]).filter(h=>h.track);
+  const days=last7Days();
+  const exYes=function(ds){ const log=state.exerciseLog[ds]; return log && Object.keys(log).some(k=>log[k]===true); };
+  return `
+  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">Plan the week, then let SnapBack ask</div><h1>Healthy Habits</h1><p>Build the plan here. Reminders and yes/no check-ins do the tracking. Distance is in kilometres.</p></div>
+  ${habitSec('today','Today', `
+    <h3 style="margin-top:0">Exercise</h3>
+    <p style="font-size:.85rem;color:var(--muted)">Pick the days, the kind of session, and the time. The week table updates when you save.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">${names.map((n,i)=>`<label style="font-size:.85rem"><input type="checkbox" id="exDay${i}"> ${n}</label>`).join(' ')}</div>
+    <div class="field"><label>Focus</label><select id="exFocus">${focuses.map(f=>`<option>${f}</option>`).join('')}</select></div>
+    <div class="field"><label>If you chose Other</label><input id="exOther" placeholder="Type the session"></div>
+    <div class="field"><label>Details</label><textarea id="exDetails" rows="2" placeholder="Example: squats, bench, rows"></textarea></div>
+    <div class="row">
+      <div class="field"><label>Start</label><input type="time" id="exStart" value="07:30"></div>
+      <div class="field"><label>End</label><input type="time" id="exEnd" value="08:15"></div>
+      <div class="field"><label>Distance (km, optional)</label><input id="exKm" inputmode="decimal" placeholder="3"></div>
+    </div>
+    <button type="button" class="btn" id="exSave" style="margin:8px 0 12px">Save session</button>
+    ${exerciseTableHtml()}
+    <h3>Screen time</h3>
+    <p style="font-size:.85rem;color:var(--muted)">How long do you want screens for each day this week? Then choose when SnapBack should remind you to stop.</p>
+    ${names.map((n,i)=>{
+      const d=(state.screenPlan.days&&state.screenPlan.days[i])||{};
+      return `<div class="row" style="align-items:flex-end"><div style="width:42px;font-weight:700">${n}</div><div class="field"><label>Hours</label><input id="scH${i}" type="number" min="0" max="16" value="${d.hours||0}"></div><div class="field"><label>Minutes</label><input id="scM${i}" type="number" min="0" max="59" value="${d.mins||0}"></div></div>`;
+    }).join('')}
+    <div class="field" style="margin-top:8px"><label>Remind me to stop at</label><input type="time" id="screenNudge" value="${escapeHtml(state.screenPlan.nudgeTime||'21:00')}"></div>
+    <button type="button" class="btn" id="screenSave" style="margin-top:8px">Save screen plan</button>
+    <p style="font-size:.85rem">Today’s limit: <b>${screenToday.hours||0}h ${screenToday.mins||0}m</b></p>
+    <h3>Add a habit</h3>
+    <div class="field"><label>Name</label><input id="newHabitName" placeholder="Example: Take medicine"></div>
+    <label style="display:block;margin:6px 0;font-size:.9rem"><input type="checkbox" id="newHabitRemind"> Send a reminder for this habit</label>
+    <label style="display:block;margin:6px 0;font-size:.9rem"><input type="checkbox" id="newHabitTrack" checked> Show this in Past 7 days</label>
+    <button type="button" class="btn" id="addHabitBtn">Add habit</button>
+  `)}
+  ${habitSec('week','Past 7 days', `
+    <p style="font-size:.85rem;color:var(--muted)">Exercise and a real meal are tracked from the yes/no questions. Other rows appear only if you asked to track them.</p>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
+      <tr><th></th>${days.map(d=>`<th style="padding:4px;color:var(--muted)">${new Date(d+'T12:00:00').toLocaleDateString(undefined,{weekday:'short'})}</th>`).join('')}</tr>
+      <tr><td style="padding:4px">Exercise</td>${days.map(d=>`<td style="text-align:center">${exYes(d)?'✓':'·'}</td>`).join('')}</tr>
+      <tr><td style="padding:4px">Real meal</td>${days.map(d=>`<td style="text-align:center">${state.mealLog[d]===true?'✓':state.mealLog[d]===false?'–':'·'}</td>`).join('')}</tr>
+      ${tracked.map(h=>`<tr><td style="padding:4px">${escapeHtml(h.name)}</td>${days.map(d=>{
+        const v=((state.habitLog||{})[d]||{})[h.id];
+        return `<td style="text-align:center">${v?'✓':'·'}</td>`;
+      }).join('')}</tr>`).join('')}
+    </table></div>
+  `)}
+  ${habitSec('nudges','Notification settings', `
+    <p style="font-size:.85rem;color:var(--muted)">Choose which daily nudges you want. Water is a reminder only. It is not stored.</p>
+    ${[['exercise','Exercise — 30 minutes before, and a yes/no after'],['meal','Real meal question around 7:30 pm'],['water','Water sip every 3 hours, 8 am to 5 pm'],['sleep','Sleep question in the morning'],['screen','Screen-time limit at the time you set']].map(function(pair){
+      const on=state.habitNudges[pair[0]]!==false;
+      return `<label style="display:flex;gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" data-action="habit-nudge" data-key="${pair[0]}" ${on?'checked':''}><span>${pair[1]}</span></label>`;
+    }).join('')}
+  `)}
+  `;
+}
 
-/* ============================================================
-   VIEW: Mind Maps
-   ============================================================ */
 function viewMindmaps(){
   if(!state.currentMindmapId){
     return `
@@ -13017,6 +13212,13 @@ function wireView(){
     else if(action==='nav') el.addEventListener('click', ()=>{ const v=el.getAttribute('data-view')||'today'; state.view=v; try{persistRender();}catch(e){render();} });
     else if(action==='accept-terms') el.addEventListener('click', ()=>{ acceptTermsAndContinue(); });
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
+    else if(action==='sched-toggle' || action==='habit-sec') el.addEventListener('click', ()=>{
+      const bag = action==='habit-sec' ? 'habitOpen' : 'schedOpen';
+      if(!state[bag]) state[bag] = action==='sched-toggle' ? {glance:true} : {today:true};
+      const key=el.dataset.key;
+      state[bag][key]=!state[bag][key];
+      persistRender();
+    });
     else if(action==='ef-start') el.addEventListener('click', ()=>{
       if(!state.energyFocus) state.energyFocus={items:[], timerSec:600};
       const idx=Number(el.dataset.idx);
@@ -13512,19 +13714,24 @@ function wireView(){
   if(state.view==='freebusyPreview') return viewFreeBusyPreview();
   if(state.view==='freebusy') return viewFreeBusyPublic(state.freeBusyPublic||parseFreeBusyFromHash());
   if(state.view==='calendar'){
-    document.getElementById('calPrev').addEventListener('click', ()=>{
+    const prev=document.getElementById('calPrev');
+    if(prev) prev.addEventListener('click', ()=>{
       const d=new Date(state.calRef+'T00:00:00');
       if(state.calMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-7);
       state.calRef=toDateStr(d); persistRender();
     });
-    document.getElementById('calNext').addEventListener('click', ()=>{
+    const next=document.getElementById('calNext');
+    if(next) next.addEventListener('click', ()=>{
       const d=new Date(state.calRef+'T00:00:00');
       if(state.calMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+7);
       state.calRef=toDateStr(d); persistRender();
     });
-    document.getElementById('calToday').addEventListener('click', ()=>{ state.calRef=todayStr(); state.selectedDay=todayStr(); persistRender(); });
-    document.getElementById('calModeMonth').addEventListener('click', ()=>{ state.calMode='month'; persistRender(); });
-    document.getElementById('calModeWeek').addEventListener('click', ()=>{ state.calMode='week'; persistRender(); });
+    const todayBtn=document.getElementById('calToday');
+    if(todayBtn) todayBtn.addEventListener('click', ()=>{ state.calRef=todayStr(); state.selectedDay=todayStr(); state.calNote=''; persistRender(); });
+    const monthBtn=document.getElementById('calModeMonth');
+    if(monthBtn) monthBtn.addEventListener('click', ()=>{ state.calMode='month'; persistRender(); });
+    const weekBtn=document.getElementById('calModeWeek');
+    if(weekBtn) weekBtn.addEventListener('click', ()=>{ state.calMode='week'; persistRender(); });
     const dayBtn=document.getElementById('calModeDay'); if(dayBtn) dayBtn.addEventListener('click', ()=>{ state.calMode='day'; if(!state.selectedDay) state.selectedDay=todayStr(); state.calRef=state.selectedDay; persistRender(); });
     const listBtn=document.getElementById('calModeList'); if(listBtn) listBtn.addEventListener('click', ()=>{ state.calMode='list'; persistRender(); });
     main.querySelectorAll('[data-action="cal-new"]').forEach(btn=>btn.addEventListener('click', (e)=>{
@@ -13612,7 +13819,15 @@ function wireView(){
     }
     wireIcsFilePicker('icsImportInput','icsUploadBtn');
     wireIcsFilePicker('icsFileSettings','icsUploadSettingsBtn');
-    main.querySelectorAll('[data-day]').forEach(el=>el.addEventListener('click', ()=>{ state.selectedDay=el.dataset.day; persistRender(); }));
+    main.querySelectorAll('[data-day]').forEach(el=>el.addEventListener('click', (e)=>{
+      if(e.target.closest('button,a,input,select,textarea')) return;
+      const ds=el.dataset.day;
+      state.selectedDay=ds;
+      state.calRef=ds;
+      const items=itemsForDate(ds);
+      if(!items.length){ openCalDraft({date:ds, start:'09:00', end:'10:00', repeat:'once'}); return; }
+      persistRender();
+    }));
     const addClassBtn=document.getElementById('addClassBtn'); if(addClassBtn) addClassBtn.addEventListener('click', addClass);
     if(document.getElementById('addSchedBtn')) wireSchedForm();
     const ttParseBtn=document.getElementById('ttParseBtn');
@@ -13752,6 +13967,7 @@ function wireView(){
     const exportBtn=document.getElementById('exportIcsBtn'); if(exportBtn) exportBtn.addEventListener('click', exportICS);
     const exportBtn2=document.getElementById('exportIcsBtn2'); if(exportBtn2) exportBtn2.addEventListener('click', exportICS);
     const weekGridBtn=document.getElementById('exportWeekGridBtn'); if(weekGridBtn) weekGridBtn.addEventListener('click', exportWeekGrid);
+    const printMonthBtn=document.getElementById('printMonthBtn'); if(printMonthBtn) printMonthBtn.addEventListener('click', ()=>{ state.calMode='month'; exportWeekGrid(); });
   }
 
   if(state.view==='semester'){
@@ -13930,6 +14146,16 @@ function wireView(){
   }
   if(state.view==='habits'){
     const addHabitBtn=document.getElementById('addHabitBtn'); if(addHabitBtn) addHabitBtn.addEventListener('click', addHabit);
+    const exSave=document.getElementById('exSave'); if(exSave) exSave.addEventListener('click', saveExercisePlan);
+    const screenSave=document.getElementById('screenSave'); if(screenSave) screenSave.addEventListener('click', saveScreenPlan);
+    const exClear=document.getElementById('exClear'); if(exClear) exClear.addEventListener('click', ()=>{ state.exercisePlan=[]; try{saveState();}catch(e){} persistRender(); });
+    main.querySelectorAll('[data-action="habit-nudge"]').forEach(el=>{
+      el.addEventListener('change', ()=>{
+        ensureHabitPlans();
+        state.habitNudges[el.dataset.key]=el.checked;
+        try{ saveState(); }catch(e){}
+      });
+    });
     const breatheBtn=document.getElementById('breatheBtn'); if(breatheBtn) breatheBtn.addEventListener('click', openBreathingPause);
     const fgToggle=document.getElementById('focusGuardToggle'); if(fgToggle) fgToggle.addEventListener('change', ()=>{ state.settings.focusGuardOn=fgToggle.checked; persistRender(); });
   }
