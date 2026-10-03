@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="288">
+<meta name="snapback-build" content="290">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -3304,7 +3304,10 @@ function addHabit(){
   if(!name){ showAppMessage('Name needed','Type the habit.'); return; }
   const remind=!!(document.getElementById('newHabitRemind')&&document.getElementById('newHabitRemind').checked);
   const track=!!(document.getElementById('newHabitTrack')&&document.getElementById('newHabitTrack').checked);
-  state.habits.push({id:uid(),name,icon:'',type:'check',remind:remind,track:track});
+  const id=uid();
+  state.habits.push({id:id,name,icon:'',type:'check',remind:remind,track:track});
+  ensureHabitPlans();
+  state.habitNudges['habit_'+id]=remind;
   nameInput.value='';
   showAppMessage('Habit added', track?'It will show in Past 7 days.':'Saved. It will not appear in Past 7 days.');
   persistRender();
@@ -3692,8 +3695,14 @@ function checkHabitNudges(now){
     if(state.notifiedKeys.indexOf(key)>=0) return;
     state.notifiedKeys.push(key);
     changed=true;
-    if(ask){ state.habitAsk=ask; }
-    fireReminder(text);
+    if(ask){
+      state.habitAsk=ask;
+      state.reminderModalOpen=false;
+      state.appMsg=null;
+      try{ renderModal(); }catch(e){}
+    } else {
+      fireReminder(text);
+    }
   }
   const hm=function(hhmm){
     const p=String(hhmm||'00:00').split(':').map(Number);
@@ -3730,17 +3739,26 @@ function checkHabitNudges(now){
       once('screen:'+today, 'Your screen limit today is '+(day.hours||0)+'h '+(day.mins||0)+'m.', null);
     }
   }
+  (state.habits||[]).forEach(function(h){
+    if(state.habitNudges['habit_'+h.id]===false) return;
+    if(state.habitNudges['habit_'+h.id]!==true && !h.remind) return;
+    const t=hm('18:00');
+    if(now>=t && now<t+30*60*1000) once('habitn:'+h.id+':'+today, h.name, null);
+  });
   return changed;
 }
-function answerHabitAsk(yes){
+function answerHabitAsk(which){
   const a=state.habitAsk; if(!a) return;
   ensureHabitPlans();
-  if(a.log==='meal') state.mealLog[a.date]=!!yes;
+  const yes = which!=='no';
+  if(a.log==='meal') state.mealLog[a.date]=yes;
   if(a.log==='exercise'){
     if(!state.exerciseLog[a.date]) state.exerciseLog[a.date]={};
-    state.exerciseLog[a.date][a.id]=!!yes;
+    state.exerciseLog[a.date][a.id]=yes;
   }
   state.habitAsk=null;
+  state.reminderModalOpen=false;
+  state.appMsg=null;
   try{ saveState(); }catch(e){}
   persistRender();
 }
@@ -4512,13 +4530,12 @@ function renderModal(){
     const sleepOpts=['0','1','2','3','4','5','6','7','8','9','10','10+'].map(h=>`<option>${h}</option>`).join('');
     root.innerHTML=`<div class="overlay"><div class="quotecard" style="text-align:left;max-width:380px">
       <div style="font-weight:800;font-size:1.05rem;margin-bottom:10px">${escapeHtml(a.text||'')}</div>
-      ${a.kind==='sleep'?`<select id="sleepHours" style="width:100%;margin-bottom:10px">${sleepOpts}</select><button class="btn" id="sleepSaveAsk" type="button">Save</button>`:`<div style="display:flex;gap:8px"><button class="btn" id="habitYes" type="button">Yes</button><button class="btn ghost" id="habitNo" type="button">No</button></div>`}
-      <button class="btn ghost sm" id="habitAskClose" type="button" style="margin-top:8px">Not now</button>
+      ${a.kind==='sleep'?`<select id="sleepHours" style="width:100%;margin-bottom:10px">${sleepOpts}</select><button class="btn" id="sleepSaveAsk" type="button">Save</button>`:`<div style="display:flex;flex-direction:column;gap:8px"><button class="btn" id="habitYes" type="button">Yes</button><button class="btn ghost" id="habitNo" type="button">No</button><button class="btn ghost" id="habitLater" type="button">Not yet, but I will</button></div>`}
     </div></div>`;
-    const y=document.getElementById('habitYes'); if(y) y.onclick=function(){ answerHabitAsk(true); };
-    const n=document.getElementById('habitNo'); if(n) n.onclick=function(){ answerHabitAsk(false); };
+    const y=document.getElementById('habitYes'); if(y) y.onclick=function(){ answerHabitAsk('yes'); };
+    const n=document.getElementById('habitNo'); if(n) n.onclick=function(){ answerHabitAsk('no'); };
+    const later=document.getElementById('habitLater'); if(later) later.onclick=function(){ answerHabitAsk('later'); };
     const s=document.getElementById('sleepSaveAsk'); if(s) s.onclick=saveSleepAsk;
-    const c=document.getElementById('habitAskClose'); if(c) c.onclick=function(){ state.habitAsk=null; renderModal(); };
     return;
   }
   if(state.breathingOpen){
@@ -5534,25 +5551,26 @@ async function fetchIcsText(url){
     attempts.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
     attempts.push('https://corsproxy.io/?' + encodeURIComponent(url));
   }
-  let last = 'Failed to fetch';
   for(let i=0;i<attempts.length;i++){
+    const ctrl = (typeof AbortController!=='undefined') ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(function(){ try{ ctrl.abort(); }catch(e){} }, 8000) : null;
     try{
-      const res = await fetch(attempts[i]);
-      if(!res.ok){ last = 'Could not fetch the calendar ('+res.status+').'; continue; }
+      const res = await fetch(attempts[i], ctrl?{signal:ctrl.signal}:{});
+      if(timer) clearTimeout(timer);
+      if(!res.ok) continue;
       const text = await res.text();
       if(text && text.indexOf('BEGIN:VEVENT')>=0) return text;
-      last = 'That link is not a calendar file. Copy the ICS link, not the normal Outlook webpage link.';
     }catch(e){
-      last = (e && e.message) || 'Failed to fetch';
+      if(timer) clearTimeout(timer);
     }
   }
-  throw new Error(last);
+  throw new Error('blocked');
 }
 async function syncIcsCalendarUrl(url){
   url = String(url||'').trim();
   if(!url){ showAppMessage('ICS link needed', 'Paste the published calendar link that ends in .ics.'); return; }
   try{
-    showAppMessage('Syncing…', 'Reading the calendar link…');
+    showAppMessage('Reading…', 'Reading the calendar link…');
     const text = await fetchIcsText(url);
     const result = importIcsText(text, 'ics-url');
     if(!result.ok){
@@ -5565,9 +5583,9 @@ async function syncIcsCalendarUrl(url){
     state.settings.calendarLastSource = 'ics';
     try{ saveState(); }catch(e){}
     try{ persistRender(); }catch(e){}
-    showAppMessage('Calendar copied', result.first);
+    showAppMessage('Uploaded', 'Uploaded.');
   }catch(e){
-    showAppMessage('Could not read that link', 'Download the calendar file, then use Upload calendar file.');
+    showAppMessage('Could not read that link', 'Outlook and Google block SnapBack from opening most calendar links. Download the calendar file, then tap Upload calendar file.');
   }
 }
 
@@ -7561,6 +7579,49 @@ function homeSectionToggle(key){
   persistRender();
 }
 
+function dayCommitments(dateStr, opts){
+  opts = opts || {};
+  const dow = mondayIndex(new Date(dateStr+'T12:00:00'));
+  const rows = [];
+  (state.classes||[]).forEach(c=>{
+    let show=false;
+    if(c.scope==='session') show = c.date===dateStr;
+    else show = c.day===dow && (!c.semStart || dateStr>=c.semStart) && (!c.semEnd || dateStr<=c.semEnd);
+    if(!show) return;
+    rows.push({time:c.start||'', end:c.end||'', title:c.title||'', room:c.room||'', kind:'class', meetingUrl:c.meetingUrl||''});
+  });
+  (state.studyBlocks||[]).filter(b=>b.date===dateStr).forEach(b=>{
+    rows.push({time:b.start||'', end:b.end||'', title:b.label||'', room:b.room||'', kind:'block'});
+  });
+  (state.exercisePlan||[]).filter(r=>r.day===dow).forEach(r=>{
+    const bits=[r.focus||'Exercise'];
+    if(r.details) bits.push(r.details);
+    if(r.km) bits.push(r.km+' km');
+    rows.push({time:r.start||'', end:r.end||'', title:bits.join(' · '), room:'', kind:'exercise'});
+  });
+  (state.externalBusy||[]).filter(ev=>ev.date===dateStr).forEach(ev=>{
+    rows.push({time:ev.allDay?'':(ev.start||''), end:ev.allDay?'':(ev.end||''), title:ev.title||'Busy', room:'', kind:'calendar'});
+  });
+  if(!opts.skipTasks){
+    (state.tasks||[]).filter(t=>!t.done && t.date===dateStr && t.time).forEach(t=>{
+      rows.push({time:t.time, end:'', title:t.title, room:'', kind:'task', id:t.id});
+    });
+  }
+  rows.sort((a,b)=>String(a.time||'').localeCompare(String(b.time||'')));
+  return rows;
+}
+function commitmentRowsHtml(rows, emptyText){
+  if(!rows.length) return `<div class="empty">${emptyText}</div>`;
+  return rows.map(c=>{
+    const when=(c.time?escapeHtml(c.time):'All day')+(c.end?('–'+escapeHtml(c.end)):'');
+    const color=c.kind==='exercise'?'var(--pine)':c.kind==='block'?'var(--purple)':'var(--blue)';
+    const inner=`<span class="dotcolor" style="background:${color}"></span><b>${when}</b>&nbsp;${escapeHtml(c.title)}${c.room?(' · '+escapeHtml(c.room)):''}`;
+    if(c.kind==='task' && c.id!=null){
+      return `<button type="button" class="classrow" data-action="open-task-menu" data-id="${c.id}" style="width:100%;text-align:left;background:transparent;border:none;cursor:pointer">${inner}</button>`;
+    }
+    return `<div class="classrow">${inner}</div>`;
+  }).join('');
+}
 function viewToday(){
   const needsName = !(state.profile && state.profile.name);
 
@@ -7576,7 +7637,7 @@ function viewToday(){
   const dlRow=(t)=>{
     const label = t.du<0 ? `${Math.abs(t.du)}d overdue` : t.du===0 ? 'Due today' : t.du===1 ? 'Due tomorrow' : `In ${t.du} days`;
     const cls = t.du<0 ? 'overdue' : t.du<=1 ? 'dueToday' : t.du<=3 ? 'medium' : 'low';
-    return `<div class="deadline-row"><span class="badge ${cls}">${label}</span><span style="flex:1">${escapeHtml(t.title)}</span></div>`;
+    return `<button type="button" class="deadline-row" data-action="open-task-menu" data-id="${t.id}" style="width:100%;text-align:left;background:transparent;border:none;cursor:pointer"><span class="badge ${cls}">${label}</span><span style="flex:1">${escapeHtml(t.title)}</span></button>`;
   };
 
   return `
@@ -7645,7 +7706,7 @@ function viewToday(){
       <h3 style="margin:0">${L('classesToday')}</h3>
       <span style="font-size:1.1rem;color:var(--muted)">${homeSectionOpen('classes')?'▾':'▸'}</span>
     </button>
-    ${homeSectionOpen('classes')?`<div style="padding:0 16px 16px">${classesToday.length ? classesToday.map(c=>`<div class="classrow"><span class="dotcolor" style="background:var(--blue)"></span><b>${c.start}–${c.end}</b>&nbsp;${escapeHtml(c.title)} ${c.room?('· '+escapeHtml(c.room)):''}${c.meetingUrl?`<a href="${escapeHtml(c.meetingUrl)}" target="_blank" rel="noopener" style="margin-left:8px"><button class="btn ghost sm">Join &#8599;</button></a>`:''}</div>`).join('') : `<div class="empty">${isStudentMode() ? 'No classes logged for today. Add them on the Calendar page.' : 'Nothing on the timetable for today. Add commitments on the Calendar page.'}</div>`}</div>`:''}
+    ${homeSectionOpen('classes')?`<div style="padding:0 16px 16px">${commitmentRowsHtml(dayCommitments(todayStr()), isStudentMode() ? 'Nothing scheduled today. Add a class, a workout, or an appointment on the Schedule page.' : 'Nothing scheduled today. Add it on the Schedule page.')}</div>`:''}
   </div>
 
   <div class="card" style="padding:0;overflow:hidden">
@@ -7679,9 +7740,9 @@ function viewToday(){
     ${open?`
       <div style="padding:0 16px 16px">
         <div style="font-size:.8rem;font-weight:700;color:var(--muted);margin-bottom:6px">Tasks</div>
-        ${tomTasks.length?tomTasks.map(t=>`<div class="deadline-row"><span class="badge dueToday">${t.time||'all day'}</span><span style="flex:1">${escapeHtml(t.title)}</span></div>`).join(''):'<div class="empty">No tasks dated tomorrow.</div>'}
-        <div style="font-size:.8rem;font-weight:700;color:var(--muted);margin:12px 0 6px">Classes</div>
-        ${tomClasses.length?tomClasses.map(c=>`<div class="classrow"><b>${c.start||''}${c.end?'–'+c.end:''}</b>&nbsp;${escapeHtml(c.title||'')}</div>`).join(''):'<div class="empty">No classes on the timetable for that weekday.</div>'}
+        ${tomTasks.length?tomTasks.map(t=>`<button type="button" class="deadline-row" data-action="open-task-menu" data-id="${t.id}" style="width:100%;text-align:left;background:transparent;border:none;cursor:pointer"><span class="badge dueToday">${t.time||'all day'}</span><span style="flex:1">${escapeHtml(t.title)}</span></button>`).join(''):'<div class="empty">No tasks dated tomorrow.</div>'}
+        <div style="font-size:.8rem;font-weight:700;color:var(--muted);margin:12px 0 6px">Also on that day</div>
+        ${commitmentRowsHtml(dayCommitments(tom,{skipTasks:true}), 'No classes, workouts, or appointments yet.')}
       </div>
     `:''}
   </div>`;
@@ -8515,17 +8576,23 @@ function itemsForDate(dateStr){
     else{ show = c.day===dow && (!c.semStart || dateStr>=c.semStart) && (!c.semEnd || dateStr<=c.semEnd); }
     if(show) items.push({type:'class', kind:'class', id:c.id, color:'var(--blue)', time:c.start, end:c.end||'', label:c.title+(c.room?' · '+c.room:''), meetingUrl:c.meetingUrl});
   });
-  state.tasks.filter(t=>t.date===dateStr).forEach(t=>items.push({type:'task',color: t.priority==='high'?'var(--brick)':t.priority==='medium'?'var(--amber)':'var(--pine)',time:t.time||'',label:t.title+' (due)',meetingUrl:t.meetingUrl}));
-  state.tasks.filter(t=>t.startDate===dateStr && t.startDate!==t.date).forEach(t=>items.push({type:'taskstart',color:'var(--blue-soft)',time:t.startTime||'',label:'Start: '+t.title,meetingUrl:t.meetingUrl}));
+  state.tasks.filter(t=>t.date===dateStr).forEach(t=>items.push({type:'task', kind:'task', id:t.id, color: t.priority==='high'?'var(--brick)':t.priority==='medium'?'var(--amber)':'var(--pine)',time:t.time||'',label:t.title,meetingUrl:t.meetingUrl}));
+  state.tasks.filter(t=>t.startDate===dateStr && t.startDate!==t.date).forEach(t=>items.push({type:'taskstart', kind:'task', id:t.id, color:'var(--blue-soft)',time:t.startTime||'',label:t.title,meetingUrl:t.meetingUrl}));
   state.studyBlocks.filter(b=>b.date===dateStr).forEach(b=>items.push({type:'block', kind:'block', id:b.id, color:'var(--purple)', time:b.start, end:b.end||'', label:b.label, meetingUrl:b.meetingUrl}));
   (state.externalBusy||[]).forEach(ev=>{
     if(ev.date!==dateStr) return;
-    items.push({type:'external',color:'var(--blue)',time:ev.allDay?'':(ev.start||''),end:ev.allDay?'':(ev.end||''),label:(ev.title||'Busy')+(ev.source==='google'?' (Google)':' (calendar)'),meetingUrl:''});
+    if(!ev.id) ev.id='ext_'+dateStr+'_'+(ev.start||'')+'_'+(ev.title||'');
+    items.push({type:'external', kind:'external', id:ev.id, color:'var(--blue)',time:ev.allDay?'':(ev.start||''),end:ev.allDay?'':(ev.end||''),label:(ev.title||'Busy'),meetingUrl:''});
   });
   if(state.nonNegotiable[dateStr]) items.push({type:'nn',color:'var(--gold)',time:'',label:'★ '+state.nonNegotiable[dateStr].text});
   const seen={};
-  return items.filter(it=>{
-    const k=(it.time||'')+'|'+(it.label||'').replace(/\s+/g,' ').toLowerCase();
+  const ranked=items.slice().sort(function(a,b){
+    const score=function(it){ return (it.kind==='class'||it.kind==='block'||it.kind==='external')?0:1; };
+    return score(a)-score(b);
+  });
+  return ranked.filter(it=>{
+    const lab=String(it.label||'').toLowerCase().replace(/\s*\((due|google|calendar)\)/g,'').replace(/\s+/g,' ').trim();
+    const k=(it.time||'')+'|'+lab;
     if(seen[k]) return false;
     seen[k]=1;
     return true;
@@ -8561,8 +8628,11 @@ function icsWhen(raw){
 }
 function importIcsText(text, source){
   const raw = unfoldIcs(text);
+  if(raw.charCodeAt(0)===80 && raw.charCodeAt(1)===75){
+    return { ok:false, message:'This is a zip. Open it, then upload the calendar file inside.' };
+  }
   if(raw.indexOf('BEGIN:VEVENT')<0){
-    return { ok:false, message:'That is not a calendar file. Open the Outlook link in a new tab, save the file that ends in .ics, then tap Upload calendar file.' };
+    return { ok:false, message:'That is not a calendar file. Download the file that ends in .ics, then tap Upload calendar file.' };
   }
   if(!Array.isArray(state.classes)) state.classes=[];
   if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
@@ -8572,11 +8642,12 @@ function importIcsText(text, source){
   const parts = raw.split('BEGIN:VEVENT');
   let added = 0;
   const dates = [];
+  const names = [];
   for(let i=1;i<parts.length;i++){
     const block = parts[i].split('END:VEVENT')[0];
     const summary = (icsProp(block,'SUMMARY') || 'Busy').slice(0,140);
     const loc = icsProp(block,'LOCATION');
-    const start = icsWhen(icsProp(block,'DTSTART'));
+    const start = icsWhen(icsProp(block,'DTSTART') || (block.match(/DTSTART[^:\n]*:([^\n]+)/i)||[])[1]);
     if(!start || !start.date) continue;
     const endWhen = icsWhen(icsProp(block,'DTEND'));
     let end = (endWhen && endWhen.start && !start.allDay) ? endWhen.start : (start.allDay ? '23:59' : '');
@@ -8589,7 +8660,7 @@ function importIcsText(text, source){
     const key = (start.date||'')+'|'+(start.start||'')+'|'+summary.toLowerCase();
     const already = (state.studyBlocks||[]).some(b=>(b.date+'|'+(b.start||'')+'|'+(b.label||'').toLowerCase())===key)
       || (state.classes||[]).some(c=>((c.title||'').toLowerCase()===summary.toLowerCase()) && c.start===(start.allDay?'09:00':start.start));
-    if(already) { dates.push(start.date); added++; continue; }
+    if(already) { dates.push(start.date); names.push(summary); added++; continue; }
     if(weekly){
       let day = 0;
       try{ day = mondayIndex(new Date(start.date+'T12:00:00')); }catch(e){}
@@ -8604,6 +8675,7 @@ function importIcsText(text, source){
       });
     }
     dates.push(start.date);
+    names.push(summary);
     added++;
   }
   if(!added) return { ok:false, message:'The file opened, but SnapBack found no events in it.' };
@@ -8617,14 +8689,14 @@ function importIcsText(text, source){
   });
   state.calRef = best;
   state.selectedDay = best;
-  state.calMode = 'list';
+  state.calMode = 'month';
   state.view = 'calendar';
-  try{
-    const nice = new Date(best+'T12:00:00').toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'});
-    state.calNote = 'Brought in '+added+' events. This schedule is showing '+nice+'. Tap an event to change or delete it.';
-  }catch(e){ state.calNote = 'Brought in '+added+' events.'; }
+  state.calNote = '';
+  state.lastUpload = names.filter(function(n,i){ return names.indexOf(n)===i; }).slice(0,8);
+  if(!state.schedOpen) state.schedOpen={glance:true};
+  state.schedOpen.glance = true;
   try{ saveState(); }catch(e){}
-  return { ok:true, added:added, first: (state.calNote||best), last:dates[dates.length-1] };
+  return { ok:true, added:added, first:'Uploaded.', last:dates[dates.length-1] };
 }
 function parseICS(text){
   return [];
@@ -8635,7 +8707,7 @@ function importICSFile(file){
     try{
       const result = importIcsText(String(reader.result||''), 'ics-file');
       if(!result.ok){ showAppMessage('Calendar not imported', result.message); return; }
-      showAppMessage('Calendar copied', result.first);
+      showAppMessage('Uploaded', 'Uploaded.');
       try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
     }catch(e){
       console.error(e);
@@ -9052,10 +9124,14 @@ function viewFreeBusyPreview(){
 
 function calEventButton(it){
   const when = it.time ? (it.time+(it.end?'–'+it.end:'')) : 'All day';
-  if(it.kind && it.id!=null){
-    return `<button type="button" data-action="cal-open" data-kind="${it.kind}" data-id="${it.id}" style="display:block;width:100%;text-align:left;margin:4px 0;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);cursor:pointer"><b>${escapeHtml(when)}</b> ${escapeHtml(it.label)}</button>`;
+  const style='display:block;width:100%;text-align:left;margin:4px 0;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);cursor:pointer';
+  if(it.kind==='task' && it.id!=null){
+    return `<button type="button" data-action="open-task-menu" data-id="${it.id}" style="${style}"><b>${escapeHtml(when)}</b> ${escapeHtml(it.label)}</button>`;
   }
-  return `<div style="padding:6px 2px;font-size:.9rem"><b>${escapeHtml(when)}</b> ${escapeHtml(it.label)}</div>`;
+  if(it.kind && it.id!=null){
+    return `<button type="button" data-action="cal-open" data-kind="${it.kind}" data-id="${it.id}" style="${style}"><b>${escapeHtml(when)}</b> ${escapeHtml(it.label)}</button>`;
+  }
+  return `<div style="${style}"><b>${escapeHtml(when)}</b> ${escapeHtml(it.label)}</div>`;
 }
 function calDraftCard(){
   const d = state.calDraft;
@@ -9105,6 +9181,9 @@ function saveCalDraftFromForm(){
   if(d.kind==='block' && d.id){
     state.studyBlocks = state.studyBlocks.filter(b=>b.id!==d.id);
   }
+  if(d.kind==='external' && d.id){
+    state.externalBusy = (state.externalBusy||[]).filter(b=>String(b.id)!==String(d.id));
+  }
   if(repeat==='weekly'){
     let day=0;
     try{ day=mondayIndex(new Date(date+'T12:00:00')); }catch(e){}
@@ -9123,6 +9202,7 @@ function deleteCalDraft(){
   const d = state.calDraft||{};
   if(d.kind==='class' && d.id) state.classes = (state.classes||[]).filter(c=>c.id!==d.id);
   if(d.kind==='block' && d.id) state.studyBlocks = (state.studyBlocks||[]).filter(b=>b.id!==d.id);
+  if(d.kind==='external' && d.id) state.externalBusy = (state.externalBusy||[]).filter(b=>String(b.id)!==String(d.id));
   state.calDraft=null;
   try{ saveState(); }catch(e){}
   persistRender();
@@ -9250,7 +9330,7 @@ function viewCalendar(){
     <div class="eyebrow">Week &amp; month at a glance</div>
     <h1>Your Schedule</h1>
     <p>Day, week, or month. Tap an empty day to add something. Tap an event to change or delete it.</p>
-    ${state.calNote?`<p style="background:var(--pine-soft);border-radius:10px;padding:10px 12px">${escapeHtml(state.calNote)}</p>`:''}
+    ${(state.lastUpload&&state.lastUpload.length)?`<div class="card" style="margin-top:8px"><b>Uploaded</b><div style="margin-top:6px">${state.lastUpload.map(n=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)">${escapeHtml(n)}</div>`).join('')}</div></div>`:''}
   </div>
   ${schedBox('glance','Quick glance', `
   <div class="calnav">
@@ -11322,7 +11402,7 @@ async function downloadJournalBucket(bucket){
 }
 
 function habitSec(key, title, inner){
-  if(!state.habitOpen) state.habitOpen={today:true};
+  if(!state.habitOpen) state.habitOpen={};
   const open=!!state.habitOpen[key];
   return `<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
     <button type="button" class="btn ghost" data-action="habit-sec" data-key="${key}" style="width:100%;text-align:left;border:none;border-radius:0;padding:14px 16px;display:flex;justify-content:space-between;align-items:center"><span style="font-weight:700">${title}</span><span>${open?'▾':'▸'}</span></button>
@@ -11341,30 +11421,45 @@ function exerciseCue(focus){
   const f=String(focus||'').toLowerCase();
   if(f.indexOf('run')>=0) return 'Time to lace up. Your run is in 30 minutes.';
   if(f.indexOf('yoga')>=0 || f.indexOf('stretch')>=0) return 'Roll out the mat. Yoga is in 30 minutes. Water bottle nearby.';
-  if(f.indexOf('cycl')>=0 || f.indexOf('cardio')>=0) return 'Cardio in 30 minutes. Fill the bottle and find your shoes.';
+  if(f.indexOf('cycl')>=0) return 'Your ride is in 30 minutes. Water, and a quick check of the bike.';
+  if(f.indexOf('swim')>=0) return 'Swimming is in 30 minutes. Towel and water.';
+  if(f.indexOf('row')>=0) return 'Rowing is in 30 minutes. Water bottle ready.';
+  if(f.indexOf('cardio')>=0 || f.indexOf('hiit')>=0 || f.indexOf('aerobic')>=0) return 'Cardio is in 30 minutes. Water and shoes.';
   if(f.indexOf('walk')>=0) return 'A walk is in 30 minutes. Comfortable shoes, water, and you are set.';
   return 'Strength work is in 30 minutes. Water bottle, and a quick space to move.';
 }
+function needsDistance(focus){
+  const f=String(focus||'').toLowerCase();
+  if(f==='other') return true;
+  return /run|walk|cycl|swim|row|tread|hik|jog/.test(f);
+}
 function saveExercisePlan(){
   ensureHabitPlans();
-  const focusSel=document.getElementById('exFocus');
-  let focus=focusSel?focusSel.value:'Strength training';
-  if(focus==='Other'){
-    focus=(document.getElementById('exOther')&&document.getElementById('exOther').value||'').trim()||'Workout';
-  }
+  const dayEl=document.getElementById('exDay');
+  const focus=(document.getElementById('exFocus')&&document.getElementById('exFocus').value)||'Weight Training';
+  const other=(document.getElementById('exOther')&&document.getElementById('exOther').value||'').trim();
   const details=(document.getElementById('exDetails')&&document.getElementById('exDetails').value||'').trim();
   const start=(document.getElementById('exStart')&&document.getElementById('exStart').value)||'07:30';
   const end=(document.getElementById('exEnd')&&document.getElementById('exEnd').value)||'08:15';
   const km=(document.getElementById('exKm')&&document.getElementById('exKm').value||'').trim();
-  const days=[];
-  for(let i=0;i<7;i++){ const el=document.getElementById('exDay'+i); if(el&&el.checked) days.push(i); }
-  if(!days.length){ showAppMessage('Pick a day','Choose at least one day for this session.'); return; }
-  days.forEach(function(day){
-    state.exercisePlan=state.exercisePlan.filter(function(r){ return !(r.day===day && r.start===start && r.focus===focus); });
-    state.exercisePlan.push({id:uid(), day:day, start:start, end:end, focus:focus, details:details, km:km});
-  });
+  const day=dayEl?dayEl.value:'';
+  state.exForm={day:day, focus:focus, other:other, details:details, start:start, end:end, km:km};
+  if(day===''){
+    showAppMessage('Choose a day','Pick the day, then tap Save session. What you typed is still here.');
+    return;
+  }
+  const label = focus==='Other' ? (other||'Workout') : focus;
+  const n=Number(day);
+  state.exercisePlan=state.exercisePlan.filter(function(r){ return !(r.day===n && r.start===start && r.focus===label); });
+  state.exercisePlan.push({id:uid(), day:n, start:start, end:end, focus:label, details:details, km: needsDistance(focus)?km:''});
   try{ saveState(); }catch(e){}
-  showAppMessage('Plan saved','Your week table is updated. A reminder can arrive 30 minutes before, if you leave that nudge on.');
+  showAppMessage('Saved','Saved.');
+}
+function clearExercisePlan(which){
+  ensureHabitPlans();
+  if(which==='all') state.exercisePlan=[];
+  else state.exercisePlan=state.exercisePlan.filter(function(r){ return String(r.day)!==String(which); });
+  try{ saveState(); }catch(e){}
   persistRender();
 }
 function saveScreenPlan(){
@@ -11378,14 +11473,13 @@ function saveScreenPlan(){
     state.screenPlan.days[i]={hours:Number(h&&h.value)||0, mins:Number(m&&m.value)||0};
   }
   try{ saveState(); }catch(e){}
-  showAppMessage('Screen plan saved','SnapBack will mention today’s limit at the time you chose.');
-  persistRender();
+  showAppMessage('Saved','Saved.');
 }
 function exerciseTableHtml(){
   ensureHabitPlans();
   const names=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
   const rows=state.exercisePlan.slice().sort(function(a,b){ return a.day-b.day || String(a.start).localeCompare(String(b.start)); });
-  if(!rows.length) return '<p style="color:var(--muted)">No sessions yet. Add one and the week table appears here.</p>';
+  if(!rows.length) return '<p style="color:var(--muted);margin:0">No sessions yet.</p>';
   const colors=['#dbeafe','#d1fae5','#fef3c7','#ede9fe','#ffe4e6','#e0f2fe','#ffedd5'];
   return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:separate;border-spacing:0;font-size:.86rem;border-radius:12px;overflow:hidden">
     <tr>
@@ -11395,80 +11489,120 @@ function exerciseTableHtml(){
       <th style="background:#7c3aed;color:#fff;padding:8px">Details</th>
       <th style="background:#ef4444;color:#fff;padding:8px">Duration</th>
     </tr>
-    ${rows.map(function(r,i){
+    ${rows.map(function(r){
       const bg=colors[r.day%colors.length];
       let dur='';
       try{
-        const [sh,sm]=String(r.start).split(':').map(Number);
-        const [eh,em]=String(r.end).split(':').map(Number);
-        const mins=(eh*60+em)-(sh*60+sm);
+        const sh=String(r.start||'').split(':').map(Number);
+        const eh=String(r.end||'').split(':').map(Number);
+        const mins=(eh[0]*60+(eh[1]||0))-(sh[0]*60+(sh[1]||0));
         if(mins>0) dur=mins+' min';
       }catch(e){}
-      const detail=escapeHtml(r.details||'')+(r.km?(' · '+escapeHtml(r.km)+' km'):'');
+      const detail=escapeHtml(r.details||'')+(r.km?(' · '+escapeHtml(String(r.km))+' km'):'');
       return `<tr style="background:${bg}"><td style="padding:8px;font-weight:700">${names[r.day]||''}</td><td style="padding:8px">${escapeHtml(formatTime12(r.start))} – ${escapeHtml(formatTime12(r.end))}</td><td style="padding:8px">${escapeHtml(r.focus||'')}</td><td style="padding:8px">${detail}</td><td style="padding:8px">${dur}</td></tr>`;
     }).join('')}
-  </table></div>
-  <button type="button" class="btn ghost sm" id="exClear" style="margin-top:8px">Clear plan</button>`;
+  </table></div>`;
+}
+function nudgeRow(key, label){
+  ensureHabitPlans();
+  const on=state.habitNudges[key]!==false;
+  const yesCls=on?'btn sm':'btn ghost sm';
+  const noCls=on?'btn ghost sm':'btn sm';
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)">
+    <span style="font-weight:600">${escapeHtml(label)}</span>
+    <span style="display:flex;gap:6px;flex:0 0 auto">
+      <button type="button" class="${yesCls}" data-action="nudge-set" data-key="${key}" data-on="1">Yes</button>
+      <button type="button" class="${noCls}" data-action="nudge-set" data-key="${key}" data-on="0">No</button>
+    </span>
+  </div>`;
 }
 function viewHabits(){
   ensureHabitPlans();
   const names=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-  const focuses=['Strength training','Running','Yoga','Cycling or cardio','Bodyweight','Walking','Sport','Other'];
+  const full=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const focuses=['Aerobics','Aqua Zumba','Barre','Bodybuilding','Bouldering','Boxing','Calisthenics','Cardio','CrossFit','Cycling','Dance','Dance Fitness','HIIT','Hip-Hop Cardio','Kickboxing','Meditation','Pilates','Powerlifting','Qi Gong','Rowing','Running','Stretch Therapy','Swimming','Tabata','Tai Chi','Treadmill','Walking','Weight Training','Yoga','Zumba','Other'];
+  const form=state.exForm||{day:'',focus:'Weight Training',other:'',details:'',start:'07:30',end:'08:15',km:''};
+  const showOther=form.focus==='Other';
+  const showKm=needsDistance(form.focus);
   const today=todayStr();
   const dow=mondayIndex(new Date(today+'T12:00:00'));
   const screenToday=(state.screenPlan.days&&state.screenPlan.days[dow])||{hours:0,mins:0};
   const tracked=(state.habits||[]).filter(h=>h.track);
   const days=last7Days();
   const exYes=function(ds){ const log=state.exerciseLog[ds]; return log && Object.keys(log).some(k=>log[k]===true); };
+  const extra=(state.habits||[]).map(h=>nudgeRow('habit_'+h.id, h.name)).join('');
   return `
-  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">Plan the week, then let SnapBack ask</div><h1>Healthy Habits</h1><p>Build the plan here. Reminders and yes/no check-ins do the tracking. Distance is in kilometres.</p></div>
-  ${habitSec('today','Today', `
-    <h3 style="margin-top:0">Exercise</h3>
-    <p style="font-size:.85rem;color:var(--muted)">Pick the days, the kind of session, and the time. The week table updates when you save.</p>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">${names.map((n,i)=>`<label style="font-size:.85rem"><input type="checkbox" id="exDay${i}"> ${n}</label>`).join(' ')}</div>
-    <div class="field"><label>Focus</label><select id="exFocus">${focuses.map(f=>`<option>${f}</option>`).join('')}</select></div>
-    <div class="field"><label>If you chose Other</label><input id="exOther" placeholder="Type the session"></div>
-    <div class="field"><label>Details</label><textarea id="exDetails" rows="2" placeholder="Example: squats, bench, rows"></textarea></div>
-    <div class="row">
-      <div class="field"><label>Start</label><input type="time" id="exStart" value="07:30"></div>
-      <div class="field"><label>End</label><input type="time" id="exEnd" value="08:15"></div>
-      <div class="field"><label>Distance (km, optional)</label><input id="exKm" inputmode="decimal" placeholder="3"></div>
-    </div>
-    <button type="button" class="btn" id="exSave" style="margin:8px 0 12px">Save session</button>
-    ${exerciseTableHtml()}
-    <h3>Screen time</h3>
-    <p style="font-size:.85rem;color:var(--muted)">How long do you want screens for each day this week? Then choose when SnapBack should remind you to stop.</p>
+  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><h1>Healthy Habits</h1></div>
+  ${habitSec('exercise','Exercise', `
+    ${habitSec('exKey','Key the plan', `
+      <div class="row">
+        <div class="field"><label>Day</label>
+          <select id="exDay">
+            <option value="" ${form.day===''?'selected':''}>Select a day</option>
+            ${full.map((n,i)=>`<option value="${i}" ${String(form.day)===String(i)?'selected':''}>${n}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Focus</label>
+          <select id="exFocus">
+            ${focuses.map(f=>`<option ${form.focus===f?'selected':''}>${f}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="field" id="exOtherWrap" style="${showOther?'':'display:none'}"><label>If you chose Other</label><input id="exOther" value="${escapeHtml(form.other||'')}" placeholder="Type the session"></div>
+      <div class="field"><label>Details</label><textarea id="exDetails" rows="2" placeholder="Example: squats, bench, rows">${escapeHtml(form.details||'')}</textarea></div>
+      <div class="row">
+        <div class="field"><label>Start</label><input type="time" id="exStart" value="${escapeHtml(form.start||'07:30')}"></div>
+        <div class="field"><label>End</label><input type="time" id="exEnd" value="${escapeHtml(form.end||'08:15')}"></div>
+        <div class="field" id="exKmWrap" style="${showKm?'':'display:none'}"><label>Distance (km)</label><input id="exKm" inputmode="decimal" value="${escapeHtml(form.km||'')}" placeholder="3"></div>
+      </div>
+      <button type="button" class="btn" id="exSave" style="margin-top:8px">Save session</button>
+      <div class="row" style="margin-top:14px;align-items:flex-end">
+        <div class="field"><label>Clear</label>
+          <select id="exClearDay">
+            <option value="all">Entire plan</option>
+            ${full.map((n,i)=>`<option value="${i}">${n} only</option>`).join('')}
+          </select>
+        </div>
+        <button type="button" class="btn ghost" id="exClear" style="margin-bottom:2px">Clear</button>
+      </div>
+    `)}
+    ${habitSec('exSee','See the plan', exerciseTableHtml())}
+  `)}
+  ${habitSec('screen','Screen time', `
+    <p style="font-size:.85rem;color:var(--muted);margin-top:0">How long do you want screens for each day this week, and when should SnapBack remind you to stop?</p>
     ${names.map((n,i)=>{
       const d=(state.screenPlan.days&&state.screenPlan.days[i])||{};
       return `<div class="row" style="align-items:flex-end"><div style="width:42px;font-weight:700">${n}</div><div class="field"><label>Hours</label><input id="scH${i}" type="number" min="0" max="16" value="${d.hours||0}"></div><div class="field"><label>Minutes</label><input id="scM${i}" type="number" min="0" max="59" value="${d.mins||0}"></div></div>`;
     }).join('')}
     <div class="field" style="margin-top:8px"><label>Remind me to stop at</label><input type="time" id="screenNudge" value="${escapeHtml(state.screenPlan.nudgeTime||'21:00')}"></div>
-    <button type="button" class="btn" id="screenSave" style="margin-top:8px">Save screen plan</button>
+    <button type="button" class="btn" id="screenSave" style="margin-top:8px">Save</button>
     <p style="font-size:.85rem">Today’s limit: <b>${screenToday.hours||0}h ${screenToday.mins||0}m</b></p>
-    <h3>Add a habit</h3>
+  `)}
+  ${habitSec('add','Add a habit', `
     <div class="field"><label>Name</label><input id="newHabitName" placeholder="Example: Take medicine"></div>
     <label style="display:block;margin:6px 0;font-size:.9rem"><input type="checkbox" id="newHabitRemind"> Send a reminder for this habit</label>
     <label style="display:block;margin:6px 0;font-size:.9rem"><input type="checkbox" id="newHabitTrack" checked> Show this in Past 7 days</label>
     <button type="button" class="btn" id="addHabitBtn">Add habit</button>
   `)}
   ${habitSec('week','Past 7 days', `
-    <p style="font-size:.85rem;color:var(--muted)">Exercise and a real meal are tracked from the yes/no questions. Other rows appear only if you asked to track them.</p>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
       <tr><th></th>${days.map(d=>`<th style="padding:4px;color:var(--muted)">${new Date(d+'T12:00:00').toLocaleDateString(undefined,{weekday:'short'})}</th>`).join('')}</tr>
-      <tr><td style="padding:4px">Exercise</td>${days.map(d=>`<td style="text-align:center">${exYes(d)?'✓':'·'}</td>`).join('')}</tr>
-      <tr><td style="padding:4px">Real meal</td>${days.map(d=>`<td style="text-align:center">${state.mealLog[d]===true?'✓':state.mealLog[d]===false?'–':'·'}</td>`).join('')}</tr>
+      <tr><td style="padding:4px">Exercise</td>${days.map(d=>`<td style="text-align:center">${exYes(d)?'Yes':'·'}</td>`).join('')}</tr>
+      <tr><td style="padding:4px">Meal</td>${days.map(d=>`<td style="text-align:center">${state.mealLog[d]===true?'Yes':state.mealLog[d]===false?'No':'·'}</td>`).join('')}</tr>
       ${tracked.map(h=>`<tr><td style="padding:4px">${escapeHtml(h.name)}</td>${days.map(d=>{
         const v=((state.habitLog||{})[d]||{})[h.id];
-        return `<td style="text-align:center">${v?'✓':'·'}</td>`;
+        return `<td style="text-align:center">${v?'Yes':'·'}</td>`;
       }).join('')}</tr>`).join('')}
     </table></div>
   `)}
   ${habitSec('nudges','Notification settings', `
-    <p style="font-size:.85rem;color:var(--muted)">Choose which daily nudges you want. Water is a reminder only. It is not stored.</p>
-    ${[['exercise','Exercise — 30 minutes before, and a yes/no after'],['meal','Real meal question around 7:30 pm'],['water','Water sip every 3 hours, 8 am to 5 pm'],['sleep','Sleep question in the morning'],['screen','Screen-time limit at the time you set']].map(function(pair){
-      const on=state.habitNudges[pair[0]]!==false;
-      return `<label style="display:flex;gap:8px;align-items:flex-start;margin:8px 0"><input type="checkbox" data-action="habit-nudge" data-key="${pair[0]}" ${on?'checked':''}><span>${pair[1]}</span></label>`;
-    }).join('')}
+    <p style="font-size:.9rem;margin-top:0">Choose Yes to receive the nudge, or No to turn it off.</p>
+    ${nudgeRow('exercise','Exercise')}
+    ${nudgeRow('meal','Meal')}
+    ${nudgeRow('water','Hydrate')}
+    ${nudgeRow('sleep','Sleep')}
+    ${nudgeRow('screen','Screen time')}
+    ${extra}
   `)}
   `;
 }
@@ -13746,6 +13880,10 @@ function wireView(){
         const c=(state.classes||[]).find(x=>String(x.id)===String(id));
         if(!c) return;
         openCalDraft({id:c.id, kind:'class', title:c.title, start:c.start, end:c.end, room:c.room||'', repeat:'weekly', date: state.selectedDay||todayStr()});
+      } else if(kind==='external'){
+        const ev=(state.externalBusy||[]).find(x=>String(x.id)===String(id));
+        if(!ev) return;
+        openCalDraft({id:ev.id, kind:'external', title:ev.title||'', date:ev.date, start:ev.start||'09:00', end:ev.end||'10:00', repeat:'once'});
       } else {
         const b=(state.studyBlocks||[]).find(x=>String(x.id)===String(id));
         if(!b) return;
@@ -14148,12 +14286,32 @@ function wireView(){
     const addHabitBtn=document.getElementById('addHabitBtn'); if(addHabitBtn) addHabitBtn.addEventListener('click', addHabit);
     const exSave=document.getElementById('exSave'); if(exSave) exSave.addEventListener('click', saveExercisePlan);
     const screenSave=document.getElementById('screenSave'); if(screenSave) screenSave.addEventListener('click', saveScreenPlan);
-    const exClear=document.getElementById('exClear'); if(exClear) exClear.addEventListener('click', ()=>{ state.exercisePlan=[]; try{saveState();}catch(e){} persistRender(); });
-    main.querySelectorAll('[data-action="habit-nudge"]').forEach(el=>{
-      el.addEventListener('change', ()=>{
+    const exClear=document.getElementById('exClear'); if(exClear) exClear.addEventListener('click', function(){
+      const w=document.getElementById('exClearDay');
+      clearExercisePlan(w?w.value:'all');
+    });
+    const exFocus=document.getElementById('exFocus');
+    if(exFocus) exFocus.addEventListener('change', function(){
+      state.exForm={
+        day:(document.getElementById('exDay')&&document.getElementById('exDay').value)||'',
+        focus:exFocus.value,
+        other:(document.getElementById('exOther')&&document.getElementById('exOther').value)||'',
+        details:(document.getElementById('exDetails')&&document.getElementById('exDetails').value)||'',
+        start:(document.getElementById('exStart')&&document.getElementById('exStart').value)||'07:30',
+        end:(document.getElementById('exEnd')&&document.getElementById('exEnd').value)||'08:15',
+        km:(document.getElementById('exKm')&&document.getElementById('exKm').value)||''
+      };
+      const ow=document.getElementById('exOtherWrap');
+      const kw=document.getElementById('exKmWrap');
+      if(ow) ow.style.display = exFocus.value==='Other' ? '' : 'none';
+      if(kw) kw.style.display = needsDistance(exFocus.value) ? '' : 'none';
+    });
+    main.querySelectorAll('[data-action="nudge-set"]').forEach(el=>{
+      el.addEventListener('click', function(){
         ensureHabitPlans();
-        state.habitNudges[el.dataset.key]=el.checked;
+        state.habitNudges[el.dataset.key]=el.dataset.on==='1';
         try{ saveState(); }catch(e){}
+        persistRender();
       });
     });
     const breatheBtn=document.getElementById('breatheBtn'); if(breatheBtn) breatheBtn.addEventListener('click', openBreathingPause);
