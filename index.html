@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="290">
+<meta name="snapback-build" content="292">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1555,17 +1555,16 @@ function setPendingNudge(on){
 function hasPendingNudge(){
   try{ return localStorage.getItem('snapback_pending_nudge')==='1'; }catch(e){ return false; }
 }
-function triggerWakeMath(reason){
+function triggerWakeMath(reason, note){
   if(!state.wakeAlarm) state.wakeAlarm={snoozesLeft:2,snoozesMax:2,time:'07:00',days:[0,1,2,3,4]};
   if(reason==='scheduled' || reason==='notification'){
     state.wakeAlarm.snoozesLeft = state.wakeAlarm.snoozesMax||2;
     setPendingNudge(true);
   }
-  // apply preferred nudge sound for ramp
   if(state.wakeAlarm.sound && state.settings) state.settings.alarmSound = state.wakeAlarm.sound;
   const a=2+Math.floor(Math.random()*8);
   const b=2+Math.floor(Math.random()*8);
-  state.wakeMath = { a, b, answer: a+b, reason: reason||'' };
+  state.wakeMath = { a, b, answer: a+b, reason: reason||'', note: note||'' };
   state.wakeMathOpen = true;
   try{ playAlarmRamp(55); }catch(e){}
   try{ if(navigator.vibrate) navigator.vibrate([400,200,400,200,400]); }catch(e){}
@@ -2155,20 +2154,11 @@ function addTask(){
       console.warn('unusual date format', date);
     }
   }
-  const reminderTime=document.getElementById('newReminderTime')?.value || time || '09:00';
+  const reminderTime=document.getElementById('newNudgeTime')?.value || time || '08:00';
+  const nudgeWhen=document.getElementById('newNudgeWhen')?.value || 'none';
   const leads=[];
-  const dueDate = date;
-  let daysUntil = 99;
-  try{
-    if(dueDate && /^\d{4}-\d{2}-\d{2}$/.test(dueDate)){
-      daysUntil = Math.round((new Date(dueDate+'T12:00:00') - new Date(todayStr()+'T12:00:00'))/86400000);
-    }
-  }catch(e){ daysUntil = 99; }
-  if(daysUntil >= 7 && document.getElementById('newLead7')?.checked) leads.push(7);
-  if(daysUntil >= 3 && document.getElementById('newLead3')?.checked) leads.push(3);
-  if(daysUntil >= 1 && document.getElementById('newLead1')?.checked) leads.push(1);
-  if(document.getElementById('newLead0')?.checked) leads.push(0);
-  if(!leads.length) leads.push(0);
+  if(nudgeWhen==='morning') leads.push(0);
+  else if(nudgeWhen==='daybefore') leads.push(1);
   const id=uid();
   const taskContext=(document.getElementById('newContext')&&document.getElementById('newContext').value)||'school';
   const technique=(document.getElementById('newTechnique')&&document.getElementById('newTechnique').value)||'';
@@ -2179,7 +2169,7 @@ function addTask(){
   else if(eis==='schedule'){ urgent=false; important=true; eisSet=true; }
   else if(eis==='quick'){ urgent=true; important=false; eisSet=true; }
   else if(eis==='later'){ urgent=false; important=false; eisSet=true; }
-  const taskObj={id,title,notes:'',date:date||'',time,priority,urgent,important,eisSet,tier:'could',frog:false,context:taskContext,technique:technique,meetingUrl:'',reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{},created:Date.now()};
+  const taskObj={id,title,notes:'',date:date||'',time,priority,urgent,important,eisSet,tier:'could',frog:false,context:taskContext,technique:technique,meetingUrl:'',nudgeWhen:nudgeWhen,reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{},created:Date.now()};
   state.tasks.unshift(taskObj);
   state.pendingStrategyTaskId = id;
   // Always show in list after add (Today filter hides future dates)
@@ -2196,8 +2186,8 @@ function addTask(){
           const [hh,mm]=(reminderTime||time||'09:00').split(':').map(Number);
           d.setHours(hh||9, mm||0, 0, 0);
           scheduleNativeNotification({
-            key:'task-'+id+'-'+daysBefore,
-            title: daysBefore===0 ? 'Task due today' : 'Task in '+daysBefore+' day(s)',
+            key:'wake-task-'+id+'-'+daysBefore,
+            title: 'Nudge',
             body: title,
             when: d
           });
@@ -3058,7 +3048,7 @@ function addScheduleItem(){
   const end = document.getElementById('schedEnd')?.value || '10:00';
   const room = document.getElementById('schedRoom')?.value.trim() || '';
   const meetingUrl = document.getElementById('schedUrl')?.value.trim() || '';
-  const alarmMin = Number(document.getElementById('schedAlarm')?.value || 0);
+  const alarmMin = (document.getElementById('schedNudge') && document.getElementById('schedNudge').checked) ? 15 : 0;
 
   if(repeat === 'once'){
     const date = document.getElementById('schedDate')?.value || todayStr();
@@ -3076,7 +3066,7 @@ function addScheduleItem(){
         const [hh,mm]=start.split(':').map(Number);
         const when=new Date(date+'T00:00:00'); when.setHours(hh,mm,0,0); when.setMinutes(when.getMinutes()-alarmMin);
         if(typeof scheduleNativeNotification==='function'){
-          scheduleNativeNotification({key:'sched-'+id, title:'Reminder', body:title+' at '+start, when});
+          scheduleNativeNotification({key:'wake-sched-'+id, title:'Nudge', body:title+' in '+alarmMin+' min', when});
         }
       }catch(e){}
     }
@@ -3817,8 +3807,8 @@ async function scheduleNativeNotification({key, title, body, when}){
     try {
       await LocalNotifications.createChannel({
         id: 'snapback_reminders_v2',
-        name: 'SnapBack Reminders',
-        description: 'Task and class reminders with sound',
+        name: 'SnapBack Nudge',
+        description: 'Nudge with sound',
         importance: 5,
         visibility: 1,
         vibration: true
@@ -3870,7 +3860,7 @@ function saveWakeAlarmFromForm(){
     }
     // One-time date OR at least one weekday
     if(!state.wakeAlarm.onceDate && !days.length){
-      showAppMessage('Pick a date or a day', 'Choose a one-time date, or tick at least one weekday.');
+      showAppMessage('To set a Nudge, pick a date or a day.', '');
       return;
     }
     state.wakeAlarm.days = days;
@@ -3902,7 +3892,7 @@ function saveWakeAlarmFromForm(){
     }
   }catch(e){
     console.warn('saveWakeAlarmFromForm', e);
-    showAppMessage('Could not save alarm', String(e&&e.message||e));
+    showAppMessage('Could not save Nudge', String(e&&e.message||e));
   }
 }
 
@@ -3969,7 +3959,8 @@ async function ensureNativeNotifListeners(){
       try{
         if(isWakeNotif(n)){
           setPendingNudge(true);
-          triggerWakeMath('notification');
+          const note = (n && n.notification && n.notification.body) || '';
+          triggerWakeMath('notification', note);
         } else {
           try{ playReminderChime(); }catch(e2){}
         }
@@ -3979,7 +3970,8 @@ async function ensureNativeNotifListeners(){
       try{
         if(isWakeNotif(n)){
           setPendingNudge(true);
-          triggerWakeMath('notification');
+          const note = (n && n.notification && n.notification.body) || '';
+          triggerWakeMath('notification', note);
         } else {
           try{ persistRender(); }catch(e){}
         }
@@ -4033,7 +4025,7 @@ async function scheduleNativeWakeAlarms(){
       const n = (res && (res.scheduled!=null)) ? res.scheduled : 0;
       if(res && res.canScheduleExactAlarms === false){
         try{
-          showAppMessage('Allow exact alarms', 'Phone Settings → Alarms & reminders → allow SnapBack. Then Save alarm again.');
+          showAppMessage('Allow exact alarms', 'Phone Settings → Alarms & reminders → allow SnapBack. Then Save Nudge again.');
           if(typeof plug.openExactAlarmSettings === 'function') await plug.openExactAlarmSettings();
         }catch(e){}
       }
@@ -4103,43 +4095,43 @@ async function syncNativeClassReminders(){
       else applies = Number(c.day)===dow;
       if(!applies || !c.start) return;
       const mins = (c.alarmMinutes!=null)?Number(c.alarmMinutes):15;
-      if(mins<=0) return;
+      if(!(mins>0)) return;
       const [hh,mm]=(c.start||'09:00').split(':').map(Number);
       const startAt=new Date(ds+'T00:00:00'); startAt.setHours(hh,mm,0,0);
       const when=new Date(startAt.getTime()-mins*60000);
       scheduleNativeNotification({
-        key: 'class-'+c.id+'-'+ds,
-        title: 'In '+mins+' min',
-        body: (c.title||'Class')+(c.room?' · '+c.room:'')+' at '+c.start,
+        key: 'wake-class-'+c.id+'-'+ds,
+        title: 'Nudge',
+        body: (c.title||'Class')+' in '+mins+' min',
         when
       });
     });
     (state.studyBlocks||[]).forEach(b=>{
       if(b.date!==ds || !b.start) return;
-      const mins=(b.alarmMinutes!=null)?Number(b.alarmMinutes):15;
-      if(mins<=0) return;
+      const mins=(b.alarmMinutes!=null)?Number(b.alarmMinutes):0;
+      if(!(mins>0)) return;
       const [hh,mm]=b.start.split(':').map(Number);
       const startAt=new Date(ds+'T00:00:00'); startAt.setHours(hh,mm,0,0);
       const when=new Date(startAt.getTime()-mins*60000);
       scheduleNativeNotification({
-        key:'block-'+b.id,
-        title:'In '+mins+' min',
-        body:(b.label||'Appointment')+' at '+b.start,
+        key:'wake-block-'+b.id,
+        title:'Nudge',
+        body:(b.label||'Appointment')+' in '+mins+' min',
         when
       });
     });
   }
-  (state.tasks||[]).filter(t=>!t.done && t.date).forEach(t=>{
-    const leads=(t.reminderLeads&&t.reminderLeads.length)?t.reminderLeads:[0];
-    const rt=t.reminderTime||t.time||'09:00';
+  (state.tasks||[]).filter(t=>!t.done && t.date && (t.reminderLeads||[]).length).forEach(t=>{
+    const leads=t.reminderLeads;
+    const rt=t.reminderTime||t.time||'08:00';
     leads.forEach(daysBefore=>{
       const d=new Date(t.date+'T12:00:00');
       d.setDate(d.getDate()-daysBefore);
       const [hh,mm]=rt.split(':').map(Number);
       d.setHours(hh||9,mm||0,0,0);
       scheduleNativeNotification({
-        key:'task-'+t.id+'-'+daysBefore,
-        title: daysBefore===0?'Task due today':'Task in '+daysBefore+' day(s)',
+        key:'wake-task-'+t.id+'-'+daysBefore,
+        title: 'Nudge',
         body:t.title,
         when:d
       });
@@ -4159,34 +4151,30 @@ function checkNotifications(){
   const now=Date.now();
   if(!state.notifiedKeys) state.notifiedKeys=[];
 
+  function ringOnce(key, note, windowMs){
+    if(state.notifiedKeys.includes(key)) return;
+    if(now < 0) return;
+    state.notifiedKeys.push(key);
+    changed=true;
+    if(!state.wakeMathOpen){
+      try{ triggerWakeMath('notification', note); }catch(e){}
+    }
+  }
+
   state.tasks.filter(t=>!t.done && t.date && (t.reminderLeads||[]).length).forEach(t=>{
     const dueDate=new Date(t.date+'T00:00:00');
     (t.reminderLeads||[]).forEach(th=>{
       const target=new Date(dueDate);
       target.setDate(target.getDate()-th);
-      const [hh,mm]=(t.reminderTime||'09:00').split(':').map(Number);
+      const [hh,mm]=(t.reminderTime||t.time||'08:00').split(':').map(Number);
       target.setHours(hh,mm,0,0);
       const key=t.id+':due:'+th;
-      if(now>=target.getTime() && now < target.getTime()+2*60*60*1000 && !state.notifiedKeys.includes(key)){
-        fireReminder(th===0 ? `Due today: ${t.title}` : `Due in ${th} day${th>1?'s':''}: ${t.title}`);
-        state.notifiedKeys.push(key); changed=true;
+      if(now>=target.getTime() && now < target.getTime()+2*60*60*1000){
+        ringOnce(key, t.title);
       }
     });
   });
 
-  state.tasks.filter(t=>!t.done && t.startDate && t.startTime && (t.startReminderMinutes||[]).length).forEach(t=>{
-    const startAt=new Date(t.startDate+'T'+t.startTime+':00');
-    (t.startReminderMinutes||[]).forEach(mins=>{
-      const target=new Date(startAt.getTime() - mins*60000);
-      const key=t.id+':start:'+mins;
-      if(now>=target.getTime() && now < target.getTime()+30*60*1000 && !state.notifiedKeys.includes(key)){
-        fireReminder(mins===0 ? `Starting now: ${t.title}` : `Starts in ${mins} min: ${t.title}`);
-        state.notifiedKeys.push(key); changed=true;
-      }
-    });
-  });
-
-  // ${L('classesToday')} — remind 15 minutes before
   const today=todayStr();
   const dow=mondayIndex(new Date(today+'T12:00:00'));
   (state.classes||[]).forEach(c=>{
@@ -4194,21 +4182,27 @@ function checkNotifications(){
     if(c.scope==='session' && c.date===today) applies=true;
     if(c.scope!=='session' && c.day===dow) applies=true;
     if(!applies || !c.start) return;
+    const mins=(c.alarmMinutes!=null)?Number(c.alarmMinutes):15;
+    if(!(mins>0)) return;
     const startAt=new Date(today+'T'+c.start+':00');
-    const target=new Date(startAt.getTime() - 15*60000);
-    const key='class:'+c.id+':15:'+today;
-    if(now>=target.getTime() && now < startAt.getTime()+5*60*1000 && !state.notifiedKeys.includes(key)){
-      fireReminder(`In 15 min: ${c.title} (${c.start}${c.room?' · '+c.room:''})`);
-      state.notifiedKeys.push(key); changed=true;
+    const target=new Date(startAt.getTime() - mins*60000);
+    const key='class:'+c.id+':'+mins+':'+today;
+    if(now>=target.getTime() && now < startAt.getTime()+5*60*1000){
+      ringOnce(key, (c.title||'Class')+' in '+mins+' min');
+    }
+  });
+  (state.studyBlocks||[]).forEach(b=>{
+    if(b.date!==today || !b.start) return;
+    const mins=(b.alarmMinutes!=null)?Number(b.alarmMinutes):0;
+    if(!(mins>0)) return;
+    const startAt=new Date(today+'T'+b.start+':00');
+    const target=new Date(startAt.getTime() - mins*60000);
+    const key='block:'+b.id+':'+mins+':'+today;
+    if(now>=target.getTime() && now < startAt.getTime()+5*60*1000){
+      ringOnce(key, (b.label||'Appointment')+' in '+mins+' min');
     }
   });
 
-  (state.customReminders||[]).filter(r=>!r.done && !r.notified).forEach(r=>{
-    if(now >= new Date(r.when).getTime()){
-      fireReminder(r.title);
-      r.notified=true; changed=true;
-    }
-  });
   try{ if(checkHabitNudges(now)) changed=true; }catch(e){}
   if(changed) saveState();
 }
@@ -4225,6 +4219,7 @@ const NAV=[
     {id:'plan', label:'Plan', ico:'&#128197;'},
     {id:'techniques', label:'Techniques', ico:'&#128295;'},
     {id:'studytools', label:'Study Tools', ico:'&#128218;'} /* label overridden below */,
+    {id:'nudge', label:'Nudge', ico:'&#9200;'},
     {id:'settings', label:'Settings', ico:'&#9881;'}
   ]}
 ];
@@ -4465,7 +4460,8 @@ function renderMain(){
   const views={today:viewToday,terms:viewTerms,tasks:viewTasks,challenges:viewChallenges,planAhead:viewPlanAhead,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
     eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,nudge:viewNudge,
     bodydouble:viewBodyDouble,energyFocus:viewEnergyFocus,ifThen:viewIfThen,ritualBackpack:viewRitualBackpack,ritualCostume:viewRitualCostume,ritualLocation:viewRitualLocation,contextSplit:viewContextSplit,settings:viewSettings,
-    habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp,
+    habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp,reminders:viewNudge,mindmaps:viewMindmaps,soundscape:viewSoundscape,
+    freebusyPreview:viewFreeBusyPreview,
     freebusyPreview:viewFreeBusyPreview,
     freebusy:function(){ return viewFreeBusyPublic(state.freeBusyPublic||parseFreeBusyFromHash()); }
   };
@@ -4498,12 +4494,13 @@ function renderModal(){
     const m = state.wakeMath;
     root.innerHTML = `<div class="overlay" id="wakeMathOverlay" style="background:rgba(0,0,0,.72)">
       <div class="quotecard" style="text-align:center;max-width:360px">
-        <div class="qeyebrow">Nudge alarm</div>
-        <div class="qtext" style="font-size:1.15rem;margin:8px 0 12px">Solve to stop the alarm</div>
+        <div class="qeyebrow">Nudge</div>
+        ${m.note?`<div style="font-size:.95rem;margin:4px 0 8px">${escapeHtml(m.note)}</div>`:''}
+        <div class="qtext" style="font-size:1.15rem;margin:8px 0 12px">Solve to stop</div>
         <div style="font-size:1.6rem;font-weight:800;margin:12px 0">${m.a} + ${m.b} = ?</div>
         <input id="wakeMathInput" type="number" inputmode="numeric" placeholder="Answer" style="width:100%;padding:12px;font-size:1.1rem;text-align:center;border-radius:12px;border:1px solid var(--line)">
         <div class="qactions" style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
-          <button class="btn" id="wakeMathSubmit" style="width:100%">Stop alarm</button>
+          <button class="btn" id="wakeMathSubmit" style="width:100%">Stop</button>
           <button class="btn ghost sm" id="wakeMathSnooze5" style="width:100%">Snooze 5 min</button>
           <button class="btn ghost sm" id="wakeMathForceStop" style="width:100%">Silence now</button>
         </div>
@@ -4923,13 +4920,24 @@ function renderModal(){
       };
       document.getElementById('tmRemind').onclick=()=>{
         const box=document.getElementById('tmExtra');
-        box.innerHTML=`<div class="field"><label>Nudge at</label><input type="time" id="tmRemTime" value="${t.reminderTime||'09:00'}"></div>
-          <label style="font-size:.85rem"><input type="checkbox" id="tmLead0" ${(t.reminderLeads||[]).includes(0)?'checked':''}> On the day</label>
-          <button class="btn sm" id="tmSaveRem" style="margin-top:8px">Save alarm</button>`;
+        const cur = (t.reminderLeads||[]).indexOf(1)>=0 ? 'daybefore' : ((t.reminderLeads||[]).indexOf(0)>=0 ? 'morning' : 'none');
+        box.innerHTML=`<div class="field"><label>Nudge me</label>
+          <select id="tmNudgeWhen">
+            <option value="none" ${cur==='none'?'selected':''}>Not at all</option>
+            <option value="morning" ${cur==='morning'?'selected':''}>That morning</option>
+            <option value="daybefore" ${cur==='daybefore'?'selected':''}>The day before</option>
+          </select>
+        </div>
+        <div class="field" style="margin-top:8px"><label>Time</label><input type="time" id="tmRemTime" value="${t.reminderTime||t.time||'08:00'}"></div>
+        <button class="btn sm" id="tmSaveRem" style="margin-top:8px">Save Nudge</button>`;
         document.getElementById('tmSaveRem').onclick=()=>{
-          t.reminderTime=document.getElementById('tmRemTime').value;
-          t.reminderLeads = document.getElementById('tmLead0').checked ? [0] : [];
+          const when=document.getElementById('tmNudgeWhen').value;
+          t.nudgeWhen=when;
+          t.reminderTime=document.getElementById('tmRemTime').value || t.time || '08:00';
+          t.reminderLeads = when==='morning' ? [0] : (when==='daybefore' ? [1] : []);
           closeTaskMenu();
+          try{ syncNativeClassReminders(); }catch(e){}
+          showAppMessage('Saved', when==='none' ? 'No Nudge on this task.' : 'Nudge saved for this task.');
         };
       };
       return;
@@ -5435,12 +5443,12 @@ async function fetchGoogleCalendarEvents(daysAhead){
     showAppMessage('Could not read Google Calendar', 'Sign in with Google again and allow Calendar, or upload a calendar file from Plan → Schedule.');
     return [];
   }
-  const timeMin = new Date(); timeMin.setHours(0,0,0,0);
-  const timeMax = new Date(timeMin.getTime() + daysAhead*86400000);
+  const timeMin = new Date(); timeMin.setDate(timeMin.getDate()-7); timeMin.setHours(0,0,0,0);
+  const timeMax = new Date(timeMin.getTime() + (daysAhead+7)*86400000);
   const url = 'https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime'
     + '&timeMin=' + encodeURIComponent(timeMin.toISOString())
     + '&timeMax=' + encodeURIComponent(timeMax.toISOString())
-    + '&maxResults=100';
+    + '&maxResults=250';
   const res = await fetch(url, { headers: { Authorization: 'Bearer ' + useToken } });
   if(!res.ok){
     const err = await res.text();
@@ -5484,7 +5492,7 @@ function mapGcalToStudyBlocks(items){
 async function syncGoogleCalendarReadonly(){
   try{
     showAppMessage('Syncing…', 'Reading Google Calendar (read-only).');
-    const items = await fetchGoogleCalendarEvents(21);
+    const items = await fetchGoogleCalendarEvents(90);
     const mapped = mapGcalToStudyBlocks(items);
     if(!state.externalBusy) state.externalBusy = [];
     // Replace previous google-sourced blocks
@@ -5492,9 +5500,13 @@ async function syncGoogleCalendarReadonly(){
     state.settings = state.settings||{};
     state.settings.calendarLastSync = Date.now();
     state.settings.calendarLastSource = 'google';
+    state.calRef = todayStr();
+    state.selectedDay = todayStr();
+    state.calMode = 'month';
+    calendarBrowsing = false;
     try{ saveState(); }catch(e){}
     try{ persistRender(); }catch(e){}
-    showAppMessage('Google Calendar', mapped.length+' event(s) imported (read-only). Shown as busy blocks in schedule.');
+    showAppMessage('Uploaded', 'Uploaded.');
   }catch(e){
     console.warn(e);
     const msg = String((e&&e.message)||e||'');
@@ -6179,7 +6191,8 @@ const TOUR_STEPS = [
   { title: 'Focus Pod', body: 'A timer for one focus block. On that screen, choose a soundscape type, set volume, then <b>Play sound</b>. Session-end beeps are under Settings → Sounds & notifications (timers).', view: 'timer' },
   { title: 'Body Doubling', body: 'Choose one style — Focus Sprint, Guided Cave, or Group Flow — then a task and a goal. The timer walks you through the phases.', view: 'bodydouble' },
   { title: 'Projects & calendar', body: 'Projects break big work into phases. Calendar holds classes and commitments. You can share busy/free times with a link when needed.', view: 'projects' },
-  { title: 'Settings & Nudge', body: 'Your profile, Google sign-in, and the <b>Nudge</b> alarm (phone). Nudge is the daily alarm with a math stop-screen. Timer sounds are separate under Sounds & notifications (timers).', view: 'settings' },
+  { title: 'Nudge', body: 'Nudge is its own page in the side menu, not inside Settings. Set a time and a date or a day. It rings until you solve a short math problem. On a task, choose Nudge me. On a class, tick Nudge me 15 minutes before.', view: 'nudge' },
+  { title: 'Settings', body: 'Your profile, Google sign-in, and backup. Timer sounds are under Sounds & notifications (timers). Those are not the Nudge sound.', view: 'settings' },
   { title: 'You are set', body: 'Explore at your own pace. Re-open this tour anytime from <b>Settings → Take a tour</b>.', view: 'today' }
 ];
 
@@ -6481,7 +6494,7 @@ const SB_TOOLS = {
   contextSplit: {title:'Study vs personal', desc:'Label tasks Study/Work or Personal so lists stop mixing life roles.', ico:'🌓', action:'context-split'},
   focusPlate: {title:'Focus Plate', desc:'Cap today: 1 big, 3 medium, 5 small. When the plate is full, you are done.', ico:'🍽', nav:'rule135'},
   biteSize: {title:'Bite Size', desc:'Cut one scary task into tiny steps you can finish in a few minutes.', ico:'🍽', nav:'bitesize'},
-  bugMe: {title:'Nudge alarm', desc:'Set an alarm that rings until you stop it — useful when “later” never comes. Not the same as quote sparks on Home.', ico:'⏰', nav:'settings'},
+  bugMe: {title:'Nudge', desc:'Opens the Nudge page. Set a time and a date or a day. It rings until you solve a short math problem.', ico:'⏰', nav:'nudge'},
   startWizard: {title:'Start Wizard', desc:'Three quick questions to unstick “I do not know how to begin.”', ico:'🪄', action:'start-wizard'},
   spotlight: {title:'Spotlight', desc:'Opens Tasks and hides everything except 3 open tasks until you finish them.', ico:'🔦', action:'mode-spotlight'},
   smallBatch: {title:'Small Batch', desc:'Opens Tasks with only a set of 3. Finish them, then take the next set.', ico:'📦', action:'mode-batch'},
@@ -6587,7 +6600,7 @@ function applyChallengeTool(toolId, challengeId){
   if(toolId==='timeblocking' || toolId==='schedule'){ navigateTo('timeblocking'); return; }
   if(toolId==='plan-ahead' || toolId==='planAhead'){ navigateTo('planAhead'); return; }
   if(toolId==='journal'){ navigateTo('journal'); return; }
-  if(toolId==='bugme' || toolId==='bugMe' || toolId==='settings'){
+  if(toolId==='bugme' || toolId==='bugMe' || toolId==='nudge' || toolId==='settings'){
     navigateTo('nudge');
     return;
   }
@@ -8305,19 +8318,20 @@ function viewTasks(){
         <option value="later">Later — neither</option>
       </select>
     </div>
+    <div class="field" style="margin-top:10px"><label>Nudge me</label>
+      <select id="newNudgeWhen">
+        <option value="none" selected>Not at all</option>
+        <option value="morning">That morning</option>
+        <option value="daybefore">The day before</option>
+      </select>
+    </div>
+    <div class="field" style="margin-top:8px"><label>Nudge time</label><input id="newNudgeTime" type="time" value="08:00"></div>
     <details style="margin-top:10px">
-      <summary style="cursor:pointer;font-size:.85rem;font-weight:600">More options (priority, nudge, AI)</summary>
+      <summary style="cursor:pointer;font-size:.85rem;font-weight:600">More options (priority, AI)</summary>
       <div class="row" style="margin-top:8px">
         <div class="field"><label>Priority</label>
           <select id="newPriority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
         </div>
-        <div class="field"><label>Nudge time</label><input id="newReminderTime" type="time"></div>
-      </div>
-      <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;font-size:.8rem">
-        <label><input type="checkbox" id="newLead7"> 7d before</label>
-        <label><input type="checkbox" id="newLead3"> 3d</label>
-        <label><input type="checkbox" id="newLead1"> 1d</label>
-        <label><input type="checkbox" id="newLead0" checked> On day</label>
       </div>
       <div class="row" style="margin-top:10px;align-items:center">
         <select id="aiHelperSelect" style="max-width:140px">
@@ -8600,7 +8614,7 @@ function itemsForDate(dateStr){
 }
 
 function unfoldIcs(text){
-  return String(text||'').replace(/^\uFEFF/, '').replace(/\r\n/g,'\n').replace(/\n[ \t]/g,'');
+  return String(text||'').replace(/^\uFEFF/, '').replace(/\u0000/g,'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').replace(/=\n/g,'').replace(/\n[ \t]/g,'');
 }
 function icsProp(block, name){
   const re = new RegExp('^'+name+'[^:\\n]*:(.*)$','im');
@@ -8626,25 +8640,75 @@ function icsWhen(raw){
   }
   return { date:m[1]+'-'+m[2]+'-'+m[3], start:m[4]+':'+m[5], allDay:false };
 }
+function icsAddDays(ds, n){
+  const d=new Date(ds+'T12:00:00');
+  d.setDate(d.getDate()+n);
+  return toDateStr(d);
+}
+function icsInstances(block, start, endTime){
+  const rrule=icsProp(block,'RRULE');
+  const one={date:start.date, start:start.allDay?'00:00':start.start, end:endTime};
+  if(!rrule) return [one];
+  const freq=(rrule.match(/FREQ=([A-Z]+)/i)||[])[1]||'';
+  const interval=Math.max(1, Number((rrule.match(/INTERVAL=(\d+)/i)||[])[1]||1));
+  const untilM=rrule.match(/UNTIL=([^;]+)/i);
+  const until=untilM?icsWhen(untilM[1]):null;
+  const count=Number((rrule.match(/COUNT=(\d+)/i)||[])[1]||0);
+  const byRaw=(rrule.match(/BYDAY=([^;]+)/i)||[])[1]||'';
+  const map={MO:0,TU:1,WE:2,TH:3,FR:4,SA:5,SU:6};
+  const days=byRaw?byRaw.split(',').map(function(x){ return map[String(x).replace(/[^A-Z]/gi,'').slice(-2).toUpperCase()]; }).filter(function(v){ return v!=null; }):null;
+  const ex=new Set();
+  const exRe=/EXDATE[^:\n]*:([^\n]+)/gi;
+  let em;
+  while((em=exRe.exec(block))){
+    String(em[1]).split(',').forEach(function(bit){
+      const w=icsWhen(bit);
+      if(w&&w.date) ex.add(w.date);
+    });
+  }
+  const winStart=icsAddDays(todayStr(), -14);
+  const winEnd=until&&until.date&&until.date<icsAddDays(todayStr(),150)?until.date:icsAddDays(todayStr(),150);
+  const origin=new Date(start.date+'T12:00:00');
+  const out=[];
+  if(freq!=='DAILY' && freq!=='WEEKLY' && freq!=='MONTHLY' && freq!=='YEARLY') return [one];
+  for(let ds=(start.date>winStart?start.date:winStart); ds<=winEnd && out.length<120; ds=icsAddDays(ds,1)){
+    const d=new Date(ds+'T12:00:00');
+    if(d<origin) continue;
+    const diff=Math.round((d-origin)/86400000);
+    let ok=false;
+    if(freq==='DAILY') ok=diff%interval===0;
+    else if(freq==='WEEKLY'){
+      const dow=mondayIndex(d);
+      const dayOk=days?days.indexOf(dow)>=0:dow===mondayIndex(origin);
+      ok=dayOk && (Math.floor(diff/7)%interval===0);
+    } else if(freq==='MONTHLY'){
+      ok=d.getDate()===origin.getDate() && (((d.getFullYear()-origin.getFullYear())*12+(d.getMonth()-origin.getMonth()))%interval===0);
+    } else if(freq==='YEARLY'){
+      ok=d.getMonth()===origin.getMonth() && d.getDate()===origin.getDate() && ((d.getFullYear()-origin.getFullYear())%interval===0);
+    }
+    if(ok && !ex.has(ds)) out.push({date:ds, start:one.start, end:endTime});
+    if(count && out.length>=count) break;
+  }
+  return out.length?out:[one];
+}
 function importIcsText(text, source){
-  const raw = unfoldIcs(text);
+  const raw = unfoldIcs(String(text||'').replace(/\u0000/g,''));
   if(raw.charCodeAt(0)===80 && raw.charCodeAt(1)===75){
     return { ok:false, message:'This is a zip. Open it, then upload the calendar file inside.' };
   }
   if(raw.indexOf('BEGIN:VEVENT')<0){
     return { ok:false, message:'That is not a calendar file. Download the file that ends in .ics, then tap Upload calendar file.' };
   }
-  if(!Array.isArray(state.classes)) state.classes=[];
   if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
   const tag = source || 'ics-file';
-  state.classes = state.classes.filter(c=>c.source!==tag);
+  state.classes = (state.classes||[]).filter(c=>c.source!==tag);
   state.studyBlocks = state.studyBlocks.filter(b=>b.source!==tag);
   const parts = raw.split('BEGIN:VEVENT');
   let added = 0;
-  const dates = [];
-  const names = [];
+  const seen={};
   for(let i=1;i<parts.length;i++){
     const block = parts[i].split('END:VEVENT')[0];
+    if(/STATUS[^:\n]*:CANCELLED/i.test(block)) continue;
     const summary = (icsProp(block,'SUMMARY') || 'Busy').slice(0,140);
     const loc = icsProp(block,'LOCATION');
     const start = icsWhen(icsProp(block,'DTSTART') || (block.match(/DTSTART[^:\n]*:([^\n]+)/i)||[])[1]);
@@ -8656,47 +8720,30 @@ function importIcsText(text, source){
       const mins = (bits[0]*60+(bits[1]||0)+60)%(24*60);
       end = String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0');
     }
-    const weekly = /FREQ=WEEKLY/i.test(icsProp(block,'RRULE'));
-    const key = (start.date||'')+'|'+(start.start||'')+'|'+summary.toLowerCase();
-    const already = (state.studyBlocks||[]).some(b=>(b.date+'|'+(b.start||'')+'|'+(b.label||'').toLowerCase())===key)
-      || (state.classes||[]).some(c=>((c.title||'').toLowerCase()===summary.toLowerCase()) && c.start===(start.allDay?'09:00':start.start));
-    if(already) { dates.push(start.date); names.push(summary); added++; continue; }
-    if(weekly){
-      let day = 0;
-      try{ day = mondayIndex(new Date(start.date+'T12:00:00')); }catch(e){}
-      state.classes.push({
-        id:uid(), title:summary, day:day, start:start.allDay?'09:00':start.start, end:end||'10:00',
-        room:loc||'', textbook:'', meetingUrl:'', scope:'semester', semStart:start.date, semEnd:'', source:tag
-      });
-    } else {
+    const instances=icsInstances(block, start, end||'23:59');
+    instances.forEach(function(inst){
+      const key=inst.date+'|'+(inst.start||'')+'|'+summary.toLowerCase();
+      if(seen[key]) return;
+      seen[key]=1;
       state.studyBlocks.push({
-        id:uid(), date:start.date, start:start.allDay?'00:00':start.start, end:end||'23:59',
+        id:uid(), date:inst.date, start:inst.start||'00:00', end:inst.end||'23:59',
         label:summary, meetingUrl:'', room:loc||'', source:tag
       });
-    }
-    dates.push(start.date);
-    names.push(summary);
-    added++;
+      added++;
+    });
   }
   if(!added) return { ok:false, message:'The file opened, but SnapBack found no events in it.' };
-  dates.sort();
-  let best = dates[0];
-  let bestDiff = Infinity;
-  const todayMs = new Date(todayStr()+'T12:00:00').getTime();
-  dates.forEach(function(ds){
-    const diff = Math.abs(new Date(ds+'T12:00:00').getTime()-todayMs);
-    if(diff<bestDiff){ bestDiff=diff; best=ds; }
-  });
-  state.calRef = best;
-  state.selectedDay = best;
+  state.calRef = todayStr();
+  state.selectedDay = todayStr();
   state.calMode = 'month';
   state.view = 'calendar';
   state.calNote = '';
-  state.lastUpload = names.filter(function(n,i){ return names.indexOf(n)===i; }).slice(0,8);
+  state.lastUpload = [];
+  calendarBrowsing = false;
   if(!state.schedOpen) state.schedOpen={glance:true};
   state.schedOpen.glance = true;
   try{ saveState(); }catch(e){}
-  return { ok:true, added:added, first:'Uploaded.', last:dates[dates.length-1] };
+  return { ok:true, added:added, first:'Uploaded.' };
 }
 function parseICS(text){
   return [];
@@ -8705,16 +8752,28 @@ function importICSFile(file){
   const reader=new FileReader();
   reader.onload=()=>{
     try{
-      const result = importIcsText(String(reader.result||''), 'ics-file');
+      const buf=reader.result;
+      const bytes=new Uint8Array(buf);
+      let text='';
+      if(bytes.length>2 && bytes[0]===0xFF && bytes[1]===0xFE) text=new TextDecoder('utf-16le').decode(buf);
+      else if(bytes.length>2 && bytes[0]===0xFE && bytes[1]===0xFF) text=new TextDecoder('utf-16be').decode(buf);
+      else {
+        text=new TextDecoder('utf-8').decode(buf);
+        if(text.indexOf('BEGIN:VEVENT')<0){
+          const alt=new TextDecoder('utf-16le').decode(buf);
+          if(alt.indexOf('BEGIN:VEVENT')>=0) text=alt;
+        }
+      }
+      const result = importIcsText(text, 'ics-file');
       if(!result.ok){ showAppMessage('Calendar not imported', result.message); return; }
       showAppMessage('Uploaded', 'Uploaded.');
       try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
     }catch(e){
       console.error(e);
-      showAppMessage('Could not read file', 'Save the Outlook download as a .ics file, choose it, then tap Upload calendar file.');
+      showAppMessage('Could not read file', 'Save the download as a .ics file, choose it, then tap Upload calendar file.');
     }
   };
-  reader.readAsText(file);
+  reader.readAsArrayBuffer(file);
 }
 
 
@@ -9136,8 +9195,7 @@ function calEventButton(it){
 function calDraftCard(){
   const d = state.calDraft;
   if(!d) return '';
-  return `<div class="card" style="border:2px solid var(--pine)">
-    <h3 style="margin-top:0">${d.id?'Edit this event':'New event'}</h3>
+  return `<div>
     <div class="field"><label>Name</label><input id="calDraftTitle" value="${escapeHtml(d.title||'')}" placeholder="Class, meeting, gym…"></div>
     <div class="row" style="margin-top:8px">
       <div class="field"><label>Date</label><input type="date" id="calDraftDate" value="${escapeHtml(d.date||todayStr())}"></div>
@@ -9153,6 +9211,9 @@ function calDraftCard(){
       </div>
       <div class="field"><label>Place</label><input id="calDraftRoom" value="${escapeHtml(d.room||'')}" placeholder="Optional"></div>
     </div>
+    <div style="margin-top:10px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:.95rem"><input type="checkbox" id="calDraftNudge" ${d.nudge===false?'':'checked'}> Nudge me 15 minutes before</label>
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
       <button type="button" class="btn" id="calDraftSave">Save</button>
       <button type="button" class="btn ghost" id="calDraftCancel">Cancel</button>
@@ -9161,7 +9222,11 @@ function calDraftCard(){
   </div>`;
 }
 function openCalDraft(opts){
-  state.calDraft = Object.assign({title:'', date: state.selectedDay||todayStr(), start:'09:00', end:'10:00', repeat:'once', room:'', id:'', kind:''}, opts||{});
+  const o = Object.assign({title:'', date: state.selectedDay||todayStr(), start:'09:00', end:'10:00', repeat:'once', room:'', id:'', kind:'', nudge:true}, opts||{});
+  if(o.alarmMinutes===0) o.nudge=false;
+  state.calDraft = o;
+  if(!state.schedOpen) state.schedOpen={glance:true};
+  state.schedOpen.event=true;
   persistRender();
 }
 function saveCalDraftFromForm(){
@@ -9172,6 +9237,8 @@ function saveCalDraftFromForm(){
   const end = (document.getElementById('calDraftEnd')&&document.getElementById('calDraftEnd').value) || '10:00';
   const repeat = (document.getElementById('calDraftRepeat')&&document.getElementById('calDraftRepeat').value) || 'once';
   const room = (document.getElementById('calDraftRoom')&&document.getElementById('calDraftRoom').value) || '';
+  const nudgeOn = !!(document.getElementById('calDraftNudge') && document.getElementById('calDraftNudge').checked);
+  const alarmMinutes = nudgeOn ? 15 : 0;
   const d = state.calDraft || {};
   if(!Array.isArray(state.classes)) state.classes=[];
   if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
@@ -9187,13 +9254,14 @@ function saveCalDraftFromForm(){
   if(repeat==='weekly'){
     let day=0;
     try{ day=mondayIndex(new Date(date+'T12:00:00')); }catch(e){}
-    state.classes.push({id:uid(), title, day, start, end, room, textbook:'', meetingUrl:'', scope:'semester', semStart:date, semEnd:''});
+    state.classes.push({id:uid(), title, day, start, end, room, textbook:'', meetingUrl:'', scope:'semester', semStart:date, semEnd:'', alarmMinutes:alarmMinutes});
   } else {
-    state.studyBlocks.push({id:uid(), date, start, end, label:title, meetingUrl:'', room});
+    state.studyBlocks.push({id:uid(), date, start, end, label:title, meetingUrl:'', room, alarmMinutes:alarmMinutes});
   }
   state.calDraft=null;
   state.selectedDay=date;
   state.calRef=date;
+  calendarBrowsing=true;
   try{ saveState(); }catch(e){}
   persistRender();
   showAppMessage('Saved', title+' is on the schedule.');
@@ -9210,20 +9278,22 @@ function deleteCalDraft(){
 function viewNudge(){
   const native = (typeof isNativeApp==='function' && isNativeApp());
   const wa = state.wakeAlarm||{};
+  const labels={chime:'Chime',bell:'Bell',beep:'Beep',digital:'Digital',radar:'Radar',knock:'Wake burst'};
+  const curSound=(wa.sound)||(state.settings&&state.settings.alarmSound)||'chime';
   return `
   <div class="pagehead">
-    <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <h1>Nudge</h1>
-    <p>${native?'This alarm can ring when the phone is locked, after you allow alarms.':'On this website or on iPhone, this only rings while SnapBack is open. For a locked phone, use the Android app or the phone Clock.'}</p>
+    <p>${native?'This rings when the phone is locked, after you allow alarms for SnapBack.':'On a laptop, or on iPhone, this rings only while SnapBack is open. The Android app can ring when the phone is locked.'}</p>
   </div>
   <div class="card">
     <div style="font-size:.78rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase">Current time</div>
     <div id="nudgeNowClock" style="font-size:2.1rem;font-weight:800;margin:2px 0 10px">--:--</div>
-    <div class="field"><label>Alarm time</label><input type="time" id="wakeTime" value="${escapeHtml(wa.time||'07:00')}"></div>
+    <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${escapeHtml(wa.time||'07:00')}"></div>
+    <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">The clock above is the time now. The time you set is when Nudge should ring.</p>
     <div class="field" style="margin-top:8px"><label>One-time date</label><input type="date" id="wakeOnceDate" value="${escapeHtml(wa.onceDate||'')}"></div>
     <div class="field" style="margin-top:8px"><label>Sound</label>
       <select id="wakeSoundSelect">
-        ${['chime','bell','beep','digital','radar','knock'].map(v=>`<option value="${v}" ${(wa.sound||'chime')===v?'selected':''}>${v}</option>`).join('')}
+        ${['chime','bell','beep','digital','radar','knock'].map(v=>`<option value="${v}" ${curSound===v?'selected':''}>${labels[v]||v}</option>`).join('')}
       </select>
     </div>
     <div style="margin-top:10px;font-size:.85rem">Or repeat on</div>
@@ -9231,12 +9301,13 @@ function viewNudge(){
       ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label style="font-size:.82rem"><input type="checkbox" id="wakeDay${i}" ${(wa.days||[]).indexOf(i)>=0?'checked':''}> ${d}</label>`).join('')}
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;max-width:280px">
-      <button class="btn" id="saveWakeBtn" type="button">Save alarm</button>
+      <button class="btn" id="saveWakeBtn" type="button">Save Nudge</button>
       <button class="btn ghost" id="testWakeBtn" type="button">Preview</button>
       ${wa.enabled?'<button class="btn ghost" id="turnOffWakeBtn" type="button">Turn off</button>':''}
     </div>
   </div>`;
 }
+let calendarBrowsing=false;
 function schedIsOpen(key){
   if(!state.schedOpen) state.schedOpen={glance:true};
   return !!state.schedOpen[key];
@@ -9251,7 +9322,14 @@ function schedBox(key, title, inner){
   </div>`;
 }
 function viewCalendar(){
-  const mode=state.calMode||'list';
+  if(!calendarBrowsing){
+    const tday=todayStr();
+    if(!state.calRef || String(state.calRef).slice(0,7)!==tday.slice(0,7)){
+      state.calRef=tday;
+      state.selectedDay=tday;
+    }
+  }
+  const mode=state.calMode||'month';
   const ref=new Date(state.calRef+'T00:00:00');
   let body='';
   if(mode==='day'){
@@ -9330,7 +9408,6 @@ function viewCalendar(){
     <div class="eyebrow">Week &amp; month at a glance</div>
     <h1>Your Schedule</h1>
     <p>Day, week, or month. Tap an empty day to add something. Tap an event to change or delete it.</p>
-    ${(state.lastUpload&&state.lastUpload.length)?`<div class="card" style="margin-top:8px"><b>Uploaded</b><div style="margin-top:6px">${state.lastUpload.map(n=>`<div style="padding:6px 0;border-bottom:1px solid var(--line)">${escapeHtml(n)}</div>`).join('')}</div></div>`:''}
   </div>
   ${schedBox('glance','Quick glance', `
   <div class="calnav">
@@ -9355,7 +9432,7 @@ function viewCalendar(){
     </div>
     ${mode==='month' ? `<div class="agenda"><h3>Agenda — ${state.selectedDay}</h3>${selItems.length ? selItems.map(it=>calEventButton(it)).join('') : '<div class="empty">Nothing on this day yet.</div>'}<button type="button" class="btn ghost sm" data-action="cal-new" data-date="${state.selectedDay}" style="margin-top:8px">Add on this day</button></div>` : ''}
   `)}
-  ${calDraftCard()}
+  ${schedBox('event', (state.calDraft&&state.calDraft.id)?'Edit event':'New event', state.calDraft?calDraftCard():'<p style="margin:0 0 8px;color:var(--muted);font-size:.9rem">Or tap a day in the month, then type the name here.</p><button type="button" class="btn" id="calStartNew">Add an event</button>')}
   ${schedBox('quick','Quick add', `
     <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Type a line, paste a timetable, or upload a screenshot. Edit the text, then choose Yes or Cancel. Nothing is added until you say Yes.</p>
     <div class="field"><label>These items are</label>
@@ -9371,12 +9448,9 @@ function viewCalendar(){
     <div id="ttPreview" style="margin-top:12px"></div>
   `)}
   ${schedBox('bring','Bring in my calendar', `
-    <p style="font-size:.85rem;color:var(--muted);margin-top:0">This copies events into SnapBack. It does not change Google, Outlook, or Apple. A Google sign-in, a link, and a downloaded file are the same job — not three different calendars.</p>
+    <p style="font-size:.85rem;color:var(--muted);margin-top:0">This copies events into SnapBack. It does not change Google or Outlook. Sign in with Google, or upload a calendar file you downloaded.</p>
     <button type="button" class="btn sm" id="syncGcalBtn">Bring in Google Calendar</button>
-    <p style="font-size:.75rem;color:var(--muted);margin:10px 0 4px">Or paste a calendar link</p>
-    <input id="icsUrlInput" value="${escapeHtml((state.settings&&state.settings.icsUrl)||'')}" placeholder="Paste the calendar link" style="width:100%">
-    <button type="button" class="btn ghost sm" id="syncIcsBtn" style="margin-top:8px">Bring in this link</button>
-    <p style="font-size:.75rem;color:var(--muted);margin:10px 0 4px">Or choose a calendar file you downloaded</p>
+    <p style="font-size:.75rem;color:var(--muted);margin:12px 0 4px">Or choose a calendar file you downloaded (.ics)</p>
     <input type="file" id="icsImportInput" accept=".ics,text/calendar,.txt">
     <button type="button" class="btn" id="icsUploadBtn" style="margin-top:8px">Upload calendar file</button>
     <p id="icsImportStatus" style="font-size:.85rem;margin-top:8px"></p>
@@ -10363,7 +10437,7 @@ function viewSemester(){
 
   <div class="card">
     <h3>Add to schedule</h3>
-    <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">Class, study, workout, appointment — once or every week. Optional alarm before it starts.</p>
+    <p style="font-size:.85rem;color:var(--muted);margin-top:-4px">Class, study, workout, appointment — once or every week.</p>
     <div class="row">
       <div class="field"><label>Type</label>
         <select id="schedType">
@@ -10402,16 +10476,8 @@ function viewSemester(){
     <div class="row" style="margin-top:8px">
       <div class="field"><label>Start</label><input id="schedStart" type="time" value="09:00"></div>
       <div class="field"><label>End</label><input id="schedEnd" type="time" value="10:00"></div>
-      <div class="field"><label>Alarm</label>
-        <select id="schedAlarm">
-          <option value="0">No alarm</option>
-          <option value="5">5 min before</option>
-          <option value="15" selected>15 min before</option>
-          <option value="30">30 min before</option>
-          <option value="60">1 hour before</option>
-        </select>
-      </div>
     </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:.95rem"><input type="checkbox" id="schedNudge" checked> Nudge me 15 minutes before</label>
     <div class="row" style="margin-top:8px">
       <div class="field"><label>Place / room</label><input id="schedRoom" placeholder="Optional"></div>
       <div class="field" style="flex:2"><label>Link (meet / maps)</label><input id="schedUrl" placeholder="Optional https://…"></div>
@@ -11569,18 +11635,18 @@ function viewHabits(){
     ${habitSec('exSee','See the plan', exerciseTableHtml())}
   `)}
   ${habitSec('screen','Screen time', `
-    <p style="font-size:.85rem;color:var(--muted);margin-top:0">How long do you want screens for each day this week, and when should SnapBack remind you to stop?</p>
+    <p style="font-size:.85rem;color:var(--muted);margin-top:0">How long do you want screens for each day this week, and when should SnapBack nudge you to stop?</p>
     ${names.map((n,i)=>{
       const d=(state.screenPlan.days&&state.screenPlan.days[i])||{};
       return `<div class="row" style="align-items:flex-end"><div style="width:42px;font-weight:700">${n}</div><div class="field"><label>Hours</label><input id="scH${i}" type="number" min="0" max="16" value="${d.hours||0}"></div><div class="field"><label>Minutes</label><input id="scM${i}" type="number" min="0" max="59" value="${d.mins||0}"></div></div>`;
     }).join('')}
-    <div class="field" style="margin-top:8px"><label>Remind me to stop at</label><input type="time" id="screenNudge" value="${escapeHtml(state.screenPlan.nudgeTime||'21:00')}"></div>
+    <div class="field" style="margin-top:8px"><label>Nudge me to stop at</label><input type="time" id="screenNudge" value="${escapeHtml(state.screenPlan.nudgeTime||'21:00')}"></div>
     <button type="button" class="btn" id="screenSave" style="margin-top:8px">Save</button>
     <p style="font-size:.85rem">Today’s limit: <b>${screenToday.hours||0}h ${screenToday.mins||0}m</b></p>
   `)}
   ${habitSec('add','Add a habit', `
     <div class="field"><label>Name</label><input id="newHabitName" placeholder="Example: Take medicine"></div>
-    <label style="display:block;margin:6px 0;font-size:.9rem"><input type="checkbox" id="newHabitRemind"> Send a reminder for this habit</label>
+    <label style="display:block;margin:6px 0;font-size:.9rem"><input type="checkbox" id="newHabitRemind"> Nudge me about this habit</label>
     <label style="display:block;margin:6px 0;font-size:.9rem"><input type="checkbox" id="newHabitTrack" checked> Show this in Past 7 days</label>
     <button type="button" class="btn" id="addHabitBtn">Add habit</button>
   `)}
@@ -11595,8 +11661,8 @@ function viewHabits(){
       }).join('')}</tr>`).join('')}
     </table></div>
   `)}
-  ${habitSec('nudges','Notification settings', `
-    <p style="font-size:.9rem;margin-top:0">Choose Yes to receive the nudge, or No to turn it off.</p>
+  ${habitSec('nudges','Nudges', `
+    <p style="font-size:.9rem;margin-top:0">Yes means SnapBack asks you. No means it stays quiet.</p>
     ${nudgeRow('exercise','Exercise')}
     ${nudgeRow('meal','Meal')}
     ${nudgeRow('water','Hydrate')}
@@ -11707,7 +11773,7 @@ const ORG_CARDS=[
   {ico:'&#9737;', name:'Today', benefit:'Helps you: answer "what now?" without scrolling through your whole backlog.', how:['Shows your one non-negotiable, plus Must-do vs Could-do','Flags what\'s due soon so nothing sneaks up'], id:'today'},
   {ico:'&#9776;', name:'Tasks', benefit:'Helps you: keep every assignment in one place instead of scattered notes and memory.', how:['Add a title, date, and priority','Tag Must-do, or Frog if you\'re dreading it'], id:'tasks'},
   {ico:'&#128197;', name:'Calendar', benefit:'Helps you: see a packed week coming before it\'s too late to plan around it.', how:['Classes, deadlines, and study blocks, color-coded','Export it into your phone\'s real calendar app'], id:'calendar'},
-  {ico:'&#128276;', name:'Reminders', benefit:'Helps you: catch a deadline a week out instead of the night before it\'s due.', how:['Every dated task auto-shows its checkpoints here','No separate setup needed'], id:'reminders'},
+  {ico:'&#9200;', name:'Nudge', benefit:'Helps you: get up or start, because it rings until you stop it.', how:['Open Nudge from the side menu','Set a time and a date or a day, then Save Nudge'], id:'nudge'},
   {ico:'&#128176;', name:'Money', benefit:'Helps you: notice spending patterns before they become a real problem.', how:['Log what you spend or earn as it happens','Check the monthly summary and category breakdown'], id:'money'},
   {ico:'&#127807;', name:'Healthy Habits', benefit:'Helps you: spot the connection between rough days and bad sleep, no food, or too much scrolling.', how:['Log exercise (what you did), sleep hours, screen time','Takes 10 seconds a day'], id:'habits'},
   {ico:'&#128202;', name:'Stats', benefit:'Helps you: actually see progress instead of just feeling behind.', how:['Pick a date range','See what got done vs. left out, and how habits/money looked'], id:'stats'},
@@ -11732,11 +11798,11 @@ const FAQ_ITEMS=[
   {q:'What is Backburner?', a:'A place to park a task you are not doing today. It is not deleted. From Challenges → Everything feels like too much → Backburner, choose an existing task and tap Move to Backburner.'},
   {q:'How do I mark Must-do or Frog?', a:'Challenges → the matching path → Must-do & Frog. Choose a task you already created, then tap Mark as Must-do, Mark as Frog, or both. You can also use More on a task card.'},
   {q:'How do I break a big assignment into steps?', a:'Open Bite Size from Challenges or Techniques. Choose the task. The text fills in. Add small steps, or use Ask AI. Keep a step under about 15 minutes.'},
-  {q:'How do I set Nudge?', a:'Open Nudge from a challenge, or Settings → Nudge. Set a time and either one date or at least one day, then Save alarm. When it rings, a short math problem stops it. On the Android app it can ring when the phone is locked. On the website or iPhone it only rings while SnapBack is open.'},
+  {q:'How do I set Nudge?', a:'Open Nudge in the side menu. Set a time and either one date or at least one day, then Save Nudge. When it rings, a short math problem stops it. On the Android app it can ring when the phone is locked. On the website or iPhone it only rings while SnapBack is open. A task can also say Nudge me that morning or the day before. A class can say Nudge me 15 minutes before. Those use the same Nudge.'},
   {q:'Why did Nudge not ring with the phone locked?', a:'The website cannot do that. Use the Android app, allow notifications and alarms, then save Nudge again. Or set the same time in the phone Clock app.'},
   {q:'How do I see my week?', a:'Plan → Schedule. Use Day, Week, Columns, or Month. Tap an event to edit it. Tap Add on a day, or a time in Day view, to create one.'},
   {q:'How do I add many classes at once?', a:'Plan → Schedule → Quick add. Type lines, paste a timetable, or upload a screenshot, then Read screenshot. Edit the text. Tap Check what I read, then Yes — save. Cancel adds nothing.'},
-  {q:'How do I bring in Google or Outlook?', a:'Plan → Schedule → Bring in my calendar. This copies events into SnapBack. It does not change Google or Outlook. You can use Google, paste a calendar link, or upload a downloaded calendar file. Tap Upload calendar file after you choose the file.'},
+  {q:'How do I bring in Google or Outlook?', a:'Plan → Schedule → Bring in my calendar. Sign in with Google, or download a calendar file (.ics) and tap Upload calendar file. This copies events into SnapBack. It does not change Google or Outlook.'},
   {q:'How do laptop and phone stay together?', a:'Sign in with the same Google account on both. A username stays on that one device only and does not appear on the other.'},
   {q:'Will I lose my work?', a:'Sign in with Google and your work is kept. You can also download a backup file from Settings → Backup.'},
   {q:'What is Focus Plate?', a:'A limit for today: 1 big thing, 3 medium, 5 small, and one Non-negotiable. Everything else waits.'}
@@ -11920,80 +11986,46 @@ function viewFlipScript(){
 
 
 function viewHelp(){
+  if(!state.helpOpen) state.helpOpen={};
+  function helpBox(key, title, inner){
+    const open=!!state.helpOpen[key];
+    return `<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
+      <button type="button" class="btn ghost" data-action="help-sec" data-key="${key}" style="width:100%;text-align:left;border:none;border-radius:0;padding:14px 16px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:700">${title}</span><span>${open?'▾':'▸'}</span>
+      </button>
+      ${open?`<div style="padding:0 16px 16px">${inner}</div>`:''}
+    </div>`;
+  }
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">How to actually use it</div><h1>Help &amp; FAQ</h1><p>Short how-tos first. Then what each section is for.</p>
+    <h1>Help & FAQ</h1>
   </div>
-
-  <div class="card">
-    <h3>Words used in SnapBack</h3>
-    <p><b>Must-do</b> — a task that should happen today. You can have more than one.</p>
-    <p><b>Frog</b> — the single task you start with. Do this before the others. A task can be Must-do and also the Frog.</p>
-    <p><b>Non-negotiable</b> — the one item on Focus Plate you will not drop today, even if the rest slips. It is not the same as Frog.</p>
-    <p><b>Backburner</b> — parked, not deleted. It leaves Today until you bring it back.</p>
-    <p><b>Nudge</b> — the alarm. Not a quote. Not a reminder badge.</p>
-    <p><b>Schedule</b> — your day, week, and month under Plan.</p>
-  </div>
-
-  <div class="card">
-    <h3>How do I…</h3>
-    <details class="faqitem" open><summary>Open the website &amp; sync with Gmail</summary>
-      <p><b>Website:</b> Open <a href="${escapeHtml(getPublicWebUrl())}" target="_blank" rel="noopener">${escapeHtml(getPublicWebUrl())}</a> in Chrome or Edge.</p>
-      <p><b>Phone app:</b> Install the SnapBack APK from your teacher.</p>
-      <p><b>Sync:</b> Sign in with the <b>same Gmail</b> on website and phone. Your tasks stay under your Google account — private to you.</p>
-      <p><b>Username login:</b> Works on one device. Set a Recovery PIN when you create the account so you can reset a forgotten password.</p>
+  ${helpBox('how','How do I…', `
+    <details class="faqitem"><summary>Open the website and sign in</summary>
+      <p>Website: open <a href="${escapeHtml(getPublicWebUrl())}" target="_blank" rel="noopener">${escapeHtml(getPublicWebUrl())}</a>.</p>
+      <p>Phone: install the SnapBack app. Sign in with the same Gmail on both.</p>
     </details>
-    <details class="faqitem"><summary>Forgot password / no Recovery PIN</summary>
-      <p>If you created a Recovery PIN, use <b>Forgot password</b> on the sign-in screen.</p>
-      <p>If you never set a PIN (older login), use <b>Erase local login on this device</b> on the sign-in screen, then <b>Create account</b> with a new password and PIN, or use <b>Continue with Google</b>.</p>
-    </details>
-
     <details class="faqitem"><summary>Set Nudge</summary>
-      <p>Open <b>Nudge</b> from a challenge, or <b>Settings → Nudge</b>. Set a time and either one date or at least one day. Tap <b>Save alarm</b>. A short math problem stops it.</p>
-      <p>On the Android app, Nudge can ring when the phone is locked. On the website or iPhone, it only rings while SnapBack is open.</p>
+      <p>Open Nudge in the side menu. Set a time and a date or a day, then Save Nudge. A short math problem stops it. On a task, choose Nudge me: that morning, the day before, or not at all. On a class, tick Nudge me 15 minutes before.</p>
     </details>
-    <details class="faqitem"><summary>Put the week on a watch</summary>
-      <p>Plan → <b>Schedule</b> → export the calendar file. Open that file in Google Calendar or Apple Calendar. The watch follows that phone calendar. SnapBack does not talk to the watch itself.</p>
+    <details class="faqitem"><summary>Bring in Google or Outlook</summary>
+      <p>Plan → Schedule → Bring in my calendar. Sign in with Google, or download a calendar file and tap Upload calendar file.</p>
     </details>
-    <details class="faqitem"><summary>Add a weekly timetable</summary>
-      <p>Plan → <b>Schedule</b> → <b>Quick add</b>. Type lines such as <i>Bio Mon 8:30</i>, paste a timetable, or upload a screenshot and tap <b>Read screenshot</b>. Edit the box. Tap <b>Check what I read</b>, then <b>Yes — save</b> or <b>Cancel</b>.</p>
-    </details>
-    <details class="faqitem"><summary>Use Focus Plate without overloading today</summary>
-      <p>Open <b>Focus Plate</b>. Fill only: 1 big, 3 medium, 5 small. Mark one as ★ Non-negotiable. Everything else waits. Use <b>Bite Size</b> at the bottom to break a big item into tiny steps.</p>
-    </details>
-    <details class="faqitem"><summary>Break a scary assignment into small steps</summary>
-      <p>Open the task → <b>Bite Size</b>, or from Focus Plate use the guided walk-through. Add bites yourself or use Smart Breakdown / templates. Check bites off in any order.</p>
-    </details>
-    <details class="faqitem"><summary>Edit a task (not only mark done or delete)</summary>
-      <p>On the task card, tap <b>✏️ Edit</b> — the title field focuses so you can change it. Date, time, priority, tags, notes, and mindset helpers are all editable on the same card.</p>
-    </details>
-  </div>
-
-  <div class="card">
-    <h3>What each part actually does for you</h3>
-    ${ORG_CARDS.map(c=>`<div class="techcard">
+  `)}
+  ${helpBox('parts','What each part does', ORG_CARDS.map(c=>`<div class="techcard">
       <div class="tc-head"><span class="tc-ico">${c.ico}</span><div class="tc-name">${c.name}</div></div>
       <p style="color:var(--pine);font-weight:600">${c.benefit}</p>
       <p>${c.how.map(h=>'&#8226; '+h).join('<br>')}</p>
-      <button class="btn ghost sm" data-action="help-goto" data-id="${c.id}">Open &rarr;</button>
-    </div>`).join('')}
-  </div>
-
-  <div class="card">
-    <h3>Which technique do I use?</h3>
-    ${TECH_CARDS.map(c=>`<div class="techcard">
+      <button class="btn ghost sm" data-action="help-goto" data-id="${c.id}">Open</button>
+    </div>`).join(''))}
+  ${helpBox('tech','Which technique do I use?', TECH_CARDS.map(c=>`<div class="techcard">
       <div class="tc-head"><span class="tc-ico">${c.ico}</span><div><div class="tc-name">${c.name}</div><div class="tc-when">${c.when}</div></div></div>
       <p>${c.desc}</p>
       <p>${c.how.map(h=>'&#8226; '+h).join('<br>')}</p>
-      <button class="btn ghost sm" data-action="help-goto" data-id="${c.id}">Try it &rarr;</button>
-    </div>`).join('')}
-  </div>
-
-  <div class="card">
-    <h3>Common questions</h3>
-    ${FAQ_ITEMS.map(f=>`<details class="faqitem"><summary>${f.q}</summary><p>${f.a}</p></details>`).join('')}
-  </div>
+      <button class="btn ghost sm" data-action="help-goto" data-id="${c.id}">Try it</button>
+    </div>`).join(''))}
+  ${helpBox('faq','Common questions', FAQ_ITEMS.map(f=>`<details class="faqitem"><summary>${f.q}</summary><p>${f.a}</p></details>`).join(''))}
   `;
 }
 
@@ -12239,45 +12271,6 @@ function viewSettings(){
       </div>
     </details>
 
-    <details class="setgroup" id="settingsNudgeDetails">
-      <summary>Nudge</summary>
-      <div class="setgroup-body">
-      <p style="font-size:.84rem;color:var(--muted);margin:0 0 14px">Alarm with a short math problem, so it is harder to dismiss by accident. ${(typeof isNativeApp==='function' && isNativeApp()) ? 'On this Android app it can ring when the phone is locked, after you allow alarms.' : 'On this website, or on iPhone, it only rings while SnapBack is open. For an alarm when the phone is locked, use the Android app or the phone’s Clock app.'}</p>
-      <div class="field">
-        <div style="font-size:.78rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase">Current time</div>
-        <div id="nudgeNowClock" style="font-size:2.1rem;font-weight:800;letter-spacing:.03em;margin:2px 0 10px;font-variant-numeric:tabular-nums">--:--</div>
-        <label>Alarm time</label>
-        <input type="time" id="wakeTime" value="${(state.wakeAlarm&&state.wakeAlarm.time)||'07:00'}">
-        <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">The clock above always shows the time now. Alarm time is only when Nudge should ring.</p>
-      </div>
-      <div class="field" style="margin-top:8px"><label>One-time date (optional)</label>
-        <input type="date" id="wakeOnceDate" value="${(state.wakeAlarm&&state.wakeAlarm.onceDate)||''}" min="2000-01-01" max="2100-12-31">
-        <div style="font-size:.78rem;color:var(--muted);margin-top:4px">If set, Nudge rings only on this date (at the time above). Leave blank to use weekly days instead.</div>
-      </div>
-      <div class="field" style="margin-top:8px"><label>Alarm sound</label>
-        <select id="wakeSoundSelect">
-          ${['chime','bell','beep','digital','radar','knock'].map(v=>{
-            const labels={chime:'Chime',bell:'Bell',beep:'Beep',digital:'Digital',radar:'Radar',knock:'Wake burst'};
-            const cur=(state.wakeAlarm&&state.wakeAlarm.sound)||(state.settings&&state.settings.alarmSound)||'chime';
-            return `<option value="${v}" ${cur===v?'selected':''}>${labels[v]||v}</option>`;
-          }).join('')}
-        </select>
-        <div style="font-size:.78rem;color:var(--muted);margin-top:4px">This sound is used for the phone alarm (and a short sample plays when you change it).</div>
-      </div>
-      <div style="margin-top:10px;font-size:.8rem;color:var(--muted);font-weight:600">Repeat on days (if no one-time date)</div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
-        ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>{
-          const selected = state.wakeAlarm && Array.isArray(state.wakeAlarm.days) && state.wakeAlarm.days.indexOf(i)>=0;
-          return `<label style="font-size:.82rem;display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:var(--input-bg)"><input type="checkbox" id="wakeDay${i}" ${selected?'checked':''}> ${d}</label>`;
-        }).join('')}
-      </div>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;max-width:300px">
-        <button class="btn" id="saveWakeBtn" type="button">Save alarm</button>
-        <button class="btn ghost" id="testWakeBtn" type="button">Preview</button>
-        ${(state.wakeAlarm&&state.wakeAlarm.enabled)?`<button class="btn ghost" id="turnOffWakeBtn" type="button">Turn off</button>`:''}
-      </div>
-    </details>
-
     <details class="setgroup">
       <summary>Webapp Link</summary>
         <p style="font-size:.8rem;color:var(--muted);margin:10px 0 8px">Open the same SnapBack on a laptop: tap <b>Copy link</b>, paste in any browser. (A shorter custom domain needs your own domain name later — the link still works as-is.)</p>
@@ -12407,7 +12400,7 @@ function viewSettings(){
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">
         <b>When this is used:</b> short sound when a <b>timer or session ends</b>
         (Focus Pod work/break, Body Doubling phases, and similar in-app timers).
-        <br><b>Not</b> the daily Nudge alarm — choose that sound under <b>Nudge</b> above.
+        <br><b>Not</b> the Nudge sound — choose that on the <b>Nudge</b> page in the side menu.
         Focus Pod background noise (brown/pink/rain…) is set on the Focus Pod screen.
       </p>
       <div class="field"><label>Timer / session end sound</label><select id="setAlarmSound">
@@ -12422,7 +12415,7 @@ function viewSettings(){
       <button type="button" class="btn sm" id="testSoundBtn" data-action="test-sound">Test sound</button>
       <div id="testSoundStatus" style="font-size:.85rem;margin-top:6px;color:var(--muted)"></div>
       <div style="margin-top:14px">
-        ${toggleRow('setDeadlineNotify','Deadline notifications', s.deadlineNotify!==false)}
+        ${toggleRow('setDeadlineNotify','Task and class Nudges', s.deadlineNotify!==false)}
         <button type="button" class="btn sm" id="grantNotifyBtn" style="margin-top:8px">Grant permission</button>
         <div id="notifyStatus" style="font-size:.85rem;margin-top:6px;color:var(--muted)">${escapeHtml(state.lastNotifyMsg||'')}</div>
         <p style="font-size:.8rem;color:var(--muted);margin-top:8px">On Android: Settings → Apps → SnapBack → Notifications → allow all; Battery → Unrestricted.</p>
@@ -12460,7 +12453,7 @@ function viewSettings(){
             <option value="classes">Classes / schedule (${(state.classes||[]).length})</option>
             <option value="studyBlocks">Study blocks (${(state.studyBlocks||[]).length})</option>
             <option value="money">Money (${(state.money||[]).length})</option>
-            <option value="customReminders">Custom reminders (${(state.customReminders||[]).length})</option>
+            <option value="customReminders">Old extra reminders (${(state.customReminders||[]).length})</option>
             <option value="journal">Journal notes (${(state.journal||[]).length})</option>
           </select>
         </div>
@@ -13302,6 +13295,12 @@ function wireView(){
     else if(action==='home-toggle') el.addEventListener('click', ()=>{
       homeSectionToggle(el.dataset.key||'');
     });
+    else if(action==='help-sec') el.addEventListener('click', ()=>{
+      if(!state.helpOpen) state.helpOpen={};
+      const k=el.dataset.key||'';
+      state.helpOpen[k]=!state.helpOpen[k];
+      persistRender();
+    });
     else if(action==='proj-list-toggle') el.addEventListener('click', ()=>{
       const which=el.dataset.which;
       if(which==='open') state.projectsListOpen = !(state.projectsListOpen !== false);
@@ -13850,18 +13849,20 @@ function wireView(){
   if(state.view==='calendar'){
     const prev=document.getElementById('calPrev');
     if(prev) prev.addEventListener('click', ()=>{
+      calendarBrowsing=true;
       const d=new Date(state.calRef+'T00:00:00');
       if(state.calMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-7);
       state.calRef=toDateStr(d); persistRender();
     });
     const next=document.getElementById('calNext');
     if(next) next.addEventListener('click', ()=>{
+      calendarBrowsing=true;
       const d=new Date(state.calRef+'T00:00:00');
       if(state.calMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+7);
       state.calRef=toDateStr(d); persistRender();
     });
     const todayBtn=document.getElementById('calToday');
-    if(todayBtn) todayBtn.addEventListener('click', ()=>{ state.calRef=todayStr(); state.selectedDay=todayStr(); state.calNote=''; persistRender(); });
+    if(todayBtn) todayBtn.addEventListener('click', ()=>{ calendarBrowsing=false; state.calRef=todayStr(); state.selectedDay=todayStr(); state.calNote=''; persistRender(); });
     const monthBtn=document.getElementById('calModeMonth');
     if(monthBtn) monthBtn.addEventListener('click', ()=>{ state.calMode='month'; persistRender(); });
     const weekBtn=document.getElementById('calModeWeek');
@@ -13890,6 +13891,8 @@ function wireView(){
         openCalDraft({id:b.id, kind:'block', title:b.label, date:b.date, start:b.start, end:b.end, room:b.room||'', repeat:'once'});
       }
     }));
+    const startNew=document.getElementById('calStartNew');
+    if(startNew) startNew.addEventListener('click', ()=>openCalDraft({date: state.selectedDay||todayStr()}));
     const cds=document.getElementById('calDraftSave'); if(cds) cds.addEventListener('click', saveCalDraftFromForm);
     const cdc=document.getElementById('calDraftCancel'); if(cdc) cdc.addEventListener('click', ()=>{ state.calDraft=null; persistRender(); });
     const cdd=document.getElementById('calDraftDelete'); if(cdd) cdd.addEventListener('click', deleteCalDraft);
