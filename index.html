@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="293">
+<meta name="snapback-build" content="294">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -5323,6 +5323,7 @@ function syncPayloadFromState(){
 }
 function applyCloudPayload(payload){
   if(!payload || typeof payload!=='object') return;
+  if(state._icsImportGuard && Date.now() < state._icsImportGuard) return;
   _syncApplying = true;
   const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm'];
   keys.forEach(k=>{ if(payload[k]!==undefined) state[k]=payload[k]; });
@@ -8617,10 +8618,16 @@ function unfoldIcs(text){
   return String(text||'').replace(/^\uFEFF/, '').replace(/\u0000/g,'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').replace(/=\n/g,'').replace(/\n[ \t]/g,'');
 }
 function icsProp(block, name){
-  const re = new RegExp('^'+name+'[^:\\n]*:(.*)$','im');
-  const m = block.match(re);
-  if(!m) return '';
-  return m[1].trim().replace(/\\n/g,' ').replace(/\\,/g,',').replace(/\\\\/g,'\\');
+  const lines = String(block||'').split('\n');
+  const head = new RegExp('^'+name+'(?:[;:]|$)','i');
+  for(let i=0;i<lines.length;i++){
+    const line = lines[i];
+    if(!head.test(line)) continue;
+    const idx = line.lastIndexOf(':');
+    if(idx<0) continue;
+    return line.slice(idx+1).trim().replace(/\\n/g,' ').replace(/\\,/g,',').replace(/\\\\/g,'\\');
+  }
+  return '';
 }
 function icsWhen(raw){
   if(!raw) return null;
@@ -8700,50 +8707,102 @@ function importIcsText(text, source){
     return { ok:false, message:'That is not a calendar file. Download the file that ends in .ics, then tap Upload calendar file.' };
   }
   if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
+  if(!Array.isArray(state.classes)) state.classes=[];
   const tag = source || 'ics-file';
-  state.classes = (state.classes||[]).filter(c=>c.source!==tag);
+  state.classes = state.classes.filter(c=>c.source!==tag);
   state.studyBlocks = state.studyBlocks.filter(b=>b.source!==tag);
   const parts = raw.split('BEGIN:VEVENT');
   let added = 0;
   const seen={};
+  const focusDates=[];
+  const today=todayStr();
+  function remember(ds){ if(ds) focusDates.push(ds); }
+  function pushBlock(date, start, end, summary, loc, allDay){
+    const key=date+'|'+(allDay?'all':start)+'|'+summary.toLowerCase();
+    if(seen[key]) return;
+    seen[key]=1;
+    state.studyBlocks.push({
+      id:uid(), date:date, start:allDay?'':(start||'09:00'), end:allDay?'':(end||''),
+      label:summary, meetingUrl:'', room:loc||'', source:tag, allDay:!!allDay
+    });
+    added++;
+    remember(date);
+  }
+  function pushWeekly(summary, loc, start, end, day, semStart, semEnd){
+    const key='w|'+day+'|'+(start||'')+'|'+summary.toLowerCase();
+    if(seen[key]) return;
+    seen[key]=1;
+    state.classes.push({
+      id:uid(), title:summary, day:day, start:start||'09:00', end:end||'', room:loc||'',
+      textbook:'', meetingUrl:'', scope:'semester', kind:'class', source:tag,
+      semStart:semStart||today, semEnd:semEnd||'', alarmMinutes:0
+    });
+    added++;
+    for(let i=0;i<21;i++){
+      const ds=icsAddDays(today, i);
+      if(mondayIndex(new Date(ds+'T12:00:00'))===day && (!semStart||ds>=semStart) && (!semEnd||ds<=semEnd)){
+        remember(ds); break;
+      }
+    }
+  }
   for(let i=1;i<parts.length;i++){
     const block = parts[i].split('END:VEVENT')[0];
     if(/STATUS[^:\n]*:CANCELLED/i.test(block)) continue;
     const summary = (icsProp(block,'SUMMARY') || 'Busy').slice(0,140);
     const loc = icsProp(block,'LOCATION');
-    const start = icsWhen(icsProp(block,'DTSTART') || (block.match(/DTSTART[^:\n]*:([^\n]+)/i)||[])[1]);
+    const start = icsWhen(icsProp(block,'DTSTART'));
     if(!start || !start.date) continue;
     const endWhen = icsWhen(icsProp(block,'DTEND'));
-    let end = (endWhen && endWhen.start && !start.allDay) ? endWhen.start : (start.allDay ? '23:59' : '');
-    if(!end && start.start){
+    let end = (endWhen && !start.allDay && endWhen.start) ? endWhen.start : '';
+    if(!start.allDay && !end && start.start){
       const bits = start.start.split(':').map(Number);
       const mins = (bits[0]*60+(bits[1]||0)+60)%(24*60);
       end = String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0');
     }
-    const instances=icsInstances(block, start, end||'23:59');
-    instances.forEach(function(inst){
-      const key=inst.date+'|'+(inst.start||'')+'|'+summary.toLowerCase();
-      if(seen[key]) return;
-      seen[key]=1;
-      state.studyBlocks.push({
-        id:uid(), date:inst.date, start:inst.start||'00:00', end:inst.end||'23:59',
-        label:summary, meetingUrl:'', room:loc||'', source:tag
-      });
-      added++;
+    const rrule=icsProp(block,'RRULE');
+    const freq=(rrule.match(/FREQ=([A-Z]+)/i)||[])[1]||'';
+    const interval=Math.max(1, Number((rrule.match(/INTERVAL=(\d+)/i)||[])[1]||1));
+    const untilM=rrule.match(/UNTIL=([^;]+)/i);
+    const until=untilM?icsWhen(untilM[1]):null;
+    const byRaw=(rrule.match(/BYDAY=([^;]+)/i)||[])[1]||'';
+    const map={MO:0,TU:1,WE:2,TH:3,FR:4,SA:5,SU:6};
+    const days=byRaw?byRaw.split(',').map(function(x){ const k=String(x).replace(/[^A-Z]/gi,'').slice(-2).toUpperCase(); return map[k]; }).filter(function(v){ return v!=null; }):[];
+    if(freq==='WEEKLY' && interval===1){
+      const useDays=days.length?days:[mondayIndex(new Date(start.date+'T12:00:00'))];
+      useDays.forEach(function(day){ pushWeekly(summary, loc, start.allDay?'09:00':start.start, end, day, start.date, until&&until.date?until.date:''); });
+      continue;
+    }
+    if(start.allDay){
+      let last=start.date;
+      if(endWhen && endWhen.date && endWhen.date>start.date) last=icsAddDays(endWhen.date, -1);
+      let ds=start.date, n=0;
+      while(ds<=last && n<21){ pushBlock(ds, '', '', summary, loc, true); ds=icsAddDays(ds,1); n++; }
+      continue;
+    }
+    const instances=icsInstances(block, start, end||'23:59').filter(function(inst){
+      return inst.date>=icsAddDays(today,-21) && inst.date<=icsAddDays(today,120);
+    }).slice(0,40);
+    (instances.length?instances:[{date:start.date, start:start.start, end:end}]).forEach(function(inst){
+      pushBlock(inst.date, inst.start, inst.end, summary, loc, false);
     });
   }
   if(!added) return { ok:false, message:'The file opened, but SnapBack found no events in it.' };
-  state.calRef = todayStr();
-  state.selectedDay = todayStr();
+  focusDates.sort();
+  const upcoming=focusDates.filter(function(d){ return d>=today; });
+  const show=upcoming[0] || focusDates[focusDates.length-1] || today;
+  state.calRef = show;
+  state.selectedDay = show;
   state.calMode = 'month';
   state.view = 'calendar';
   state.calNote = '';
   state.lastUpload = [];
-  calendarBrowsing = false;
+  calendarBrowsing = String(show).slice(0,7)!==today.slice(0,7);
   if(!state.schedOpen) state.schedOpen={glance:true};
   state.schedOpen.glance = true;
+  state._icsImportGuard = Date.now()+8000;
   try{ saveState(); }catch(e){}
-  return { ok:true, added:added, first:'Uploaded.' };
+  const when = new Date(show+'T12:00:00').toLocaleDateString(undefined,{day:'numeric', month:'short', year:'numeric'});
+  return { ok:true, added:added, first:'Brought in '+added+'. Showing '+when+'.' };
 }
 function parseICS(text){
   return [];
@@ -8766,7 +8825,7 @@ function importICSFile(file){
       }
       const result = importIcsText(text, 'ics-file');
       if(!result.ok){ showAppMessage('Calendar not imported', result.message); return; }
-      showAppMessage('Uploaded', 'Uploaded.');
+      showAppMessage('Calendar copied', result.first||'Uploaded.');
       try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
     }catch(e){
       console.error(e);
