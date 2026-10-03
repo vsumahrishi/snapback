@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="292">
+<meta name="snapback-build" content="293">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -11662,7 +11662,7 @@ function viewHabits(){
     </table></div>
   `)}
   ${habitSec('nudges','Nudges', `
-    <p style="font-size:.9rem;margin-top:0">Yes means SnapBack asks you. No means it stays quiet.</p>
+    <p style="font-size:.9rem;margin-top:0">Click Yes for a Nudge.</p>
     ${nudgeRow('exercise','Exercise')}
     ${nudgeRow('meal','Meal')}
     ${nudgeRow('water','Hydrate')}
@@ -11792,20 +11792,11 @@ const TECH_CARDS=[
 ];
 const FAQ_ITEMS=[
   {q:'I may miss a due date. What do I do?', a:'Challenges → I am afraid I will miss a due date → Deadline helper. It asks where you are, then offers one step: a rough version, 15 minutes with no editing, the late-penalty rule, a short extension note with a specific date, an earlier hard stop, working beside someone, one tiny step, or checking whether the college allows flexible deadlines.'},
-  {q:'What is Must-do?', a:'A task that should happen today. Several tasks can be Must-do. They show on Today under Must do.'},
-  {q:'What is a Frog?', a:'The one task to do first. “Eat the frog” means start with the hardest or most important item so the rest feels easier. Only treat one task as the Frog. A task can be both Must-do and the Frog: it belongs today, and you start with it.'},
+  {q:'What is Must-do?', a:'A task that should happen today. Several tasks can be Must-do. They show on Today under Must do. To set one: open the task, tap More, then Move to Must-do. Or open Challenges → Must-do & Frog, choose a task you already created, and tap Mark as Must-do.'},
+  {q:'What is a Frog?', a:'The one task to do first. “Eat the frog” means start with the hardest or most important item so the rest feels easier. Only one task should be the Frog. A task can be both Must-do and the Frog: it belongs today, and you start with it. To set one: open the task, tap More, then Mark as Frog. Or open Challenges → Must-do & Frog, choose the task, and tap Mark as Frog or Must-do + Frog.'},
   {q:'What is a Non-negotiable?', a:'The one thing on Focus Plate that you will not drop today, even if the rest of the plate slips. It is not the same as Frog. Frog is which task you start with. Non-negotiable is the one you refuse to skip.'},
   {q:'What is Backburner?', a:'A place to park a task you are not doing today. It is not deleted. From Challenges → Everything feels like too much → Backburner, choose an existing task and tap Move to Backburner.'},
-  {q:'How do I mark Must-do or Frog?', a:'Challenges → the matching path → Must-do & Frog. Choose a task you already created, then tap Mark as Must-do, Mark as Frog, or both. You can also use More on a task card.'},
-  {q:'How do I break a big assignment into steps?', a:'Open Bite Size from Challenges or Techniques. Choose the task. The text fills in. Add small steps, or use Ask AI. Keep a step under about 15 minutes.'},
-  {q:'How do I set Nudge?', a:'Open Nudge in the side menu. Set a time and either one date or at least one day, then Save Nudge. When it rings, a short math problem stops it. On the Android app it can ring when the phone is locked. On the website or iPhone it only rings while SnapBack is open. A task can also say Nudge me that morning or the day before. A class can say Nudge me 15 minutes before. Those use the same Nudge.'},
-  {q:'Why did Nudge not ring with the phone locked?', a:'The website cannot do that. Use the Android app, allow notifications and alarms, then save Nudge again. Or set the same time in the phone Clock app.'},
-  {q:'How do I see my week?', a:'Plan → Schedule. Use Day, Week, Columns, or Month. Tap an event to edit it. Tap Add on a day, or a time in Day view, to create one.'},
-  {q:'How do I add many classes at once?', a:'Plan → Schedule → Quick add. Type lines, paste a timetable, or upload a screenshot, then Read screenshot. Edit the text. Tap Check what I read, then Yes — save. Cancel adds nothing.'},
-  {q:'How do I bring in Google or Outlook?', a:'Plan → Schedule → Bring in my calendar. Sign in with Google, or download a calendar file (.ics) and tap Upload calendar file. This copies events into SnapBack. It does not change Google or Outlook.'},
-  {q:'How do laptop and phone stay together?', a:'Sign in with the same Google account on both. A username stays on that one device only and does not appear on the other.'},
-  {q:'Will I lose my work?', a:'Sign in with Google and your work is kept. You can also download a backup file from Settings → Backup.'},
-  {q:'What is Focus Plate?', a:'A limit for today: 1 big thing, 3 medium, 5 small, and one Non-negotiable. Everything else waits.'}
+  {q:'Will I lose my work?', a:'Sign in with Google and your work is kept. You can also download a backup file from Settings → Backup.'}
 ];
 
 /* ============================================================
@@ -12004,16 +11995,32 @@ function viewHelp(){
   ${helpBox('how','How do I…', `
     <details class="faqitem"><summary>Open the website and sign in</summary>
       <p>Website: open <a href="${escapeHtml(getPublicWebUrl())}" target="_blank" rel="noopener">${escapeHtml(getPublicWebUrl())}</a>.</p>
-      <p>Phone: install the SnapBack app. Sign in with the same Gmail on both.</p>
+      <p>Phone: install the SnapBack app. Sign in with the same Gmail on the phone and on the laptop. A username stays on that one device only.</p>
     </details>
     <details class="faqitem"><summary>Set Nudge</summary>
       <p>Open Nudge in the side menu. Set a time and a date or a day, then Save Nudge. A short math problem stops it. On a task, choose Nudge me: that morning, the day before, or not at all. On a class, tick Nudge me 15 minutes before.</p>
     </details>
+    <details class="faqitem"><summary>Turn on notifications on the phone</summary>
+      <p>This is in the phone’s own Settings, not inside SnapBack.</p>
+      <p>1. Settings → Apps → SnapBack → Notifications → Allow notifications.</p>
+      <p>2. Settings → Apps → Special app access → Alarms & reminders → SnapBack → Allow.</p>
+      <p>3. Settings → Apps → SnapBack → Battery → Unrestricted, so the phone does not stop the alarm.</p>
+      <p>Then open SnapBack → Nudge and tap Save Nudge again.</p>
+    </details>
     <details class="faqitem"><summary>Bring in Google or Outlook</summary>
-      <p>Plan → Schedule → Bring in my calendar. Sign in with Google, or download a calendar file and tap Upload calendar file.</p>
+      <p>Plan → Schedule → Bring in my calendar. Sign in with Google, or download a calendar file (.ics) and tap Upload calendar file. This copies events into SnapBack. It does not change Google or Outlook.</p>
+    </details>
+    <details class="faqitem"><summary>See my week</summary>
+      <p>Plan → Schedule. Use Day, Week, Columns, or Month. Tap an event to edit it. Tap Add on a day, or a time in Day view, to create one.</p>
+    </details>
+    <details class="faqitem"><summary>Add many classes at once</summary>
+      <p>Plan → Schedule → Quick add. Type lines, paste a timetable, or upload a screenshot, then Read screenshot. Edit the text. Tap Check what I read, then Yes — save. Cancel adds nothing.</p>
+    </details>
+    <details class="faqitem"><summary>Break a big assignment into steps</summary>
+      <p>Open Bite Size from Challenges or Techniques. Choose the task. The text fills in. Add small steps, or use Ask AI. Keep a step under about 15 minutes.</p>
     </details>
   `)}
-  ${helpBox('parts','What each part does', ORG_CARDS.map(c=>`<div class="techcard">
+  ${helpBox('parts','About each page', ORG_CARDS.map(c=>`<div class="techcard">
       <div class="tc-head"><span class="tc-ico">${c.ico}</span><div class="tc-name">${c.name}</div></div>
       <p style="color:var(--pine);font-weight:600">${c.benefit}</p>
       <p>${c.how.map(h=>'&#8226; '+h).join('<br>')}</p>
