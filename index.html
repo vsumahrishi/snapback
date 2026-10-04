@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="301">
+<meta name="snapback-build" content="305">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -104,6 +104,7 @@ h1{font-size:1.6rem}
 
 label{font-size:.77rem;color:var(--muted);font-weight:600;display:block;margin-bottom:4px}
 input,select,textarea{width:100%;padding:9px 11px;border-radius:10px;border:1px solid var(--line);background:var(--input-bg);font:inherit;font-size:.9rem;color:var(--ink)}
+input[type="checkbox"],input[type="radio"]{width:auto;padding:0;margin:0 8px 0 0;vertical-align:middle;flex:0 0 auto}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-offset:1px;border-color:var(--pine)}
 .field{margin-bottom:9px}
 .row{display:flex;gap:9px;flex-wrap:wrap}
@@ -3853,29 +3854,48 @@ function saveWakeAlarmFromForm(){
     const tm = document.getElementById('wakeTime');
     const snd = document.getElementById('wakeSoundSelect');
     const once = document.getElementById('wakeOnceDate');
-    state.wakeAlarm.enabled = true;
-    state.wakeAlarm.time = (tm && tm.value) ? tm.value : (state.wakeAlarm.time || '07:00');
-    state.wakeAlarm.onceDate = (once && once.value) ? once.value : '';
-    if(snd && snd.value && state.wakeAlarm.alert!=='silent'){
-      state.wakeAlarm.sound = snd.value;
-      if(!state.settings) state.settings={};
-      state.settings.alarmSound = snd.value;
-    }
-    const mathEl=document.getElementById('wakeMathOn');
-    state.wakeAlarm.math = !mathEl || mathEl.checked;
-    const alertEl=document.querySelector('input[name="wakeAlert"]:checked');
-    state.wakeAlarm.alert = alertEl && alertEl.value==='silent' ? 'silent' : 'regular';
+    const whenEl=document.querySelector('input[name="wakeWhen"]:checked');
+    const repeating = !!(whenEl && whenEl.value==='repeat');
     const days=[];
     for(let i=0;i<7;i++){
       const el=document.getElementById('wakeDay'+i);
       if(el && el.checked) days.push(i);
     }
-    // One-time date OR at least one weekday
-    if(!state.wakeAlarm.onceDate && !days.length){
-      showAppMessage('To set a Nudge, pick a date or a day.', '');
+    const editingId=state.nudgeEditId||'';
+    const mathEl=document.getElementById('wakeMathOn');
+    const alertEl=document.querySelector('input[name="wakeAlert"]:checked');
+    const item={
+      id: editingId || uid(),
+      enabled: true,
+      time: (tm && tm.value) ? tm.value : '07:00',
+      onceDate: repeating ? '' : ((once && once.value) ? once.value : todayStr()),
+      days: repeating ? days : [],
+      sound: (snd && snd.value) || 'chime',
+      math: !mathEl || mathEl.checked,
+      alert: alertEl && alertEl.value==='silent' ? 'silent' : 'regular',
+      snoozesMax: 2,
+      snoozesLeft: 2
+    };
+    if(repeating && !days.length){
+      showAppMessage('Pick at least one day.', '');
       return;
     }
-    state.wakeAlarm.days = days;
+    if(!repeating && !item.onceDate){
+      showAppMessage('Pick a date.', '');
+      return;
+    }
+    ensureNudges();
+    if(editingId){
+      const idx=state.nudges.findIndex(function(n){ return String(n.id)===String(editingId); });
+      item.id=editingId;
+      if(idx>=0) state.nudges[idx]=item; else state.nudges.push(item);
+    } else {
+      state.nudges.push(item);
+    }
+    state.nudgeEditId='';
+    state.wakeAlarm=item;
+    if(!state.settings) state.settings={};
+    state.settings.alarmSound=item.sound;
     if(state.wakeAlarm.snoozesMax==null) state.wakeAlarm.snoozesMax=2;
     state.wakeAlarm.snoozesLeft = state.wakeAlarm.snoozesMax;
     persistRender();
@@ -3908,18 +3928,34 @@ function saveWakeAlarmFromForm(){
   }
 }
 
-function nextWakeDate(){
+function ensureNudges(){
+  if(!Array.isArray(state.nudges)) state.nudges=[];
   const wa=state.wakeAlarm;
-  if(!wa || !wa.enabled || !wa.time) return null;
+  if(wa && wa.enabled && !state.nudges.length && (wa.onceDate || (Array.isArray(wa.days) && wa.days.length))){
+    state.nudges.push({
+      id: wa.id || uid(),
+      enabled: true,
+      time: wa.time || '07:00',
+      onceDate: wa.onceDate || '',
+      days: Array.isArray(wa.days) ? wa.days.slice() : [],
+      sound: wa.sound || (state.settings && state.settings.alarmSound) || 'chime',
+      math: wa.math!==false,
+      alert: wa.alert || 'regular',
+      snoozesMax: wa.snoozesMax || 2,
+      snoozesLeft: wa.snoozesLeft || 2
+    });
+  }
+}
+function nextForNudge(wa){
+  if(!wa || wa.enabled===false || !wa.time) return null;
   const parts=(wa.time||'07:00').split(':');
   const hh=parseInt(parts[0],10)||0, mm=parseInt(parts[1],10)||0;
-  // One-time date
   if(wa.onceDate){
     const d=new Date(wa.onceDate+'T12:00:00');
     if(!isNaN(d.getTime())){
       d.setHours(hh, mm, 0, 0);
       if(d.getTime() > Date.now()+2000) return d;
-      return null; // past
+      return null;
     }
   }
   const days = Array.isArray(wa.days) ? wa.days : [];
@@ -3936,6 +3972,16 @@ function nextWakeDate(){
   }
   return null;
 }
+function nextWakeDate(){
+  ensureNudges();
+  let best=null, bestN=null;
+  (state.nudges||[]).forEach(function(n){
+    const d=nextForNudge(n);
+    if(d && (!best || d.getTime()<best.getTime())){ best=d; bestN=n; }
+  });
+  if(bestN) state.wakeAlarm=Object.assign({enabled:true}, bestN);
+  return best;
+}
 
 function scheduleWakeAlarms(){
   try{
@@ -3947,6 +3993,7 @@ function scheduleWakeAlarms(){
   if(ms<1000 || ms>14*24*3600*1000) return;
   _wakeCheckTimer = setTimeout(function(){
     _wakeCheckTimer=null;
+    try{ nextWakeDate(); }catch(e){}
     try{ triggerWakeMath('scheduled'); }catch(e){ console.warn(e); }
     try{ scheduleWakeAlarms(); }catch(e){}
   }, ms);
@@ -4753,6 +4800,25 @@ function renderModal(){
     document.getElementById('seriesCancel').onclick=function(){ seriesChoice('cancel'); };
     return;
   }
+  if(state.calTwins && state.calTwins.length && !state.dayPop){
+    const t=state.calTwins[0];
+    const when=prettyDate(t.a.date)||t.a.date;
+    const clock=(t.a.start||'')+(t.a.end?('–'+t.a.end):'');
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:440px;text-align:left">
+      <div style="font-weight:800;font-size:1.05rem;margin-bottom:8px">Which one do you want to keep?</div>
+      <p style="margin:0 0 12px">${escapeHtml(when)}${clock?' · '+escapeHtml(clock):''}</p>
+      <p style="margin:0 0 12px;color:var(--muted);font-size:.9rem">These look like the same appointment. SnapBack will not choose for you.</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn" id="twinA" type="button">${escapeHtml(t.a.title||'First')}</button>
+        <button class="btn" id="twinB" type="button">${escapeHtml(t.b.title||'Second')}</button>
+        <button class="btn ghost" id="twinBoth" type="button">Keep both</button>
+      </div>
+    </div></div>`;
+    document.getElementById('twinA').onclick=function(){ keepTwin('a'); };
+    document.getElementById('twinB').onclick=function(){ keepTwin('b'); };
+    document.getElementById('twinBoth').onclick=function(){ keepTwin('both'); };
+    return;
+  }
   if(state.calClashes && state.calClashes.length && !state.dayPop){
     const c=state.calClashes[0];
     const when=prettyDate(c.date);
@@ -4762,18 +4828,20 @@ function renderModal(){
       <p style="margin:0 0 8px">${escapeHtml(when)}${clock?' · '+escapeHtml(clock):''}</p>
       <p style="margin:0 0 4px">Already in SnapBack: <b>${escapeHtml(c.oldTitle||'')}</b></p>
       <p style="margin:0 0 12px">From the calendar file: <b>${escapeHtml(c.newTitle||'')}</b></p>
-      <p style="margin:0 0 12px;color:var(--muted);font-size:.9rem">Edit either appointment, or keep both.</p>
+      <p style="margin:0 0 12px;color:var(--muted);font-size:.9rem">Choose what to do with each appointment.</p>
       <div style="display:flex;flex-direction:column;gap:8px">
         <button class="btn" id="clashOld" type="button">Edit the SnapBack appointment</button>
+        <button class="btn ghost" id="clashOldDel" type="button">Delete the SnapBack appointment</button>
         <button class="btn ghost" id="clashNew" type="button">Edit the imported appointment</button>
+        <button class="btn ghost" id="clashNewDel" type="button">Delete the imported appointment</button>
         <button class="btn ghost" id="clashKeep" type="button">Keep both</button>
-        <button class="btn ghost" id="clashKeepAll" type="button">Keep both for the rest</button>
       </div>
     </div></div>`;
     document.getElementById('clashOld').onclick=function(){ clashEdit('old'); };
     document.getElementById('clashNew').onclick=function(){ clashEdit('new'); };
+    document.getElementById('clashOldDel').onclick=function(){ clashDelete('old'); };
+    document.getElementById('clashNewDel').onclick=function(){ clashDelete('new'); };
     document.getElementById('clashKeep').onclick=function(){ state.calClashes=state.calClashes.slice(1); persistRender(); };
-    document.getElementById('clashKeepAll').onclick=function(){ state.calClashes=[]; persistRender(); };
     return;
   }
   if(state.dayPop){
@@ -5413,7 +5481,7 @@ function cloudDocRef(){
   return userDocRef() || legacySyncDocRef();
 }
 function syncPayloadFromState(){
-  const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm','projects','bodyDouble','whenThen','techniqueTaskId','filter','listMode','audience','playlist','player','semester'];
+  const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm','nudges','projects','bodyDouble','whenThen','techniqueTaskId','filter','listMode','audience','playlist','player','semester'];
   const payload = {};
   keys.forEach(k=>{ if(state[k]!==undefined) payload[k]=state[k]; });
   payload.updatedAt = new Date().toISOString();
@@ -5428,7 +5496,7 @@ function applyCloudPayload(payload){
   if(state._icsImportGuard && Date.now() < state._icsImportGuard) return;
   if(state._calEditGuard && Date.now() < state._calEditGuard) return;
   _syncApplying = true;
-  const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm'];
+  const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm','nudges'];
   keys.forEach(k=>{ if(payload[k]!==undefined) state[k]=payload[k]; });
   saveState();
   _syncApplying = false;
@@ -8747,26 +8815,77 @@ function classCoversDate(c, dateStr){
   if(Array.isArray(c.exdates) && c.exdates.indexOf(dateStr)>=0) return false;
   return true;
 }
-function compactDuplicateEvents(){
-  const seenB={};
-  state.studyBlocks=(state.studyBlocks||[]).filter(b=>{
-    b.label=cleanCalTitle(b.label);
-    const k=(b.date||'')+'|'+(String(b.start||'').slice(0,5))+'|'+calTitleKey(b.label);
-    if(seenB[k]) return false;
-    seenB[k]=1;
-    return true;
+function meetingKey(s){
+  let t=cleanCalTitle(s);
+  t=t.replace(/\s*[·•|]\s*(microsoft teams meeting|teams meeting|zoom meeting|google meet).*$/i,'').trim();
+  t=t.replace(/\b(microsoft teams meeting|teams meeting|zoom meeting|google meet)\b/ig,'').trim();
+  t=t.replace(/^[A-Z]{2,5}\s+/,'');
+  const parts=t.toLowerCase().split(/\s*\/\s*/).map(function(p){ return p.trim(); }).filter(Boolean).sort();
+  return parts.join(' / ');
+}
+function queueTwinChoices(){
+  const groups={};
+  function add(date, start, end, title, kind, id){
+    const key=meetingKey(title);
+    if(!key || !date) return;
+    const g=date+'|'+String(start||'').slice(0,5)+'|'+key;
+    if(!groups[g]) groups[g]=[];
+    groups[g].push({date:date, start:start||'', end:end||'', title:title, kind:kind, id:id});
+  }
+  (state.studyBlocks||[]).forEach(function(b){ add(b.date, b.start, b.end, b.label, 'block', b.id); });
+  (state.classes||[]).forEach(function(c){
+    for(let i=0;i<28;i++){
+      const ds=icsAddDays(todayStr(), i);
+      if(!classCoversDate(c, ds)) continue;
+      add(ds, c.start, c.end, c.title, 'class', c.id);
+      break;
+    }
   });
-  const seenC={};
-  state.classes=(state.classes||[]).filter(c=>{
-    c.title=cleanCalTitle(c.title);
-    const k=String(c.day)+'|'+(String(c.start||'').slice(0,5))+'|'+calTitleKey(c.title);
-    if(seenC[k]) return false;
-    seenC[k]=1;
-    return true;
+  const skip=state.calTwinSkip||{};
+  const pairs=[];
+  Object.keys(groups).forEach(function(g){
+    const uniq=[];
+    const seen={};
+    groups[g].forEach(function(it){
+      const idk=it.kind+':'+it.id;
+      if(seen[idk]) return;
+      seen[idk]=1;
+      uniq.push(it);
+    });
+    if(uniq.length<2) return;
+    const names={};
+    uniq.forEach(function(it){ names[String(it.title||'')]=1; });
+    if(Object.keys(names).length<2) return;
+    const sig=g+'|'+uniq.map(function(it){ return it.id; }).join(',');
+    if(skip[sig]) return;
+    pairs.push({sig:sig, a:uniq[0], b:uniq[1], extra:uniq.slice(2)});
   });
-  state.studyBlocks=(state.studyBlocks||[]).filter(b=>{
-    return !(state.classes||[]).some(c=>classCoversDate(c, b.date) && calTitleKey(c.title)===calTitleKey(b.label) && String(c.start||'').slice(0,5)===String(b.start||'').slice(0,5));
-  });
+  state.calTwins=pairs.slice(0,8);
+}
+function dropCalById(kind, id){
+  if(id==null) return;
+  if(kind==='class') state.classes=(state.classes||[]).filter(function(c){ return String(c.id)!==String(id); });
+  else if(kind==='external') state.externalBusy=(state.externalBusy||[]).filter(function(b){ return String(b.id)!==String(id); });
+  else state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return String(b.id)!==String(id); });
+}
+function keepTwin(which){
+  const t=(state.calTwins||[])[0];
+  if(!t){ state.calTwins=[]; persistRender(); return; }
+  markCalEdit();
+  if(which==='both'){
+    if(!state.calTwinSkip) state.calTwinSkip={};
+    state.calTwinSkip[t.sig]=1;
+  } else {
+    const drop=which==='a'?t.b:t.a;
+    dropCalById(drop.kind, drop.id);
+    (t.extra||[]).forEach(function(it){
+      if(String(it.id)!==String((which==='a'?t.a:t.b).id)) dropCalById(it.kind, it.id);
+    });
+  }
+  state.calTwins=(state.calTwins||[]).slice(1);
+  if(!state.calTwins.length){ try{ queueTwinChoices(); }catch(e){} }
+  try{ saveState(); }catch(e){}
+  persistRender();
 }
 function makeGrade8Math(){
   const kind=Math.floor(Math.random()*4);
@@ -9004,8 +9123,6 @@ function importIcsText(text, source){
   if(!state.schedOpen) state.schedOpen={};
   state.schedOpen.glance = true;
   state._icsImportGuard = Date.now()+8000;
-  try{ compactDuplicateEvents(); }catch(e){}
-  state._calCompacted=true;
   const before=state.icsUndo||{classes:[], studyBlocks:[]};
   const clashes=[];
   function oldAt(date){
@@ -9041,14 +9158,14 @@ function importIcsText(text, source){
       break;
     }
   });
-  state.calClashes=clashes;
+  state.calClashes=clashes.filter(function(c){
+    const oldOk=(state.studyBlocks||[]).some(function(b){ return String(b.id)===String(c.oldId); }) || (state.classes||[]).some(function(x){ return String(x.id)===String(c.oldId) && classCoversDate(x, c.date); });
+    const newOk=(state.studyBlocks||[]).some(function(b){ return String(b.id)===String(c.newId); }) || (state.classes||[]).some(function(x){ return String(x.id)===String(c.newId); });
+    return oldOk && newOk;
+  });
   try{ saveState(); }catch(e){}
-  const list=Object.keys(names);
-  let message = list.length===1
-    ? '“'+list[0]+'” is on the schedule. Tap a day to open it.'
-    : list.length+' appointments are on the schedule. Tap a day to open it.';
-  if(clashes.length) message+=' Where a different appointment was already at that time, SnapBack will ask which one to edit.';
-  return { ok:true, added:added, first:message };
+  try{ queueTwinChoices(); }catch(e){}
+  return { ok:true, added:added, first:'Calendar uploaded.' };
 }
 function parseICS(text){
   return [];
@@ -9569,6 +9686,33 @@ function closeDayPop(){
   state.seriesAsk=null;
   persistRender();
 }
+function removeNamedOnDate(kind, id, date, title, start){
+  markCalEdit();
+  if(id){
+    state.studyBlocks=(state.studyBlocks||[]).filter(b=>String(b.id)!==String(id));
+    state.externalBusy=(state.externalBusy||[]).filter(b=>String(b.id)!==String(id));
+    const c=(state.classes||[]).find(x=>String(x.id)===String(id));
+    if(c){
+      if(c.scope==='session' || (c.date && c.date===date)){
+        state.classes=(state.classes||[]).filter(x=>String(x.id)!==String(id));
+      } else {
+        if(!Array.isArray(c.exdates)) c.exdates=[];
+        if(date && c.exdates.indexOf(date)<0) c.exdates.push(date);
+      }
+    }
+  }
+  if(title && date) dropCopiesOnDate(date, title, start);
+}
+function clashDelete(which){
+  const c=(state.calClashes||[])[0];
+  if(!c){ state.calClashes=[]; persistRender(); return; }
+  if(which==='old') removeNamedOnDate(c.oldKind, c.oldId, c.date, c.oldTitle, c.oldStart);
+  else removeNamedOnDate(c.newKind, c.newId, c.date, c.newTitle, c.start);
+  state.calClashes=(state.calClashes||[]).slice(1);
+  state.dayPop=null;
+  state.calDraft=null;
+  persistRender();
+}
 function clashEdit(which){
   const c=(state.calClashes||[])[0];
   if(!c){ state.calClashes=[]; persistRender(); return; }
@@ -9654,22 +9798,22 @@ function sameCalTime(a,b){
   return String(a).slice(0,5)===String(b).slice(0,5);
 }
 function dropCopiesOnDate(date, title, start){
-  const lab=normCalTitle(title);
+  const lab=calTitleKey(title);
   (state.classes||[]).forEach(c=>{
-    if(normCalTitle(c.title)!==lab) return;
+    if(calTitleKey(c.title)!==lab) return;
     if(!sameCalTime(c.start, start)) return;
     if(!Array.isArray(c.exdates)) c.exdates=[];
     if(c.exdates.indexOf(date)<0) c.exdates.push(date);
   });
   state.studyBlocks=(state.studyBlocks||[]).filter(b=>{
     if(b.date!==date) return true;
-    if(normCalTitle(b.label)!==lab) return true;
+    if(calTitleKey(b.label)!==lab) return true;
     if(!sameCalTime(b.start, start)) return true;
     return false;
   });
   state.externalBusy=(state.externalBusy||[]).filter(b=>{
     if(b.date!==date) return true;
-    if(normCalTitle(b.title||b.label)!==lab) return true;
+    if(calTitleKey(b.title||b.label)!==lab) return true;
     if(!sameCalTime(b.start, start)) return true;
     return false;
   });
@@ -9700,7 +9844,7 @@ function deleteCalFollowing(){
   const d=state.calDraft||{};
   const date=d.date||state.selectedDay||todayStr();
   const prev=icsAddDays(date,-1);
-  const lab=normCalTitle(d.title);
+  const lab=calTitleKey(d.title);
   markCalEdit();
   function endClass(c){
     if(!c || c._drop) return;
@@ -9710,19 +9854,19 @@ function deleteCalFollowing(){
   (state.classes||[]).forEach(c=>{
     if(d.kind==='class' && String(c.id)===String(d.id)) endClass(c);
     else if(d.seriesId && c.seriesId===d.seriesId) endClass(c);
-    else if(lab && normCalTitle(c.title)===lab && sameCalTime(c.start, d.start)) endClass(c);
+    else if(lab && calTitleKey(c.title)===lab && sameCalTime(c.start, d.start)) endClass(c);
   });
   state.classes=(state.classes||[]).filter(c=>!c._drop);
   state.studyBlocks=(state.studyBlocks||[]).filter(b=>{
     if(!b.date || b.date<date) return true;
     if(d.kind==='block' && String(b.id)===String(d.id)) return false;
     if(d.seriesId && b.seriesId===d.seriesId) return false;
-    if(lab && normCalTitle(b.label)===lab && sameCalTime(b.start, d.start)) return false;
+    if(lab && calTitleKey(b.label)===lab && sameCalTime(b.start, d.start)) return false;
     return true;
   });
   state.externalBusy=(state.externalBusy||[]).filter(b=>{
     if(!b.date || b.date<date) return true;
-    if(lab && normCalTitle(b.title||b.label)===lab && sameCalTime(b.start, d.start)) return false;
+    if(lab && calTitleKey(b.title||b.label)===lab && sameCalTime(b.start, d.start)) return false;
     return true;
   });
   state.calDraft=null;
@@ -9766,41 +9910,79 @@ function deleteCalDraft(){
     persistRender();
   }
 }
+function nudgeSection(key, title, inner){
+  if(!state.nudgeOpen) state.nudgeOpen={create:true, yours:true};
+  if(state.nudgeOpen[key]===undefined) state.nudgeOpen[key]=true;
+  const open=!!state.nudgeOpen[key];
+  return `<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
+    <button type="button" class="btn ghost" data-action="nudge-toggle" data-key="${key}" style="width:100%;text-align:left;border:none;border-radius:0;padding:14px 16px;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-weight:700">${title}</span><span>${open?'▾':'▸'}</span>
+    </button>
+    ${open?`<div style="padding:0 16px 16px">${inner}</div>`:''}
+  </div>`;
+}
 function viewNudge(){
   const native = (typeof isNativeApp==='function' && isNativeApp());
-  const wa = state.wakeAlarm||{};
+  ensureNudges();
   const labels={chime:'Chime',bell:'Bell',beep:'Beep',digital:'Digital',radar:'Radar',knock:'Wake burst'};
-  const curSound=(wa.sound)||(state.settings&&state.settings.alarmSound)||'chime';
-  return `
-  <div class="pagehead">
-    <h1>Nudge</h1>
-    <p>${native?'This rings when the phone is locked, after you allow alarms for SnapBack.':'On a laptop, or on iPhone, this rings only while SnapBack is open. The Android app can ring when the phone is locked.'}</p>
-  </div>
-  <div class="card">
+  const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const editing=state.nudgeEditId ? (state.nudges||[]).find(function(n){ return String(n.id)===String(state.nudgeEditId); }) : null;
+  const wa=editing||{};
+  const curSound=(editing&&editing.sound)||(state.settings&&state.settings.alarmSound)||'chime';
+  const now=new Date();
+  const nowClock=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  const savedRepeat=!!(editing && !editing.onceDate && (editing.days||[]).length);
+  const timeVal=editing ? (editing.time||nowClock) : nowClock;
+  const dateVal=editing ? (editing.onceDate||todayStr()) : todayStr();
+  const dayOn=function(i){ return !!(editing && (editing.days||[]).indexOf(i)>=0); };
+  const form=`
     <div style="font-size:.78rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase">Current time</div>
-    <div id="nudgeNowClock" style="font-size:2.1rem;font-weight:800;margin:2px 0 10px">--:--</div>
-    <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${escapeHtml(wa.time||'07:00')}"></div>
-    <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">The clock above is the time now. The time you set is when Nudge should ring.</p>
-    <div class="field" style="margin-top:8px"><label>One-time date</label><input type="date" id="wakeOnceDate" value="${escapeHtml(wa.onceDate||'')}"></div>
+    <div id="nudgeNowClock" style="font-size:2.1rem;font-weight:800;margin:2px 0 10px">${nowClock}</div>
+    <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${escapeHtml(timeVal)}"></div>
+    <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">The clock above is the time now. The time you set is when this Nudge should ring.</p>
+    <div style="margin-top:12px;font-weight:700">When</div>
+    <label style="display:flex;align-items:center;margin-top:8px"><input type="radio" name="wakeWhen" value="once" ${savedRepeat?'':'checked'}> One time</label>
+    <label style="display:flex;align-items:center;margin-top:6px"><input type="radio" name="wakeWhen" value="repeat" ${savedRepeat?'checked':''}> Repeat</label>
+    <div class="field" id="wakeOnceWrap" style="margin-top:8px;${savedRepeat?'display:none':''}"><label>Date</label><input type="date" id="wakeOnceDate" value="${escapeHtml(savedRepeat?'':dateVal)}"></div>
+    <div id="wakeRepeatWrap" style="${savedRepeat?'':'display:none'};margin-top:8px">
+      <div style="font-size:.85rem">Repeat on</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
+        ${dayNames.map((d,i)=>`<label style="display:flex;align-items:center;font-size:.82rem"><input type="checkbox" id="wakeDay${i}" ${dayOn(i)?'checked':''}> ${d}</label>`).join('')}
+      </div>
+    </div>
     <div class="field" style="margin-top:8px" id="wakeSoundWrap"><label>Sound</label>
       <select id="wakeSoundSelect">
         ${['chime','bell','beep','digital','radar','knock'].map(v=>`<option value="${v}" ${curSound===v?'selected':''}>${labels[v]||v}</option>`).join('')}
       </select>
     </div>
-    <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="wakeMathOn" ${wa.math===false?'':'checked'}> Ask a math problem to stop this Nudge</label>
-    <div style="margin-top:12px;font-size:.85rem">Notification</div>
-    <label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="radio" name="wakeAlert" value="regular" ${wa.alert==='silent'?'':'checked'}> Regular notification</label>
-    <label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="radio" name="wakeAlert" value="silent" ${wa.alert==='silent'?'checked':''}> Silent notification</label>
-    <div style="margin-top:10px;font-size:.85rem">Or repeat on</div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
-      ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label style="font-size:.82rem"><input type="checkbox" id="wakeDay${i}" ${(wa.days||[]).indexOf(i)>=0?'checked':''}> ${d}</label>`).join('')}
-    </div>
+    <label style="display:flex;align-items:center;margin-top:12px"><input type="checkbox" id="wakeMathOn" ${wa.math===false?'':'checked'}> Ask a math problem to stop this Nudge</label>
+    <div style="margin-top:12px;font-weight:700">Notification</div>
+    <label style="display:flex;align-items:center;margin-top:6px"><input type="radio" name="wakeAlert" value="regular" ${wa.alert==='silent'?'':'checked'}> Regular notification</label>
+    <label style="display:flex;align-items:center;margin-top:6px"><input type="radio" name="wakeAlert" value="silent" ${wa.alert==='silent'?'checked':''}> Silent notification</label>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;max-width:280px">
-      <button class="btn" id="saveWakeBtn" type="button">Save Nudge</button>
+      <button class="btn" id="saveWakeBtn" type="button">${editing?'Save changes':'Save Nudge'}</button>
       <button class="btn ghost" id="testWakeBtn" type="button">Preview</button>
-      ${wa.enabled?'<button class="btn ghost" id="turnOffWakeBtn" type="button">Turn off</button>':''}
-    </div>
-  </div>`;
+      ${editing?'<button class="btn ghost" type="button" data-action="nudge-cancel">Cancel</button>':''}
+    </div>`;
+  const rows=(state.nudges||[]).map(function(n){
+    const when=n.onceDate ? prettyDate(n.onceDate) : ((n.days||[]).map(function(i){ return dayNames[i]; }).join(', ')||'No days');
+    return `<div style="border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px">
+      <div style="font-weight:700">${escapeHtml(n.time||'')} · ${escapeHtml(when)}</div>
+      <div style="font-size:.85rem;color:var(--muted);margin:4px 0 8px">${n.alert==='silent'?'Silent notification':'Regular notification'} · ${n.math===false?'No math problem':'Math problem to stop it'}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn ghost sm" type="button" data-action="nudge-edit" data-id="${escapeHtml(n.id)}">Edit</button>
+        <button class="btn ghost sm" type="button" data-action="nudge-del" data-id="${escapeHtml(n.id)}">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+  const yours=rows || '<p style="margin:0;color:var(--muted)">No Nudges yet.</p>';
+  return `
+  <div class="pagehead">
+    <h1>Nudge</h1>
+    <p>${native?'This rings when the phone is locked, after you allow alarms for SnapBack.':'On a laptop, or on iPhone, this rings only while SnapBack is open. The Android app can ring when the phone is locked.'}</p>
+  </div>
+  ${nudgeSection('create', editing?'Edit Nudge':'Create a Nudge', form)}
+  ${nudgeSection('yours', 'Your Nudges', yours)}`;
 }
 let calendarBrowsing=false;
 function schedIsOpen(key){
@@ -9817,8 +9999,8 @@ function schedBox(key, title, inner){
   </div>`;
 }
 function viewCalendar(){
-  if(!state._calCompacted){
-    try{ compactDuplicateEvents(); state._calCompacted=true; saveState(); }catch(e){}
+  if(!state.calTwins || !state.calTwins.length){
+    try{ queueTwinChoices(); }catch(e){}
   }
   if(!calendarBrowsing){
     const tday=todayStr();
@@ -13870,6 +14052,32 @@ function wireView(){
       state[bag][key]=!state[bag][key];
       persistRender();
     });
+    else if(action==='nudge-toggle') el.addEventListener('click', ()=>{
+      if(!state.nudgeOpen) state.nudgeOpen={create:true, yours:true};
+      state.nudgeOpen[el.dataset.key]=!state.nudgeOpen[el.dataset.key];
+      persistRender();
+    });
+    else if(action==='nudge-edit') el.addEventListener('click', ()=>{
+      state.nudgeEditId=el.dataset.id;
+      if(!state.nudgeOpen) state.nudgeOpen={create:true, yours:true};
+      state.nudgeOpen.create=true;
+      persistRender();
+    });
+    else if(action==='nudge-cancel') el.addEventListener('click', ()=>{
+      state.nudgeEditId='';
+      persistRender();
+    });
+    else if(action==='nudge-del') el.addEventListener('click', ()=>{
+      state.nudges=(state.nudges||[]).filter(function(n){ return String(n.id)!==String(el.dataset.id); });
+      if(String(state.nudgeEditId)===String(el.dataset.id)) state.nudgeEditId='';
+      if(!(state.nudges||[]).length){
+        if(!state.wakeAlarm) state.wakeAlarm={};
+        state.wakeAlarm.enabled=false;
+      }
+      persistRender();
+      try{ scheduleWakeAlarms(); }catch(e){}
+      try{ if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms(); }catch(e){}
+    });
     else if(action==='ef-start') el.addEventListener('click', ()=>{
       if(!state.energyFocus) state.energyFocus={items:[], timerSec:600};
       const idx=Number(el.dataset.idx);
@@ -15177,6 +15385,70 @@ function wireView(){
       if(!from||!to) return;
       state.flipScripts.push({from, to, id:uid()});
       persistRender();
+    });
+  }
+
+  if(state.view==='nudge'){
+    try{
+      const clock=document.getElementById('nudgeNowClock');
+      if(clock){
+        const paint=function(){
+          const d=new Date();
+          clock.textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')+':'+String(d.getSeconds()).padStart(2,'0');
+        };
+        paint();
+        if(window.__nudgeClockTimer) clearInterval(window.__nudgeClockTimer);
+        window.__nudgeClockTimer=setInterval(paint, 1000);
+      }
+    }catch(e){}
+    function syncWakeAlertUi(){
+      const sel=document.querySelector('input[name="wakeAlert"]:checked');
+      const wrap=document.getElementById('wakeSoundWrap');
+      if(wrap) wrap.style.display = sel && sel.value==='silent' ? 'none' : '';
+      const when=document.querySelector('input[name="wakeWhen"]:checked');
+      const onceWrap=document.getElementById('wakeOnceWrap');
+      const repWrap=document.getElementById('wakeRepeatWrap');
+      const repeat=when && when.value==='repeat';
+      if(onceWrap) onceWrap.style.display=repeat?'none':'';
+      if(repWrap) repWrap.style.display=repeat?'':'none';
+    }
+    document.querySelectorAll('input[name="wakeAlert"],input[name="wakeWhen"]').forEach(function(el){ el.addEventListener('change', syncWakeAlertUi); });
+    syncWakeAlertUi();
+    const saveWake=document.getElementById('saveWakeBtn');
+    if(saveWake) saveWake.addEventListener('click', function(e){
+      e.preventDefault();
+      try{ saveWakeAlarmFromForm(); }catch(err){ showAppMessage('Save failed', String(err&&err.message||err)); }
+    });
+    const testWake=document.getElementById('testWakeBtn');
+    if(testWake) testWake.addEventListener('click', function(e){
+      e.preventDefault();
+      try{
+        if(!state.wakeAlarm) state.wakeAlarm={};
+        const alertEl=document.querySelector('input[name="wakeAlert"]:checked');
+        state.wakeAlarm.alert = alertEl && alertEl.value==='silent' ? 'silent' : 'regular';
+        const mathEl=document.getElementById('wakeMathOn');
+        state.wakeAlarm.math = !mathEl || !!mathEl.checked;
+        const snd=document.getElementById('wakeSoundSelect');
+        if(snd && snd.value) state.wakeAlarm.sound=snd.value;
+        triggerWakeMath('test');
+      }catch(err){ showAppMessage('Preview failed', String(err&&err.message||err)); }
+    });
+    const editN=document.getElementById('nudgeEditBtn');
+    if(editN) editN.addEventListener('click', function(){ state.nudgeEditing=true; persistRender(); });
+    const delN=document.getElementById('nudgeDeleteBtn');
+    if(delN) delN.addEventListener('click', function(){
+      if(!state.wakeAlarm) state.wakeAlarm={};
+      state.wakeAlarm.enabled=false;
+      state.nudgeEditing=false;
+      setPendingNudge(false);
+      try{ scheduleWakeAlarms(); }catch(err){}
+      try{ if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms(); }catch(err){}
+      try{
+        const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+        if(plug && plug.cancel) plug.cancel();
+      }catch(err){}
+      persistRender();
+      showAppMessage('Nudge deleted', 'It will not ring until you save a new one.');
     });
   }
 
