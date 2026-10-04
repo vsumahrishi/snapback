@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="309">
+<meta name="snapback-build" content="313">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4304,10 +4304,7 @@ function checkNotifications(){
   const today=todayStr();
   const dow=mondayIndex(new Date(today+'T12:00:00'));
   (state.classes||[]).forEach(c=>{
-    let applies=false;
-    if(c.scope==='session' && c.date===today) applies=true;
-    if(c.scope!=='session' && c.day===dow) applies=true;
-    if(!applies || !c.start) return;
+    if(!classCoversDate(c, today) || !c.start) return;
     const mins=(c.alarmMinutes!=null)?Number(c.alarmMinutes):15;
     if(!(mins>0)) return;
     const startAt=new Date(today+'T'+c.start+':00');
@@ -4620,10 +4617,8 @@ function renderModal(){
     const p=state.nudgePreview;
     root.innerHTML=`<div class="overlay"><div class="quotecard" style="text-align:center;max-width:380px">
       <div class="qeyebrow">Preview</div>
-      <div class="qtext" style="font-size:1.05rem;margin:8px 0 10px">This is only a sound check.</div>
-      <p style="margin:0 0 12px;color:var(--muted);font-size:.9rem">Nothing is saved. A Nudge you are setting is not stopped, and a saved Nudge is not deleted.</p>
-      ${p.silent?'<p style="margin:0 0 12px">Silent is selected, so there is no sound.</p>':''}
-      ${p.text?`<p style="margin:0 0 8px;font-size:.9rem">A real Nudge can ask a short math problem. Sample only:</p><div style="font-size:1.4rem;font-weight:800;margin:8px 0 12px">${escapeHtml(p.text)} = ?</div>`:''}
+      <p style="margin:8px 0 14px">${p.silent?'Silent notification. No sound.':'This is the sound. Nothing is saved yet.'}</p>
+      ${!p.silent && p.text?`<div style="font-size:1.3rem;font-weight:800;margin:0 0 14px">${escapeHtml(p.text)} = ?</div>`:''}
       <button class="btn" id="previewStop" type="button" style="width:100%">Stop preview</button>
     </div></div>`;
     document.getElementById('previewStop').onclick=stopNudgePreview;
@@ -4904,8 +4899,8 @@ function renderModal(){
       <p style="margin:0 0 12px">${escapeHtml(when)}${clock?' · '+escapeHtml(clock):''}${t.recurring?' · repeats':''}</p>
       <p style="margin:0 0 12px;color:var(--muted);font-size:.9rem">${t.recurring?'These look like the same repeating appointment. You will be asked once, not on every date.':'These look like the same appointment.'}</p>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <button class="btn" id="twinA" type="button">${escapeHtml(t.a.title||'First')}</button>
-        <button class="btn" id="twinB" type="button">${escapeHtml(t.b.title||'Second')}</button>
+        <button class="btn" id="twinA" type="button">${escapeHtml(apptSourceLabel(t.a))}</button>
+        <button class="btn" id="twinB" type="button">${escapeHtml(apptSourceLabel(t.b))}</button>
         <button class="btn ghost" id="twinBoth" type="button">Keep both</button>
       </div>
     </div></div>`;
@@ -7870,10 +7865,7 @@ function dayCommitments(dateStr, opts){
   const dow = mondayIndex(new Date(dateStr+'T12:00:00'));
   const rows = [];
   (state.classes||[]).forEach(c=>{
-    let show=false;
-    if(c.scope==='session') show = c.date===dateStr;
-    else show = c.day===dow && (!c.semStart || dateStr>=c.semStart) && (!c.semEnd || dateStr<=c.semEnd);
-    if(!show) return;
+    if(!classCoversDate(c, dateStr)) return;
     rows.push({time:c.start||'', end:c.end||'', title:c.title||'', room:c.room||'', kind:'class', meetingUrl:c.meetingUrl||''});
   });
   (state.studyBlocks||[]).filter(b=>b.date===dateStr).forEach(b=>{
@@ -7884,13 +7876,14 @@ function dayCommitments(dateStr, opts){
     const bits=[r.focus||'Exercise'];
     if(r.details) bits.push(r.details);
     if(r.km) bits.push(r.km+' km');
-    rows.push({time:r.start||'', end:r.end||'', title:bits.join(' · '), room:'', kind:'exercise'});
+    rows.push({time:r.start||'', end:r.end||'', title:bits.join(' · '), room:'', kind:'exercise', id:r.id, date:dateStr});
   });
   (state.externalBusy||[]).filter(ev=>ev.date===dateStr).forEach(ev=>{
-    rows.push({time:ev.allDay?'':(ev.start||''), end:ev.allDay?'':(ev.end||''), title:ev.title||'Busy', room:'', kind:'calendar'});
+    if(!ev.id) ev.id='ext_'+dateStr+'_'+(ev.start||'')+'_'+(ev.title||'');
+    rows.push({time:ev.allDay?'':(ev.start||''), end:ev.allDay?'':(ev.end||''), title:ev.title||'Busy', room:'', kind:'external', id:ev.id, date:dateStr});
   });
   if(!opts.skipTasks){
-    (state.tasks||[]).filter(t=>!t.done && t.date===dateStr && t.time).forEach(t=>{
+    (state.tasks||[]).filter(t=>!t.done && !t.exerciseId && t.date===dateStr && t.time).forEach(t=>{
       rows.push({time:t.time, end:'', title:t.title, room:'', kind:'task', id:t.id});
     });
   }
@@ -7910,22 +7903,26 @@ function commitmentRowsHtml(rows, emptyText){
   }).join('');
 }
 function viewToday(){
+  try{ clearExcludedCopies(); }catch(e){}
   try{ syncExerciseLinks(); }catch(e){}
   const needsName = !(state.profile && state.profile.name);
 
   const nn=state.nonNegotiable[todayStr()];
   const activeTasks=state.tasks.filter(t=>!t.done);
-  const mustToday=activeTasks.filter(t=>t.tier==='must');
-  const couldToday=activeTasks.filter(t=>t.tier!=='must').slice(0,8);
-  const deadlines=activeTasks.filter(t=>t.date).map(t=>({...t,du:daysUntil(t.date)})).sort((a,b)=>a.du-b.du).slice(0,6);
+  const workTasks=activeTasks.filter(t=>!t.exerciseId);
+  const mustToday=workTasks.filter(t=>t.tier==='must');
+  const couldToday=workTasks.filter(t=>t.tier!=='must').slice(0,8);
+  const taskDeadlines=workTasks.filter(t=>t.date).map(t=>({...t, du:daysUntil(t.date), kind:'task'}));
+  const projectDeadlines=(state.projects||[]).filter(p=>p && !p.archived && p.deadline).map(p=>({id:p.id, title:p.title||'Project', du:daysUntil(p.deadline), kind:'project'}));
+  const deadlines=taskDeadlines.concat(projectDeadlines).sort((a,b)=>a.du-b.du).slice(0,6);
   const todayDow=mondayIndex(new Date());
   const classesToday=state.classes.filter(c=>c.day===todayDow).sort((a,b)=>a.start.localeCompare(b.start));
-  const frogTasks=activeTasks.filter(t=>t.frog);
+  const frogTasks=workTasks.filter(t=>t.frog);
 
   const dlRow=(t)=>{
     const label = t.du<0 ? `${Math.abs(t.du)}d overdue` : t.du===0 ? 'Due today' : t.du===1 ? 'Due tomorrow' : `In ${t.du} days`;
     const cls = t.du<0 ? 'overdue' : t.du<=1 ? 'dueToday' : t.du<=3 ? 'medium' : 'low';
-    return `<button type="button" class="deadline-row" data-action="open-task-menu" data-id="${t.id}" style="width:100%;text-align:left;background:transparent;border:none;cursor:pointer"><span class="badge ${cls}">${label}</span><span style="flex:1">${escapeHtml(t.title)}</span></button>`;
+    return `<button type="button" class="deadline-row" data-action="${t.kind==='project'?'open-project':'open-task-menu'}" data-id="${t.id}" style="width:100%;text-align:left;background:transparent;border:none;cursor:pointer"><span class="badge ${cls}">${label}</span><span style="flex:1">${escapeHtml(t.title)}</span></button>`;
   };
 
   return `
@@ -8011,7 +8008,7 @@ function viewToday(){
 
     ${(()=>{
     const tom=tomorrowStr();
-    const tomTasks=state.tasks.filter(t=>!t.done && t.date===tom);
+    const tomTasks=state.tasks.filter(t=>!t.done && !t.exerciseId && t.date===tom);
     const tomClasses=(state.classes||[]).filter(c=>{
       try{ return c.day===mondayIndex(new Date(tom+'T12:00:00')); }catch(e){ return false; }
     }).sort((a,b)=>String(a.start).localeCompare(String(b.start)));
@@ -8176,7 +8173,7 @@ function taskCard(t){
   </li>`;
 }
 function openTasksForModes(){
-  return (state.tasks||[]).filter(t=>!t.done);
+  return (state.tasks||[]).filter(t=>!t.done && !t.exerciseId);
 }
 function tasksViewToolbar(){
   const mode=state.listMode||'all';
@@ -8202,7 +8199,7 @@ function viewTasks(){
     if(state.filter === 'done') state.filter = 'all';
   }
   // tasksPanel null → no list body shown (headers only)
-  let list=state.tasks||[];
+  let list=(state.tasks||[]).filter(t=>!t.exerciseId);
   const f=state.filter||'all';
   const q=(state.taskSearch||'').trim().toLowerCase();
   if(f==='today') list=list.filter(t=>t.date===todayStr() && !t.done);
@@ -8215,7 +8212,7 @@ function viewTasks(){
   else if(f==='frog') list=list.filter(t=>t.frog && !t.done);
   else if(f==='all' || !f) list=list.filter(t=>!t.done); // completed hidden by default
   // hide backburner from main list unless filter says so
-  if(f==='backburner') list=(state.tasks||[]).filter(t=>t.backburner && !t.done);
+  if(f==='backburner') list=(state.tasks||[]).filter(t=>t.backburner && !t.done && !t.exerciseId);
   else if(f!=='done') list=list.filter(t=>!t.backburner);
   // Completed date range (only when viewing completed)
   if(f==='done'){
@@ -8918,6 +8915,16 @@ function classCoversDate(c, dateStr){
   if(Array.isArray(c.exdates) && c.exdates.indexOf(dateStr)>=0) return false;
   return true;
 }
+function apptSourceLabel(it){
+  if(!it) return 'Appointment';
+  let rec=null;
+  if(it.kind==='class') rec=(state.classes||[]).find(function(x){ return String(x.id)===String(it.id); });
+  else if(it.kind==='task') rec=(state.tasks||[]).find(function(x){ return String(x.id)===String(it.id); });
+  else rec=(state.studyBlocks||[]).find(function(x){ return String(x.id)===String(it.id); });
+  const src=rec&&rec.source||'';
+  const fromFile=src==='ics-file'||src==='ics'||!!(rec&&rec.importBatch);
+  return (fromFile?'From the calendar file: ':'Already in SnapBack: ')+(it.title||'Appointment');
+}
 function meetingKey(s){
   let t=cleanCalTitle(s);
   t=t.replace(/\s*[·•|]\s*(microsoft teams meeting|teams meeting|zoom meeting|google meet).*$/i,'').trim();
@@ -8951,6 +8958,10 @@ function queueTwinChoices(){
       add({date:ds, start:c.start||'', end:c.end||'', title:c.title, kind:'class', id:c.id, seriesId:c.seriesId||''});
     }
   });
+  (state.tasks||[]).forEach(function(t){
+    if(t.done || !t.date || !t.time) return;
+    add({date:t.date, start:t.time||'', end:'', title:t.title, kind:'task', id:t.id, seriesId:''});
+  });
   const series={};
   Object.keys(bySlot).forEach(function(g){
     const uniq=[];
@@ -8962,9 +8973,6 @@ function queueTwinChoices(){
       uniq.push(it);
     });
     if(uniq.length<2) return;
-    const names={};
-    uniq.forEach(function(it){ names[String(it.title||'')]=1; });
-    if(Object.keys(names).length<2) return;
     const sample=uniq[0];
     const pk=meetingKey(sample.title)+'|'+String(sample.start||'').slice(0,5);
     if(!series[pk]) series[pk]={slots:[]};
@@ -8995,6 +9003,7 @@ function dropCalById(kind, id){
   if(id==null) return;
   if(kind==='class') state.classes=(state.classes||[]).filter(function(c){ return String(c.id)!==String(id); });
   else if(kind==='external') state.externalBusy=(state.externalBusy||[]).filter(function(b){ return String(b.id)!==String(id); });
+  else if(kind==='task') state.tasks=(state.tasks||[]).filter(function(t){ return String(t.id)!==String(id); });
   else state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return String(b.id)!==String(id); });
 }
 function dropOneTwin(it){
@@ -9009,24 +9018,27 @@ function dropOneTwin(it){
   }
   dropCalById(it.kind, it.id);
 }
-function dropAllTwin(it, keepTitle){
+function dropAllTwin(it, keep){
   if(!it) return;
+  const keepObj = keep && typeof keep==='object' ? keep : null;
+  const keepId = keepObj ? keepObj.id : '';
+  const keepKind = keepObj ? keepObj.kind : '';
   const key=meetingKey(it.title);
   const st=String(it.start||'').slice(0,5);
-  const keepShown=keepTitle?cleanCalTitle(keepTitle).toLowerCase():'';
-  function shouldDrop(title, start){
+  function shouldDrop(title, start, id, kind){
+    if(keepId && String(id)===String(keepId) && (!keepKind || kind===keepKind)) return false;
     if(String(start||'').slice(0,5)!==st) return false;
     if(meetingKey(title)!==key) return false;
-    if(keepShown && cleanCalTitle(title).toLowerCase()===keepShown) return false;
     return true;
   }
-  if(it.seriesId && (!keepTitle || cleanCalTitle(it.title).toLowerCase()!==keepShown)){
+  if(it.seriesId && !(keepObj && keepObj.seriesId && keepObj.seriesId===it.seriesId)){
     state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return b.seriesId!==it.seriesId; });
     state.classes=(state.classes||[]).filter(function(c){ return c.seriesId!==it.seriesId; });
   }
-  state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return !shouldDrop(b.label, b.start); });
-  state.classes=(state.classes||[]).filter(function(c){ return !shouldDrop(c.title, c.start); });
-  state.externalBusy=(state.externalBusy||[]).filter(function(b){ return !shouldDrop(b.title||b.label, b.start); });
+  state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return !shouldDrop(b.label, b.start, b.id, 'block'); });
+  state.classes=(state.classes||[]).filter(function(c){ return !shouldDrop(c.title, c.start, c.id, 'class'); });
+  state.externalBusy=(state.externalBusy||[]).filter(function(b){ return !shouldDrop(b.title||b.label, b.start, b.id, 'external'); });
+  state.tasks=(state.tasks||[]).filter(function(t){ return !shouldDrop(t.title, t.time, t.id, 'task'); });
 }
 function keepTwin(which, scope){
   const t=(state.calTwins||[])[0];
@@ -9043,7 +9055,7 @@ function keepTwin(which, scope){
   if(which!=='both'){
     const drop=which==='a'?t.b:t.a;
     const keep=which==='a'?t.a:t.b;
-    if(scope==='all') dropAllTwin(drop, keep.title);
+    if(scope==='all') dropAllTwin(drop, keep);
     else dropOneTwin(drop);
   }
   if(!state.calTwinSkip) state.calTwinSkip={};
@@ -9301,6 +9313,10 @@ function importIcsText(text, source){
       if(c.source==='ics-file'||c.source==='ics') return;
       if(classCoversDate(c, date)) list.push({title:c.title, start:c.start||'', end:c.end||'', kind:'class', id:c.id});
     });
+    (state.tasks||[]).forEach(function(t){
+      if(t.done || t.date!==date || !t.time) return;
+      list.push({title:t.title, start:t.time||'', end:'', kind:'task', id:t.id});
+    });
     return list;
   }
   function noteClash(date, start, end, title, kind, id){
@@ -9317,21 +9333,22 @@ function importIcsText(text, source){
   });
   (state.classes||[]).forEach(function(c){
     if(c.importBatch!==batch) return;
-    for(let i=0;i<45;i++){
+    for(let i=0;i<90;i++){
       const ds=icsAddDays(today, i);
       if(!classCoversDate(c, ds)) continue;
       noteClash(ds, c.start, c.end, c.title, 'class', c.id);
-      break;
     }
   });
   state.calClashes=clashes.filter(function(c){
-    const oldOk=(state.studyBlocks||[]).some(function(b){ return String(b.id)===String(c.oldId); }) || (state.classes||[]).some(function(x){ return String(x.id)===String(c.oldId) && classCoversDate(x, c.date); });
+    const oldOk=(state.studyBlocks||[]).some(function(b){ return String(b.id)===String(c.oldId); }) || (state.classes||[]).some(function(x){ return String(x.id)===String(c.oldId) && classCoversDate(x, c.date); }) || (c.oldKind==='task' && (state.tasks||[]).some(function(t){ return String(t.id)===String(c.oldId); }));
     const newOk=(state.studyBlocks||[]).some(function(b){ return String(b.id)===String(c.newId); }) || (state.classes||[]).some(function(x){ return String(x.id)===String(c.newId); });
     return oldOk && newOk;
   });
   try{ saveState(); }catch(e){}
+  state.calTwinSkip={};
+  state.calTwins=[];
   try{ queueTwinChoices(); }catch(e){}
-  return { ok:true, added:added, first:'Calendar uploaded.' };
+  return { ok:true, added:added, first:'Calendar uploaded.', questions:((state.calClashes&&state.calClashes.length)||0)+((state.calTwins&&state.calTwins.length)||0) };
 }
 function parseICS(text){
   return [];
@@ -9354,8 +9371,11 @@ function importICSFile(file){
       }
       const result = importIcsText(text, 'ics-file');
       if(!result.ok){ showAppMessage('Calendar not imported', result.message); return; }
-      showAppMessage('Calendar updated', result.first||'Your calendar has been updated.');
-      try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+      if(result.questions){
+        try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+      } else {
+        showAppMessage('Calendar uploaded', 'Your calendar has been updated.');
+      }
     }catch(e){
       console.error(e);
       showAppMessage('Could not read file', 'Save the download as a .ics file, choose it, then tap Upload calendar file.');
@@ -10003,6 +10023,24 @@ function sameCalTime(a,b){
   if(!a||!b) return true;
   return String(a).slice(0,5)===String(b).slice(0,5);
 }
+function clearExcludedCopies(){
+  let changed=false;
+  (state.classes||[]).forEach(function(c){
+    (c.exdates||[]).forEach(function(date){
+      const beforeT=(state.tasks||[]).length;
+      const beforeB=(state.studyBlocks||[]).length;
+      removeTasksForSchedule({id:c.id, title:c.title, date:date, start:c.start}, 'one');
+      state.studyBlocks=(state.studyBlocks||[]).filter(function(b){
+        if(b.date!==date) return true;
+        if(calTitleKey(b.label)!==calTitleKey(c.title)) return true;
+        if(!sameCalTime(b.start, c.start)) return true;
+        return false;
+      });
+      if((state.tasks||[]).length!==beforeT || (state.studyBlocks||[]).length!==beforeB) changed=true;
+    });
+  });
+  if(changed){ try{ saveState(); }catch(e){} }
+}
 function dropCopiesOnDate(date, title, start){
   const lab=calTitleKey(title);
   (state.classes||[]).forEach(c=>{
@@ -10023,6 +10061,7 @@ function dropCopiesOnDate(date, title, start){
     if(!sameCalTime(b.start, start)) return true;
     return false;
   });
+  removeTasksForSchedule({title:title, date:date, start:start}, 'one');
 }
 function removeTasksForSchedule(d, scope){
   if(!d) return;
@@ -13813,6 +13852,31 @@ function wireView(){
     else id=null;
     if(action==='toggle-done') el.addEventListener('change', ()=>toggleDone(id));
     else if(action==='open-task-menu') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); openTaskMenu(id); });
+    else if(action==='home-cal-open') el.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const kind=el.dataset.kind;
+      const rawId=el.dataset.id;
+      const date=el.dataset.date||todayStr();
+      state.selectedDay=date;
+      state.calRef=date;
+      calendarBrowsing=true;
+      if(kind==='exercise'){ beginExerciseEdit(rawId); return; }
+      if(kind==='class'){
+        const c=(state.classes||[]).find(function(x){ return String(x.id)===String(rawId); });
+        if(!c) return;
+        openListedEvent({kind:'class', id:c.id, label:c.title, time:c.start||'', end:c.end||'', seriesId:c.seriesId||'', source:c.source||''});
+        return;
+      }
+      if(kind==='external'){
+        const ev=(state.externalBusy||[]).find(function(x){ return String(x.id)===String(rawId); });
+        if(!ev) return;
+        openCalDraft({id:ev.id, kind:'external', title:ev.title||'', date:date, start:ev.start||'09:00', end:ev.end||'10:00', repeat:'once'});
+        return;
+      }
+      const b=(state.studyBlocks||[]).find(function(x){ return String(x.id)===String(rawId); });
+      if(!b) return;
+      openListedEvent({kind:'block', id:b.id, label:b.label, time:b.start||'', end:b.end||'', seriesId:b.seriesId||'', source:b.source||''});
+    });
     
     else if(action==='quick-done') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
@@ -14402,6 +14466,7 @@ function wireView(){
       const raw=el.getAttribute('data-id')||el.dataset.id;
       state.projectId=raw;
       state.projectWizard=null;
+      state.view='projects';
       const found=getProject(raw);
       if(!found){ showAppMessage('Could not open', 'Project not found. Try refreshing.'); return; }
       persistRender();
@@ -16377,40 +16442,4 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.appPrompt===undefined) state.appPrompt=null;
     if(state.pickTom===undefined) state.pickTom=false;
     if(state.pickTimer===undefined) state.pickTimer=false;
-    if(state.workSession===undefined) state.workSession=null;
-    if(!state.contextFilter) state.contextFilter='all';
-    if(state.askDateOpen===undefined) state.askDateOpen=false;
-    if(state.sneakTomorrow===undefined) state.sneakTomorrow=false;
-    if(state.dateEditOpen===undefined) state.dateEditOpen=false;
-    if(state.editingTaskId===undefined) state.editingTaskId=null;
-    if(state.dateEditId===undefined) state.dateEditId=null;
-    if(!state.listMode) state.listMode='all'; // all | spotlight | wall | one | jar
-    if(!state.spotlightSize) state.spotlightSize=3;
-    if(state.jarQueue===undefined) state.jarQueue=null;
-    if(state.oneAtATimeIndex===undefined) state.oneAtATimeIndex=0;
-    if(state.topOfMindId===undefined) state.topOfMindId=null;
-    if(!state.timeTrack) state.timeTrack={taskId:null, startedAt:null, accumulated:{}};
-    if(state.backburner===undefined) state.backburner=[];
-    if(!state.wakeAlarm) state.wakeAlarm={enabled:false,time:'07:00',days:[0,1,2,3,4],snoozesMax:2,snoozesLeft:2};
-    if(state.wakeMathOpen===undefined) state.wakeMathOpen=false;
-    if(state.wakeMath===undefined) state.wakeMath=null;
-    if(state.deleteSeriesPrompt===undefined) state.deleteSeriesPrompt=null;
-    if(state.settings.celebrateOnComplete===undefined) state.settings.celebrateOnComplete=true;
-    if(state.settings.celebrateSound===undefined) state.settings.celebrateSound=true;
-    if(!Array.isArray(state.whenThen)) state.whenThen=[];
-    if(!Array.isArray(state.rewardingRoutines)) state.rewardingRoutines=[];
-    if(!Array.isArray(state.strategicPlans)) state.strategicPlans=[];
-    if(!Array.isArray(state.flipScripts)) state.flipScripts=[];
-    if(!state.statsRangeStart){ const d=new Date(); d.setDate(d.getDate()-6); state.statsRangeStart=toDateStr(d); }
-    if(!state.statsRangeEnd) state.statsRangeEnd=todayStr();
-  }
-  if(state.settings.quoteOnLoad && state.lastQuoteShownDate!==todayStr()){
-    state.lastQuoteShownDate=todayStr();
-    state.quoteModalOpen=true;
-    state.quoteIndex=Math.floor(Math.random()*allQuotes().length);
-  }
-  render();
-})();
-</script>
-</body>
-</html>
+    if(state.workSession===undefined) st

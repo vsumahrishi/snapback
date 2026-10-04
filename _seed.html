@@ -1,0 +1,27 @@
+<!doctype html>
+<html><body>
+<script>
+const today = new Date().toISOString().slice(0,10);
+const state = {
+  tasks: [
+    { id:'d1', title:'Finish lab report — Chapter 4', date:today, done:false, tier:'must', context:'school' },
+    { id:'d2', title:'Revise organic chemistry notes', date:today, done:false, context:'school' },
+    { id:'d3', title:'Draft cover letter for internship', date:today, done:false, context:'personal' }
+  ],
+  classes: [{ id:'c1', name:'Organic Chemistry', day:'Wed', start:'10:00', end:'11:00' }],
+  profile: { name:'Demo User', displayName:'Demo User', isStudent:true },
+  settings: { darkMode:false },
+  journal: [],
+  projects: [{ id:'p1', title:'Biology Chapter 4 Project', status:'open', phase:'planning' }],
+  nonNegotiable: { text:'Complete one focused study block', date:today },
+  view: 'today'
+};
+localStorage.setItem('focuspod_state_v2', JSON.stringify(state));
+localStorage.setItem('snapback_session_ok', '1');
+localStorage.setItem('snapback_local_auth', JSON.stringify({ username:'DemoUser', pinHash:'x' }));
+const v = new URLSearchParams(location.search).get('v') || 'today';
+location.replace('/#/' + (v === 'today' ? '' : v));
+setTimeout(() => location.href = '/index.html#/' + (v==='today'?'':v), 100);
+</script>
+Seeding…
+</body></html>
