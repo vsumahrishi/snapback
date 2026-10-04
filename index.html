@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="294">
+<meta name="snapback-build" content="295">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -8698,6 +8698,12 @@ function icsInstances(block, start, endTime){
   }
   return out.length?out:[one];
 }
+function prettyDate(ds){
+  if(!ds) return '';
+  const d=new Date(ds+'T12:00:00');
+  if(isNaN(d.getTime())) return ds;
+  return d.toLocaleDateString(undefined,{weekday:'long', day:'numeric', month:'long'});
+}
 function importIcsText(text, source){
   const raw = unfoldIcs(String(text||'').replace(/\u0000/g,''));
   if(raw.charCodeAt(0)===80 && raw.charCodeAt(1)===75){
@@ -8712,11 +8718,20 @@ function importIcsText(text, source){
   state.classes = state.classes.filter(c=>c.source!==tag);
   state.studyBlocks = state.studyBlocks.filter(b=>b.source!==tag);
   const parts = raw.split('BEGIN:VEVENT');
+  const found = Math.max(0, parts.length-1);
   let added = 0;
   const seen={};
   const focusDates=[];
+  const lines=[];
   const today=todayStr();
   function remember(ds){ if(ds) focusDates.push(ds); }
+  function note(date, start, end, summary){
+    if(lines.length>=6) return;
+    if(date<today) return;
+    const when = prettyDate(date);
+    const clock = start ? (start+(end?'–'+end:'')) : 'All day';
+    lines.push(when+' · '+clock+' · '+summary);
+  }
   function pushBlock(date, start, end, summary, loc, allDay){
     const key=date+'|'+(allDay?'all':start)+'|'+summary.toLowerCase();
     if(seen[key]) return;
@@ -8727,6 +8742,7 @@ function importIcsText(text, source){
     });
     added++;
     remember(date);
+    note(date, allDay?'':(start||''), allDay?'':(end||''), summary);
   }
   function pushWeekly(summary, loc, start, end, day, semStart, semEnd){
     const key='w|'+day+'|'+(start||'')+'|'+summary.toLowerCase();
@@ -8737,12 +8753,12 @@ function importIcsText(text, source){
       textbook:'', meetingUrl:'', scope:'semester', kind:'class', source:tag,
       semStart:semStart||today, semEnd:semEnd||'', alarmMinutes:0
     });
-    added++;
-    for(let i=0;i<21;i++){
-      const ds=icsAddDays(today, i);
-      if(mondayIndex(new Date(ds+'T12:00:00'))===day && (!semStart||ds>=semStart) && (!semEnd||ds<=semEnd)){
-        remember(ds); break;
-      }
+    const horizon=icsAddDays(today, 180);
+    for(let ds=icsAddDays(today,-21); ds<=horizon; ds=icsAddDays(ds,1)){
+      if(mondayIndex(new Date(ds+'T12:00:00'))!==day) continue;
+      if(semStart && ds<semStart) continue;
+      if(semEnd && ds>semEnd) continue;
+      pushBlock(ds, start, end, summary, loc, false);
     }
   }
   for(let i=1;i<parts.length;i++){
@@ -8780,13 +8796,13 @@ function importIcsText(text, source){
       continue;
     }
     const instances=icsInstances(block, start, end||'23:59').filter(function(inst){
-      return inst.date>=icsAddDays(today,-21) && inst.date<=icsAddDays(today,120);
-    }).slice(0,40);
+      return inst.date>=icsAddDays(today,-30) && inst.date<=icsAddDays(today,180);
+    }).slice(0,60);
     (instances.length?instances:[{date:start.date, start:start.start, end:end}]).forEach(function(inst){
       pushBlock(inst.date, inst.start, inst.end, summary, loc, false);
     });
   }
-  if(!added) return { ok:false, message:'The file opened, but SnapBack found no events in it.' };
+  if(!added) return { ok:false, message:'The file opened, but it had no appointments SnapBack could read.' };
   focusDates.sort();
   const upcoming=focusDates.filter(function(d){ return d>=today; });
   const show=upcoming[0] || focusDates[focusDates.length-1] || today;
@@ -8796,13 +8812,19 @@ function importIcsText(text, source){
   state.view = 'calendar';
   state.calNote = '';
   state.lastUpload = [];
-  calendarBrowsing = String(show).slice(0,7)!==today.slice(0,7);
-  if(!state.schedOpen) state.schedOpen={glance:true};
+  calendarBrowsing = true;
+  if(!state.schedOpen) state.schedOpen={};
   state.schedOpen.glance = true;
   state._icsImportGuard = Date.now()+8000;
+  const preview=lines.slice(0,6);
+  state.scheduleNotice={ title:'Added to your schedule', lines: preview.slice() };
   try{ saveState(); }catch(e){}
-  const when = new Date(show+'T12:00:00').toLocaleDateString(undefined,{day:'numeric', month:'short', year:'numeric'});
-  return { ok:true, added:added, first:'Brought in '+added+'. Showing '+when+'.' };
+  let message='Your calendar has been updated.';
+  if(preview.length) message+='\n\n'+preview.join('\n');
+  message+='\n\nThe name is written on that day.';
+  if(found===1) message+=' This file contained 1 appointment. To add the whole Outlook calendar, export the full calendar, then upload that file.';
+  else if(found>added+2) message+=' This file had '+found+' appointments. '+added+' could be placed.';
+  return { ok:true, added:added, first:message };
 }
 function parseICS(text){
   return [];
@@ -8825,7 +8847,7 @@ function importICSFile(file){
       }
       const result = importIcsText(text, 'ics-file');
       if(!result.ok){ showAppMessage('Calendar not imported', result.message); return; }
-      showAppMessage('Calendar copied', result.first||'Uploaded.');
+      showAppMessage('Calendar updated', result.first||'Your calendar has been updated.');
       try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
     }catch(e){
       console.error(e);
@@ -9394,7 +9416,9 @@ function viewCalendar(){
   if(mode==='day'){
     const ds=state.selectedDay||toDateStr(ref);
     const items=itemsForDate(ds);
+    const untimed=items.filter(it=>!it.time);
     const hours=[];
+    if(untimed.length) hours.push('<div style="margin-bottom:8px">'+untimed.map(it=>calEventButton(it)).join('')+'</div>');
     for(let h=7;h<=21;h++){
       const hh=String(h).padStart(2,'0')+':00';
       const at=items.filter(it=>(it.time||'').slice(0,2)===String(h).padStart(2,'0'));
@@ -9435,9 +9459,15 @@ function viewCalendar(){
       const otherMonth = d.getMonth()!==month;
       const isToday = ds===todayStr();
       const isSel = ds===state.selectedDay;
+      const names=items.slice(0,2).map(it=>{
+        const t=it.time?String(it.time).slice(0,5)+' ':'';
+        const name=String(it.label||'Busy').split('·')[0].trim();
+        return `<div style="font-size:.68rem;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t+name)}</div>`;
+      }).join('');
       cells.push(`<div class="daycell ${otherMonth?'otherMonth':''} ${isToday?'today':''} ${isSel?'selected':''}" data-day="${ds}">
         <div class="daynum">${d.getDate()}</div>
-        <div class="daydots">${items.slice(0,4).map(it=>`<span class="dotcolor" style="background:${it.color}"></span>`).join('')}${items.length>4?`<span style="font-size:.62rem;color:var(--muted)">+${items.length-4}</span>`:''}</div>
+        ${names}
+        ${items.length>2?`<div style="font-size:.62rem;color:var(--muted)">+${items.length-2} more</div>`:''}
       </div>`);
     }
     body=`<div class="dowhead"></div>` +
@@ -9468,6 +9498,11 @@ function viewCalendar(){
     <h1>Your Schedule</h1>
     <p>Day, week, or month. Tap an empty day to add something. Tap an event to change or delete it.</p>
   </div>
+  ${state.scheduleNotice && state.scheduleNotice.lines && state.scheduleNotice.lines.length ? `<div class="card">
+    <h3 style="margin-top:0">${escapeHtml(state.scheduleNotice.title||'Added to your schedule')}</h3>
+    ${state.scheduleNotice.lines.map(l=>`<div style="padding:6px 0;border-top:1px solid var(--line)">${escapeHtml(l)}</div>`).join('')}
+    <button type="button" class="btn ghost sm" id="clearSchedNotice" style="margin-top:8px">Hide</button>
+  </div>` : ''}
   ${schedBox('glance','Quick glance', `
   <div class="calnav">
       <button class="btn ghost sm" id="calPrev">&larr;</button>
@@ -13927,6 +13962,8 @@ function wireView(){
       if(state.calMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+7);
       state.calRef=toDateStr(d); persistRender();
     });
+    const clearNote=document.getElementById('clearSchedNotice');
+    if(clearNote) clearNote.onclick=()=>{ state.scheduleNotice=null; persistRender(); };
     const todayBtn=document.getElementById('calToday');
     if(todayBtn) todayBtn.addEventListener('click', ()=>{ calendarBrowsing=false; state.calRef=todayStr(); state.selectedDay=todayStr(); state.calNote=''; persistRender(); });
     const monthBtn=document.getElementById('calModeMonth');
