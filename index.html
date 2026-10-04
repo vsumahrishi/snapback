@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="295">
+<meta name="snapback-build" content="296">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -8589,6 +8589,7 @@ function itemsForDate(dateStr){
     let show=false;
     if(c.scope==='session'){ show = c.date===dateStr; }
     else{ show = c.day===dow && (!c.semStart || dateStr>=c.semStart) && (!c.semEnd || dateStr<=c.semEnd); }
+    if(show && Array.isArray(c.exdates) && c.exdates.indexOf(dateStr)>=0) show=false;
     if(show) items.push({type:'class', kind:'class', id:c.id, color:'var(--blue)', time:c.start, end:c.end||'', label:c.title+(c.room?' · '+c.room:''), meetingUrl:c.meetingUrl});
   });
   state.tasks.filter(t=>t.date===dateStr).forEach(t=>items.push({type:'task', kind:'task', id:t.id, color: t.priority==='high'?'var(--brick)':t.priority==='medium'?'var(--amber)':'var(--pine)',time:t.time||'',label:t.title,meetingUrl:t.meetingUrl}));
@@ -8715,6 +8716,12 @@ function importIcsText(text, source){
   if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
   if(!Array.isArray(state.classes)) state.classes=[];
   const tag = source || 'ics-file';
+  try{
+    state.icsUndo={
+      classes: JSON.parse(JSON.stringify(state.classes||[])),
+      studyBlocks: JSON.parse(JSON.stringify(state.studyBlocks||[]))
+    };
+  }catch(e){ state.icsUndo=null; }
   state.classes = state.classes.filter(c=>c.source!==tag);
   state.studyBlocks = state.studyBlocks.filter(b=>b.source!==tag);
   const parts = raw.split('BEGIN:VEVENT');
@@ -8722,49 +8729,46 @@ function importIcsText(text, source){
   let added = 0;
   const seen={};
   const focusDates=[];
-  const lines=[];
+  const names={};
   const today=todayStr();
+  const batch=uid();
   function remember(ds){ if(ds) focusDates.push(ds); }
-  function note(date, start, end, summary){
-    if(lines.length>=6) return;
-    if(date<today) return;
-    const when = prettyDate(date);
-    const clock = start ? (start+(end?'–'+end:'')) : 'All day';
-    lines.push(when+' · '+clock+' · '+summary);
-  }
-  function pushBlock(date, start, end, summary, loc, allDay){
+  function pushBlock(date, start, end, summary, loc, allDay, seriesId){
     const key=date+'|'+(allDay?'all':start)+'|'+summary.toLowerCase();
     if(seen[key]) return;
     seen[key]=1;
     state.studyBlocks.push({
       id:uid(), date:date, start:allDay?'':(start||'09:00'), end:allDay?'':(end||''),
-      label:summary, meetingUrl:'', room:loc||'', source:tag, allDay:!!allDay
+      label:summary, meetingUrl:'', room:loc||'', source:tag, allDay:!!allDay, seriesId:seriesId||'', importBatch:batch
     });
     added++;
     remember(date);
-    note(date, allDay?'':(start||''), allDay?'':(end||''), summary);
   }
-  function pushWeekly(summary, loc, start, end, day, semStart, semEnd){
+  function pushWeekly(summary, loc, start, end, day, semStart, semEnd, seriesId){
     const key='w|'+day+'|'+(start||'')+'|'+summary.toLowerCase();
     if(seen[key]) return;
     seen[key]=1;
     state.classes.push({
       id:uid(), title:summary, day:day, start:start||'09:00', end:end||'', room:loc||'',
       textbook:'', meetingUrl:'', scope:'semester', kind:'class', source:tag,
-      semStart:semStart||today, semEnd:semEnd||'', alarmMinutes:0
+      semStart:semStart||today, semEnd:semEnd||'', alarmMinutes:0, seriesId:seriesId||'', exdates:[], importBatch:batch
     });
-    const horizon=icsAddDays(today, 180);
-    for(let ds=icsAddDays(today,-21); ds<=horizon; ds=icsAddDays(ds,1)){
+    added++;
+    for(let i=0;i<21;i++){
+      const ds=icsAddDays(today, i);
       if(mondayIndex(new Date(ds+'T12:00:00'))!==day) continue;
       if(semStart && ds<semStart) continue;
       if(semEnd && ds>semEnd) continue;
-      pushBlock(ds, start, end, summary, loc, false);
+      remember(ds);
+      break;
     }
   }
   for(let i=1;i<parts.length;i++){
     const block = parts[i].split('END:VEVENT')[0];
     if(/STATUS[^:\n]*:CANCELLED/i.test(block)) continue;
     const summary = (icsProp(block,'SUMMARY') || 'Busy').slice(0,140);
+    names[summary]=1;
+    const seriesId=uid();
     const loc = icsProp(block,'LOCATION');
     const start = icsWhen(icsProp(block,'DTSTART'));
     if(!start || !start.date) continue;
@@ -8785,24 +8789,31 @@ function importIcsText(text, source){
     const days=byRaw?byRaw.split(',').map(function(x){ const k=String(x).replace(/[^A-Z]/gi,'').slice(-2).toUpperCase(); return map[k]; }).filter(function(v){ return v!=null; }):[];
     if(freq==='WEEKLY' && interval===1){
       const useDays=days.length?days:[mondayIndex(new Date(start.date+'T12:00:00'))];
-      useDays.forEach(function(day){ pushWeekly(summary, loc, start.allDay?'09:00':start.start, end, day, start.date, until&&until.date?until.date:''); });
+      useDays.forEach(function(day){ pushWeekly(summary, loc, start.allDay?'09:00':start.start, end, day, start.date, until&&until.date?until.date:'', seriesId); });
       continue;
     }
     if(start.allDay){
       let last=start.date;
       if(endWhen && endWhen.date && endWhen.date>start.date) last=icsAddDays(endWhen.date, -1);
       let ds=start.date, n=0;
-      while(ds<=last && n<21){ pushBlock(ds, '', '', summary, loc, true); ds=icsAddDays(ds,1); n++; }
+      while(ds<=last && n<21){ pushBlock(ds, '', '', summary, loc, true, seriesId); ds=icsAddDays(ds,1); n++; }
       continue;
     }
     const instances=icsInstances(block, start, end||'23:59').filter(function(inst){
       return inst.date>=icsAddDays(today,-30) && inst.date<=icsAddDays(today,180);
     }).slice(0,60);
     (instances.length?instances:[{date:start.date, start:start.start, end:end}]).forEach(function(inst){
-      pushBlock(inst.date, inst.start, inst.end, summary, loc, false);
+      pushBlock(inst.date, inst.start, inst.end, summary, loc, false, seriesId);
     });
   }
-  if(!added) return { ok:false, message:'The file opened, but it had no appointments SnapBack could read.' };
+  if(!added){
+    if(state.icsUndo){
+      state.classes=state.icsUndo.classes||[];
+      state.studyBlocks=state.icsUndo.studyBlocks||[];
+      state.icsUndo=null;
+    }
+    return { ok:false, message:'The file opened, but it had no appointments SnapBack could read.' };
+  }
   focusDates.sort();
   const upcoming=focusDates.filter(function(d){ return d>=today; });
   const show=upcoming[0] || focusDates[focusDates.length-1] || today;
@@ -8812,18 +8823,16 @@ function importIcsText(text, source){
   state.view = 'calendar';
   state.calNote = '';
   state.lastUpload = [];
+  state.scheduleNotice = null;
   calendarBrowsing = true;
   if(!state.schedOpen) state.schedOpen={};
   state.schedOpen.glance = true;
   state._icsImportGuard = Date.now()+8000;
-  const preview=lines.slice(0,6);
-  state.scheduleNotice={ title:'Added to your schedule', lines: preview.slice() };
   try{ saveState(); }catch(e){}
-  let message='Your calendar has been updated.';
-  if(preview.length) message+='\n\n'+preview.join('\n');
-  message+='\n\nThe name is written on that day.';
-  if(found===1) message+=' This file contained 1 appointment. To add the whole Outlook calendar, export the full calendar, then upload that file.';
-  else if(found>added+2) message+=' This file had '+found+' appointments. '+added+' could be placed.';
+  const list=Object.keys(names);
+  const message = list.length===1
+    ? '“'+list[0]+'” is on the schedule. Tap a day with a dot to see it below.'
+    : list.length+' appointments are on the schedule. Tap a day with a dot to see that day below.';
   return { ok:true, added:added, first:message };
 }
 function parseICS(text){
@@ -9298,7 +9307,7 @@ function calDraftCard(){
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
       <button type="button" class="btn" id="calDraftSave">Save</button>
       <button type="button" class="btn ghost" id="calDraftCancel">Cancel</button>
-      ${d.id?'<button type="button" class="btn ghost" id="calDraftDelete">Delete</button>':''}
+      ${d.id ? (calRepeats(d) ? `<button type="button" class="btn ghost" id="calDeleteOne">This date only</button><button type="button" class="btn ghost" id="calDeleteFollowing">This and all following</button>` : `<button type="button" class="btn ghost" id="calDraftDelete">Delete</button>`) : ''}
     </div>
   </div>`;
 }
@@ -9346,6 +9355,85 @@ function saveCalDraftFromForm(){
   try{ saveState(); }catch(e){}
   persistRender();
   showAppMessage('Saved', title+' is on the schedule.');
+}
+function calRepeats(d){
+  if(!d || !d.id) return false;
+  if(d.kind==='class' || d.repeat==='weekly') return true;
+  if(d.seriesId){
+    const blocks=(state.studyBlocks||[]).filter(b=>b.seriesId===d.seriesId).length;
+    const classes=(state.classes||[]).filter(c=>c.seriesId===d.seriesId).length;
+    if(blocks+classes>1) return true;
+  }
+  const label=String(d.title||'').toLowerCase();
+  if(label && d.source==='ics-file'){
+    const n=(state.studyBlocks||[]).filter(b=>b.source==='ics-file' && String(b.label||'').toLowerCase()===label && (b.start||'')===(d.start||'')).length;
+    if(n>1) return true;
+  }
+  return false;
+}
+function deleteCalOne(){
+  const d=state.calDraft||{};
+  const date=d.date||state.selectedDay||todayStr();
+  const label=String(d.title||'').toLowerCase();
+  if(d.kind==='class' && d.id){
+    const c=(state.classes||[]).find(x=>String(x.id)===String(d.id));
+    if(c){
+      if(!Array.isArray(c.exdates)) c.exdates=[];
+      if(c.exdates.indexOf(date)<0) c.exdates.push(date);
+    }
+  }
+  state.studyBlocks=(state.studyBlocks||[]).filter(b=>{
+    if(b.date!==date) return true;
+    if(d.kind==='block' && String(b.id)===String(d.id)) return false;
+    if(d.seriesId && b.seriesId===d.seriesId) return false;
+    if(label && String(b.label||'').toLowerCase()===label && (b.start||'')===(d.start||'') && b.source==='ics-file') return false;
+    return true;
+  });
+  if(d.kind==='external' && d.id) state.externalBusy=(state.externalBusy||[]).filter(b=>String(b.id)!==String(d.id));
+  state.calDraft=null;
+  try{ saveState(); }catch(e){}
+  persistRender();
+}
+function deleteCalFollowing(){
+  const d=state.calDraft||{};
+  const date=d.date||state.selectedDay||todayStr();
+  const prev=icsAddDays(date,-1);
+  const label=String(d.title||'').toLowerCase();
+  function endClass(c){
+    if(!c) return;
+    if(!c.semStart || date<=c.semStart) c._drop=true;
+    else c.semEnd=prev;
+  }
+  if(d.kind==='class' && d.id) endClass((state.classes||[]).find(x=>String(x.id)===String(d.id)));
+  (state.classes||[]).forEach(c=>{
+    if(d.seriesId && c.seriesId===d.seriesId) endClass(c);
+  });
+  state.classes=(state.classes||[]).filter(c=>!c._drop);
+  state.studyBlocks=(state.studyBlocks||[]).filter(b=>{
+    if(!b.date || b.date<date) return true;
+    if(d.kind==='block' && String(b.id)===String(d.id)) return false;
+    if(d.seriesId && b.seriesId===d.seriesId) return false;
+    if(label && String(b.label||'').toLowerCase()===label && (b.start||'')===(d.start||'') && (b.source==='ics-file' || b.seriesId)) return false;
+    return true;
+  });
+  state.calDraft=null;
+  try{ saveState(); }catch(e){}
+  persistRender();
+}
+function undoIcsUpload(){
+  if(state.icsUndo && (state.icsUndo.classes || state.icsUndo.studyBlocks)){
+    state.classes=state.icsUndo.classes||[];
+    state.studyBlocks=state.icsUndo.studyBlocks||[];
+    state.icsUndo=null;
+  } else {
+    state.classes=(state.classes||[]).filter(c=>c.source!=='ics-file' && c.source!=='ics');
+    state.studyBlocks=(state.studyBlocks||[]).filter(b=>b.source!=='ics-file' && b.source!=='ics');
+  }
+  state.scheduleNotice=null;
+  state.calDraft=null;
+  try{ saveState(); }catch(e){}
+  persistRender();
+  showAppMessage('Upload removed', 'Appointments brought in from a calendar file have been removed. Events you typed yourself are still there.');
 }
 function deleteCalDraft(){
   const d = state.calDraft||{};
@@ -9459,15 +9547,9 @@ function viewCalendar(){
       const otherMonth = d.getMonth()!==month;
       const isToday = ds===todayStr();
       const isSel = ds===state.selectedDay;
-      const names=items.slice(0,2).map(it=>{
-        const t=it.time?String(it.time).slice(0,5)+' ':'';
-        const name=String(it.label||'Busy').split('·')[0].trim();
-        return `<div style="font-size:.68rem;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t+name)}</div>`;
-      }).join('');
       cells.push(`<div class="daycell ${otherMonth?'otherMonth':''} ${isToday?'today':''} ${isSel?'selected':''}" data-day="${ds}">
         <div class="daynum">${d.getDate()}</div>
-        ${names}
-        ${items.length>2?`<div style="font-size:.62rem;color:var(--muted)">+${items.length-2} more</div>`:''}
+        <div class="daydots">${items.slice(0,4).map(it=>`<span class="dotcolor" style="background:${it.color}"></span>`).join('')}${items.length>4?`<span style="font-size:.62rem;color:var(--muted)">+${items.length-4}</span>`:''}</div>
       </div>`);
     }
     body=`<div class="dowhead"></div>` +
@@ -9498,11 +9580,6 @@ function viewCalendar(){
     <h1>Your Schedule</h1>
     <p>Day, week, or month. Tap an empty day to add something. Tap an event to change or delete it.</p>
   </div>
-  ${state.scheduleNotice && state.scheduleNotice.lines && state.scheduleNotice.lines.length ? `<div class="card">
-    <h3 style="margin-top:0">${escapeHtml(state.scheduleNotice.title||'Added to your schedule')}</h3>
-    ${state.scheduleNotice.lines.map(l=>`<div style="padding:6px 0;border-top:1px solid var(--line)">${escapeHtml(l)}</div>`).join('')}
-    <button type="button" class="btn ghost sm" id="clearSchedNotice" style="margin-top:8px">Hide</button>
-  </div>` : ''}
   ${schedBox('glance','Quick glance', `
   <div class="calnav">
       <button class="btn ghost sm" id="calPrev">&larr;</button>
@@ -9547,6 +9624,7 @@ function viewCalendar(){
     <p style="font-size:.75rem;color:var(--muted);margin:12px 0 4px">Or choose a calendar file you downloaded (.ics)</p>
     <input type="file" id="icsImportInput" accept=".ics,text/calendar,.txt">
     <button type="button" class="btn" id="icsUploadBtn" style="margin-top:8px">Upload calendar file</button>
+    <button type="button" class="btn ghost" id="undoIcsBtn" style="margin-top:8px">Undo upload</button>
     <p id="icsImportStatus" style="font-size:.85rem;margin-top:8px"></p>
   `)}
   ${schedBox('free','Free slots', `
@@ -13983,7 +14061,7 @@ function wireView(){
       if(kind==='class'){
         const c=(state.classes||[]).find(x=>String(x.id)===String(id));
         if(!c) return;
-        openCalDraft({id:c.id, kind:'class', title:c.title, start:c.start, end:c.end, room:c.room||'', repeat:'weekly', date: state.selectedDay||todayStr()});
+        openCalDraft({id:c.id, kind:'class', title:c.title, start:c.start, end:c.end, room:c.room||'', repeat:'weekly', date: state.selectedDay||todayStr(), seriesId:c.seriesId||'', source:c.source||''});
       } else if(kind==='external'){
         const ev=(state.externalBusy||[]).find(x=>String(x.id)===String(id));
         if(!ev) return;
@@ -13991,7 +14069,7 @@ function wireView(){
       } else {
         const b=(state.studyBlocks||[]).find(x=>String(x.id)===String(id));
         if(!b) return;
-        openCalDraft({id:b.id, kind:'block', title:b.label, date:b.date, start:b.start, end:b.end, room:b.room||'', repeat:'once'});
+        openCalDraft({id:b.id, kind:'block', title:b.label, date:b.date, start:b.start, end:b.end, room:b.room||'', repeat:'once', seriesId:b.seriesId||'', source:b.source||''});
       }
     }));
     const startNew=document.getElementById('calStartNew');
@@ -13999,6 +14077,9 @@ function wireView(){
     const cds=document.getElementById('calDraftSave'); if(cds) cds.addEventListener('click', saveCalDraftFromForm);
     const cdc=document.getElementById('calDraftCancel'); if(cdc) cdc.addEventListener('click', ()=>{ state.calDraft=null; persistRender(); });
     const cdd=document.getElementById('calDraftDelete'); if(cdd) cdd.addEventListener('click', deleteCalDraft);
+    const cd1=document.getElementById('calDeleteOne'); if(cd1) cd1.addEventListener('click', deleteCalOne);
+    const cd2=document.getElementById('calDeleteFollowing'); if(cd2) cd2.addEventListener('click', deleteCalFollowing);
+    const undoIcs=document.getElementById('undoIcsBtn'); if(undoIcs) undoIcs.addEventListener('click', undoIcsUpload);
 
     const freeBtn=document.getElementById('freeSlotBtn');
     if(freeBtn) freeBtn.addEventListener('click', ()=>{
