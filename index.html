@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="313">
+<meta name="snapback-build" content="314">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4617,8 +4617,9 @@ function renderModal(){
     const p=state.nudgePreview;
     root.innerHTML=`<div class="overlay"><div class="quotecard" style="text-align:center;max-width:380px">
       <div class="qeyebrow">Preview</div>
-      <p style="margin:8px 0 14px">${p.silent?'Silent notification. No sound.':'This is the sound. Nothing is saved yet.'}</p>
-      ${!p.silent && p.text?`<div style="font-size:1.3rem;font-weight:800;margin:0 0 14px">${escapeHtml(p.text)} = ?</div>`:''}
+      ${p.silent
+        ? `<p style="margin:8px 0 14px">This is how your nudge appears</p>`
+        : `<p style="margin:8px 0 8px">Sound check.</p><div style="font-size:1.45rem;font-weight:800;margin:0 0 14px">${escapeHtml(p.text||'10 × 9')} = ?</div>`}
       <button class="btn" id="previewStop" type="button" style="width:100%">Stop preview</button>
     </div></div>`;
     document.getElementById('previewStop').onclick=stopNudgePreview;
@@ -16442,4 +16443,40 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.appPrompt===undefined) state.appPrompt=null;
     if(state.pickTom===undefined) state.pickTom=false;
     if(state.pickTimer===undefined) state.pickTimer=false;
-    if(state.workSession===undefined) st
+    if(state.workSession===undefined) state.workSession=null;
+    if(!state.contextFilter) state.contextFilter='all';
+    if(state.askDateOpen===undefined) state.askDateOpen=false;
+    if(state.sneakTomorrow===undefined) state.sneakTomorrow=false;
+    if(state.dateEditOpen===undefined) state.dateEditOpen=false;
+    if(state.editingTaskId===undefined) state.editingTaskId=null;
+    if(state.dateEditId===undefined) state.dateEditId=null;
+    if(!state.listMode) state.listMode='all'; // all | spotlight | wall | one | jar
+    if(!state.spotlightSize) state.spotlightSize=3;
+    if(state.jarQueue===undefined) state.jarQueue=null;
+    if(state.oneAtATimeIndex===undefined) state.oneAtATimeIndex=0;
+    if(state.topOfMindId===undefined) state.topOfMindId=null;
+    if(!state.timeTrack) state.timeTrack={taskId:null, startedAt:null, accumulated:{}};
+    if(state.backburner===undefined) state.backburner=[];
+    if(!state.wakeAlarm) state.wakeAlarm={enabled:false,time:'07:00',days:[0,1,2,3,4],snoozesMax:2,snoozesLeft:2};
+    if(state.wakeMathOpen===undefined) state.wakeMathOpen=false;
+    if(state.wakeMath===undefined) state.wakeMath=null;
+    if(state.deleteSeriesPrompt===undefined) state.deleteSeriesPrompt=null;
+    if(state.settings.celebrateOnComplete===undefined) state.settings.celebrateOnComplete=true;
+    if(state.settings.celebrateSound===undefined) state.settings.celebrateSound=true;
+    if(!Array.isArray(state.whenThen)) state.whenThen=[];
+    if(!Array.isArray(state.rewardingRoutines)) state.rewardingRoutines=[];
+    if(!Array.isArray(state.strategicPlans)) state.strategicPlans=[];
+    if(!Array.isArray(state.flipScripts)) state.flipScripts=[];
+    if(!state.statsRangeStart){ const d=new Date(); d.setDate(d.getDate()-6); state.statsRangeStart=toDateStr(d); }
+    if(!state.statsRangeEnd) state.statsRangeEnd=todayStr();
+  }
+  if(state.settings.quoteOnLoad && state.lastQuoteShownDate!==todayStr()){
+    state.lastQuoteShownDate=todayStr();
+    state.quoteModalOpen=true;
+    state.quoteIndex=Math.floor(Math.random()*allQuotes().length);
+  }
+  render();
+})();
+</script>
+</body>
+</html>
