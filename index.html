@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="305">
+<meta name="snapback-build" content="306">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4804,10 +4804,25 @@ function renderModal(){
     const t=state.calTwins[0];
     const when=prettyDate(t.a.date)||t.a.date;
     const clock=(t.a.start||'')+(t.a.end?('–'+t.a.end):'');
+    if(t.pending){
+      const kept=t.pending==='both' ? 'both names' : (t.pending==='a' ? t.a.title : t.b.title);
+      root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:440px;text-align:left">
+        <div style="font-weight:800;font-size:1.05rem;margin-bottom:8px">This appointment repeats</div>
+        <p style="margin:0 0 8px">You chose to keep ${t.pending==='both'?'both':('“'+escapeHtml(kept)+'”')}.</p>
+        <p style="margin:0 0 12px;color:var(--muted);font-size:.9rem">Apply that to this date only, or to every date in the series?</p>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button class="btn" id="twinOne" type="button">This appointment only</button>
+          <button class="btn" id="twinAll" type="button">All repeating appointments</button>
+        </div>
+      </div></div>`;
+      document.getElementById('twinOne').onclick=function(){ keepTwin(t.pending, 'one'); };
+      document.getElementById('twinAll').onclick=function(){ keepTwin(t.pending, 'all'); };
+      return;
+    }
     root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:440px;text-align:left">
       <div style="font-weight:800;font-size:1.05rem;margin-bottom:8px">Which one do you want to keep?</div>
-      <p style="margin:0 0 12px">${escapeHtml(when)}${clock?' · '+escapeHtml(clock):''}</p>
-      <p style="margin:0 0 12px;color:var(--muted);font-size:.9rem">These look like the same appointment. SnapBack will not choose for you.</p>
+      <p style="margin:0 0 12px">${escapeHtml(when)}${clock?' · '+escapeHtml(clock):''}${t.recurring?' · repeats':''}</p>
+      <p style="margin:0 0 12px;color:var(--muted);font-size:.9rem">${t.recurring?'These look like the same repeating appointment. You will be asked once, not on every date.':'These look like the same appointment.'}</p>
       <div style="display:flex;flex-direction:column;gap:8px">
         <button class="btn" id="twinA" type="button">${escapeHtml(t.a.title||'First')}</button>
         <button class="btn" id="twinB" type="button">${escapeHtml(t.b.title||'Second')}</button>
@@ -8824,29 +8839,29 @@ function meetingKey(s){
   return parts.join(' / ');
 }
 function queueTwinChoices(){
-  const groups={};
-  function add(date, start, end, title, kind, id){
-    const key=meetingKey(title);
-    if(!key || !date) return;
-    const g=date+'|'+String(start||'').slice(0,5)+'|'+key;
-    if(!groups[g]) groups[g]=[];
-    groups[g].push({date:date, start:start||'', end:end||'', title:title, kind:kind, id:id});
+  const bySlot={};
+  function add(it){
+    const key=meetingKey(it.title);
+    if(!key || !it.date) return;
+    const g=it.date+'|'+String(it.start||'').slice(0,5)+'|'+key;
+    if(!bySlot[g]) bySlot[g]=[];
+    bySlot[g].push(it);
   }
-  (state.studyBlocks||[]).forEach(function(b){ add(b.date, b.start, b.end, b.label, 'block', b.id); });
+  (state.studyBlocks||[]).forEach(function(b){
+    add({date:b.date, start:b.start||'', end:b.end||'', title:b.label, kind:'block', id:b.id, seriesId:b.seriesId||''});
+  });
   (state.classes||[]).forEach(function(c){
-    for(let i=0;i<28;i++){
+    for(let i=0;i<90;i++){
       const ds=icsAddDays(todayStr(), i);
       if(!classCoversDate(c, ds)) continue;
-      add(ds, c.start, c.end, c.title, 'class', c.id);
-      break;
+      add({date:ds, start:c.start||'', end:c.end||'', title:c.title, kind:'class', id:c.id, seriesId:c.seriesId||''});
     }
   });
-  const skip=state.calTwinSkip||{};
-  const pairs=[];
-  Object.keys(groups).forEach(function(g){
+  const series={};
+  Object.keys(bySlot).forEach(function(g){
     const uniq=[];
     const seen={};
-    groups[g].forEach(function(it){
+    bySlot[g].forEach(function(it){
       const idk=it.kind+':'+it.id;
       if(seen[idk]) return;
       seen[idk]=1;
@@ -8856,11 +8871,21 @@ function queueTwinChoices(){
     const names={};
     uniq.forEach(function(it){ names[String(it.title||'')]=1; });
     if(Object.keys(names).length<2) return;
-    const sig=g+'|'+uniq.map(function(it){ return it.id; }).join(',');
-    if(skip[sig]) return;
-    pairs.push({sig:sig, a:uniq[0], b:uniq[1], extra:uniq.slice(2)});
+    const sample=uniq[0];
+    const pk=meetingKey(sample.title)+'|'+String(sample.start||'').slice(0,5);
+    if(!series[pk]) series[pk]={slots:[]};
+    series[pk].slots.push({date:sample.date, a:uniq[0], b:uniq[1], extra:uniq.slice(2)});
   });
-  state.calTwins=pairs.slice(0,8);
+  const skip=state.calTwinSkip||{};
+  const pairs=[];
+  Object.keys(series).forEach(function(pk){
+    if(skip[pk]) return;
+    const slots=series[pk].slots;
+    const first=slots[0];
+    const recurring=slots.length>1 || first.a.kind==='class' || first.b.kind==='class' || !!(first.a.seriesId || first.b.seriesId);
+    pairs.push({sig:pk, recurring:recurring, a:first.a, b:first.b, extra:first.extra||[], slots:slots});
+  });
+  state.calTwins=pairs.slice(0,6);
 }
 function dropCalById(kind, id){
   if(id==null) return;
@@ -8868,20 +8893,62 @@ function dropCalById(kind, id){
   else if(kind==='external') state.externalBusy=(state.externalBusy||[]).filter(function(b){ return String(b.id)!==String(id); });
   else state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return String(b.id)!==String(id); });
 }
-function keepTwin(which){
+function dropOneTwin(it){
+  if(!it) return;
+  if(it.kind==='class'){
+    const c=(state.classes||[]).find(function(x){ return String(x.id)===String(it.id); });
+    if(c){
+      if(!Array.isArray(c.exdates)) c.exdates=[];
+      if(it.date && c.exdates.indexOf(it.date)<0) c.exdates.push(it.date);
+    }
+    return;
+  }
+  dropCalById(it.kind, it.id);
+}
+function dropAllTwin(it){
+  if(!it) return;
+  const shown=cleanCalTitle(it.title).toLowerCase();
+  const st=String(it.start||'').slice(0,5);
+  if(it.seriesId){
+    state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return b.seriesId!==it.seriesId; });
+    state.classes=(state.classes||[]).filter(function(c){ return c.seriesId!==it.seriesId; });
+  }
+  state.studyBlocks=(state.studyBlocks||[]).filter(function(b){
+    if(cleanCalTitle(b.label).toLowerCase()!==shown) return true;
+    if(String(b.start||'').slice(0,5)!==st) return true;
+    return false;
+  });
+  state.classes=(state.classes||[]).filter(function(c){
+    if(cleanCalTitle(c.title).toLowerCase()!==shown) return true;
+    if(String(c.start||'').slice(0,5)!==st) return true;
+    return false;
+  });
+}
+function keepTwin(which, scope){
   const t=(state.calTwins||[])[0];
   if(!t){ state.calTwins=[]; persistRender(); return; }
-  markCalEdit();
-  if(which==='both'){
-    if(!state.calTwinSkip) state.calTwinSkip={};
-    state.calTwinSkip[t.sig]=1;
-  } else {
-    const drop=which==='a'?t.b:t.a;
-    dropCalById(drop.kind, drop.id);
-    (t.extra||[]).forEach(function(it){
-      if(String(it.id)!==String((which==='a'?t.a:t.b).id)) dropCalById(it.kind, it.id);
-    });
+  if(!scope){
+    if(t.recurring){
+      t.pending=which;
+      persistRender();
+      return;
+    }
+    scope='one';
   }
+  markCalEdit();
+  if(which!=='both'){
+    const drop=which==='a'?t.b:t.a;
+    const extras=(t.slots||[{extra:t.extra}]).reduce(function(acc, slot){ return acc.concat(slot.extra||[]); }, t.extra||[]);
+    if(scope==='all'){
+      dropAllTwin(drop);
+      extras.forEach(function(it){ dropAllTwin(it); });
+    } else {
+      dropOneTwin(drop);
+      (t.extra||[]).forEach(function(it){ dropOneTwin(it); });
+    }
+  }
+  if(!state.calTwinSkip) state.calTwinSkip={};
+  state.calTwinSkip[t.sig]=scope||'one';
   state.calTwins=(state.calTwins||[]).slice(1);
   if(!state.calTwins.length){ try{ queueTwinChoices(); }catch(e){} }
   try{ saveState(); }catch(e){}
