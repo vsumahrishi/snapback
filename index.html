@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="307">
+<meta name="snapback-build" content="309">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1474,9 +1474,9 @@ function playDistinctAlarm(ctx, kind, vol){
  * Uses settings.soundVolume as the peak (phone volume keys still control the device;
  * the in-app slider sets peak loudness of this alarm).
  */
-function playAlarmRamp(durationSec){
+function playAlarmRamp(durationSec, force){
   stopAlarmRamp();
-  if(state.settings && state.settings.soundOn===false) return;
+  if(!force && state.settings && state.settings.soundOn===false) return;
   const ctx = ensureAudio(); if(!ctx) return;
   try{ if(ctx.state==='suspended') ctx.resume(); }catch(e){}
   const total = durationSec || 55;
@@ -1546,6 +1546,48 @@ function playAlarmRamp(durationSec){
       }catch(e){}
     }
   };
+}
+function captureNudgeDraft(){
+  const tm=document.getElementById('wakeTime');
+  if(!tm) return;
+  const whenEl=document.querySelector('input[name="wakeWhen"]:checked');
+  const days=[];
+  for(let i=0;i<7;i++){
+    const el=document.getElementById('wakeDay'+i);
+    if(el && el.checked) days.push(i);
+  }
+  const mathEl=document.getElementById('wakeMathOn');
+  const alertEl=document.querySelector('input[name="wakeAlert"]:checked');
+  const snd=document.getElementById('wakeSoundSelect');
+  const once=document.getElementById('wakeOnceDate');
+  state.nudgeFormDraft={
+    time: tm.value||'',
+    onceDate: once&&once.value||'',
+    repeating: !!(whenEl && whenEl.value==='repeat'),
+    days: days,
+    sound: snd&&snd.value||'chime',
+    math: !mathEl || !!mathEl.checked,
+    alert: alertEl&&alertEl.value==='silent'?'silent':'regular'
+  };
+}
+function startNudgePreview(){
+  captureNudgeDraft();
+  const draft=state.nudgeFormDraft||{};
+  const prev=state.wakeAlarm?Object.assign({}, state.wakeAlarm):null;
+  if(!state.wakeAlarm) state.wakeAlarm={};
+  state.wakeAlarm.sound=draft.sound||'chime';
+  if(draft.alert!=='silent'){
+    try{ playAlarmRamp(12, true); }catch(e){}
+  }
+  if(prev) state.wakeAlarm=prev;
+  const q=draft.math===false?null:makeGrade8Math();
+  state.nudgePreview={silent:draft.alert==='silent', text:q?q.text:'', answer:q?q.answer:''};
+  persistRender();
+}
+function stopNudgePreview(){
+  try{ stopAlarmRamp(); }catch(e){}
+  state.nudgePreview=null;
+  persistRender();
 }
 function setPendingNudge(on){
   try{
@@ -2367,6 +2409,9 @@ function toggleDone(id){
 }
 function deleteTask(id){
   const item=state.tasks.find(t=>t.id===id);
+  if(item && item.exerciseId){
+    state.exercisePlan=(state.exercisePlan||[]).filter(function(r){ return String(r.id)!==String(item.exerciseId); });
+  }
   if(item) pushUndo({type:'delete-task', item:JSON.parse(JSON.stringify(item)), label:'Task deleted — Undo'});
   state.tasks=state.tasks.filter(t=>t.id!==id);
   if(state.timer.activeTaskId===id) state.timer.activeTaskId=null;
@@ -2385,6 +2430,17 @@ function updateTaskField(id,field,value,opts){
     }
   }
   t[field]=value;
+  if(t.exerciseId){
+    const r=(state.exercisePlan||[]).find(function(x){ return String(x.id)===String(t.exerciseId); });
+    if(r){
+      if(field==='title') r.focus=value;
+      if(field==='notes') r.details=value;
+      if(field==='time') r.start=value;
+      if(field==='date' && value){
+        try{ r.day=mondayIndex(new Date(value+'T12:00:00')); }catch(e){}
+      }
+    }
+  }
   if(opts.silent){ saveState(); return; }
   persistRender();
   if(opts.feedback) showAppMessage('Saved', 'Task updated.');
@@ -3166,7 +3222,10 @@ function addStudyBlock(){
 
 function deleteStudyBlock(id){
   const item=state.studyBlocks.find(b=>b.id===id);
-  if(item) pushUndo({type:'delete-block', item:JSON.parse(JSON.stringify(item)), label:'Appointment removed — Undo'});
+  if(item){
+    removeTasksForSchedule({id:item.id, title:item.label, date:item.date, start:item.start}, 'one');
+    pushUndo({type:'delete-block', item:JSON.parse(JSON.stringify(item)), label:'Appointment removed — Undo'});
+  }
   state.studyBlocks=state.studyBlocks.filter(b=>b.id!==id);
   persistRender();
 }
@@ -3884,6 +3943,13 @@ function saveWakeAlarmFromForm(){
       showAppMessage('Pick a date.', '');
       return;
     }
+    if(!repeating){
+      const when=new Date(item.onceDate+'T'+String(item.time||'00:00').slice(0,5)+':00');
+      if(!isNaN(when.getTime()) && when.getTime()<=Date.now()){
+        showAppMessage('That time has already passed', 'Pick a later time, or a future date.');
+        return;
+      }
+    }
     ensureNudges();
     if(editingId){
       const idx=state.nudges.findIndex(function(n){ return String(n.id)===String(editingId); });
@@ -3893,6 +3959,7 @@ function saveWakeAlarmFromForm(){
       state.nudges.push(item);
     }
     state.nudgeEditId='';
+    state.nudgeFormDraft=null;
     state.wakeAlarm=item;
     if(!state.settings) state.settings={};
     state.settings.alarmSound=item.sound;
@@ -4549,6 +4616,19 @@ function renderModal(){
     root.innerHTML=launchConsentHtml();
     return;
   }
+  if(state.nudgePreview){
+    const p=state.nudgePreview;
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="text-align:center;max-width:380px">
+      <div class="qeyebrow">Preview</div>
+      <div class="qtext" style="font-size:1.05rem;margin:8px 0 10px">This is only a sound check.</div>
+      <p style="margin:0 0 12px;color:var(--muted);font-size:.9rem">Nothing is saved. A Nudge you are setting is not stopped, and a saved Nudge is not deleted.</p>
+      ${p.silent?'<p style="margin:0 0 12px">Silent is selected, so there is no sound.</p>':''}
+      ${p.text?`<p style="margin:0 0 8px;font-size:.9rem">A real Nudge can ask a short math problem. Sample only:</p><div style="font-size:1.4rem;font-weight:800;margin:8px 0 12px">${escapeHtml(p.text)} = ?</div>`:''}
+      <button class="btn" id="previewStop" type="button" style="width:100%">Stop preview</button>
+    </div></div>`;
+    document.getElementById('previewStop').onclick=stopNudgePreview;
+    return;
+  }
   if(state.wakeMathOpen && state.wakeMath){
     const m = state.wakeMath;
     root.innerHTML = `<div class="overlay" id="wakeMathOverlay" style="background:rgba(0,0,0,.72)">
@@ -4873,7 +4953,7 @@ function renderModal(){
       const rows=items.map(function(it, idx){
         const t=it.time ? (it.time+(it.end?'–'+it.end:'')) : 'All day';
         return `<div style="display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:6px 0">
-          <div style="flex:1"><b>${escapeHtml(t)}</b> ${escapeHtml(it.label||'')}</div>
+          <div style="flex:1"><b>${escapeHtml(t)}</b> ${escapeHtml(it.label||'')}<div style="font-size:.78rem;color:var(--muted);margin-top:2px">${escapeHtml(repeatLabel(it))}</div></div>
           <button type="button" class="btn ghost sm day-open" data-idx="${idx}">Open</button>
         </div>`;
       }).join('');
@@ -7800,6 +7880,7 @@ function dayCommitments(dateStr, opts){
     rows.push({time:b.start||'', end:b.end||'', title:b.label||'', room:b.room||'', kind:'block'});
   });
   (state.exercisePlan||[]).filter(r=>r.day===dow).forEach(r=>{
+    if((state.tasks||[]).some(function(t){ return String(t.exerciseId)===String(r.id) && !t.done; })) return;
     const bits=[r.focus||'Exercise'];
     if(r.details) bits.push(r.details);
     if(r.km) bits.push(r.km+' km');
@@ -7829,6 +7910,7 @@ function commitmentRowsHtml(rows, emptyText){
   }).join('');
 }
 function viewToday(){
+  try{ syncExerciseLinks(); }catch(e){}
   const needsName = !(state.profile && state.profile.name);
 
   const nn=state.nonNegotiable[todayStr()];
@@ -9728,10 +9810,30 @@ function calDraftCard(){
   </div>`;
 }
 function eventRepeats(it){
-  if(!it) return false;
-  if(it.kind==='class') return true;
-  if(it.seriesId && (state.studyBlocks||[]).filter(b=>b.seriesId===it.seriesId).length>1) return true;
-  return false;
+  return repeatKind(it)!=='once';
+}
+function repeatKind(it){
+  if(!it) return 'once';
+  if(it.kind==='class') return 'weekly';
+  const title=cleanCalTitle(it.label||it.title||'').toLowerCase();
+  const start=String(it.time||it.start||'').slice(0,5);
+  if(it.seriesId && (state.studyBlocks||[]).filter(function(b){ return b.seriesId===it.seriesId; }).length>1) return 'series';
+  if(title){
+    const n=(state.studyBlocks||[]).filter(function(b){
+      return cleanCalTitle(b.label).toLowerCase()===title && String(b.start||'').slice(0,5)===start;
+    }).length;
+    const c=(state.classes||[]).some(function(x){
+      return cleanCalTitle(x.title).toLowerCase()===title && String(x.start||'').slice(0,5)===start;
+    });
+    if(n>1 || (n>=1 && c)) return 'series';
+  }
+  return 'once';
+}
+function repeatLabel(it){
+  const k=repeatKind(it);
+  if(k==='weekly') return 'Repeats every week';
+  if(k==='series') return 'Repeats';
+  return 'One time';
 }
 function openDayPop(ds){
   state.selectedDay=ds;
@@ -9861,9 +9963,13 @@ function saveCalDraftFromForm(){
   if(repeat==='weekly'){
     let day=0;
     try{ day=mondayIndex(new Date(date+'T12:00:00')); }catch(e){}
-    state.classes.push({id:uid(), title, day, start, end, room, textbook:'', meetingUrl:'', scope:'semester', semStart:date, semEnd:'', alarmMinutes:alarmMinutes});
+    const id=uid();
+    state.classes.push({id:id, title, day, start, end, room, textbook:'', meetingUrl:'', scope:'semester', semStart:date, semEnd:'', alarmMinutes:alarmMinutes});
+    relinkScheduleTasks(d, {id:id, title:title, start:start, date:date, day:day, repeat:'weekly'});
   } else {
-    state.studyBlocks.push({id:uid(), date, start, end, label:title, meetingUrl:'', room, alarmMinutes:alarmMinutes});
+    const id=uid();
+    state.studyBlocks.push({id:id, date, start, end, label:title, meetingUrl:'', room, alarmMinutes:alarmMinutes});
+    relinkScheduleTasks(d, {id:id, title:title, start:start, date:date, repeat:'once'});
   }
   state.calDraft=null;
   state.dayPop=null;
@@ -9883,8 +9989,8 @@ function calRepeats(d){
     if(blocks+classes>1) return true;
   }
   const label=String(d.title||'').toLowerCase();
-  if(label && d.source==='ics-file'){
-    const n=(state.studyBlocks||[]).filter(b=>b.source==='ics-file' && String(b.label||'').toLowerCase()===label && (b.start||'')===(d.start||'')).length;
+  if(label){
+    const n=(state.studyBlocks||[]).filter(function(b){ return String(b.label||'').toLowerCase()===label && String(b.start||'').slice(0,5)===String(d.start||'').slice(0,5); }).length;
     if(n>1) return true;
   }
   return false;
@@ -9918,10 +10024,50 @@ function dropCopiesOnDate(date, title, start){
     return false;
   });
 }
+function removeTasksForSchedule(d, scope){
+  if(!d) return;
+  const date=d.date||'';
+  const title=d.title||d.label||'';
+  const start=String(d.start||'').slice(0,5);
+  const id=d.id;
+  state.tasks=(state.tasks||[]).filter(function(t){
+    const linked=id && (String(t.studyBlockId)===String(id) || String(t.classId)===String(id) || String(t.scheduleId)===String(id));
+    const named=title && cleanCalTitle(t.title||'').toLowerCase()===cleanCalTitle(title).toLowerCase() && (!start || !t.time || String(t.time).slice(0,5)===start);
+    if(!linked && !named) return true;
+    if(scope==='following'){
+      if(t.date && date && t.date<date) return true;
+      return false;
+    }
+    if(t.date && date && t.date!==date) return true;
+    return false;
+  });
+}
+function relinkScheduleTasks(oldDraft, neu){
+  if(!oldDraft) return;
+  const oldTitle=cleanCalTitle(oldDraft.title||'').toLowerCase();
+  const oldStart=String(oldDraft.start||'').slice(0,5);
+  (state.tasks||[]).forEach(function(t){
+    const linked=oldDraft.id && (String(t.studyBlockId)===String(oldDraft.id) || String(t.classId)===String(oldDraft.id) || String(t.scheduleId)===String(oldDraft.id));
+    const named=oldTitle && cleanCalTitle(t.title||'').toLowerCase()===oldTitle && (!oldStart || !t.time || String(t.time).slice(0,5)===oldStart) && (!oldDraft.date || !t.date || t.date===oldDraft.date);
+    if(!linked && !named) return;
+    t.title=neu.title;
+    if(neu.start) t.time=neu.start;
+    if(neu.repeat==='weekly'){
+      t.classId=neu.id;
+      t.studyBlockId='';
+      t.date=nextDateForDow(neu.day);
+    } else {
+      t.studyBlockId=neu.id;
+      t.classId='';
+      if(neu.date) t.date=neu.date;
+    }
+  });
+}
 function deleteCalOne(){
   const d=state.calDraft||{};
   const date=d.date||state.selectedDay||todayStr();
   markCalEdit();
+  removeTasksForSchedule({id:d.id, title:d.title, date:date, start:d.start}, 'one');
   if(d.kind==='block' && d.id) state.studyBlocks=(state.studyBlocks||[]).filter(b=>String(b.id)!==String(d.id));
   if(d.kind==='external' && d.id) state.externalBusy=(state.externalBusy||[]).filter(b=>String(b.id)!==String(d.id));
   if(d.kind==='class' && d.id){
@@ -9947,6 +10093,7 @@ function deleteCalFollowing(){
   const lab=calTitleKey(d.title);
   const mk=meetingKey(d.title);
   markCalEdit();
+  removeTasksForSchedule({id:d.id, title:d.title, date:date, start:d.start}, 'following');
   function endClass(c){
     if(!c || c._drop) return;
     if(!c.semStart || date<=c.semStart) c._drop=true;
@@ -10001,6 +10148,7 @@ function deleteCalDraft(){
   markCalEdit();
   if(d.kind==='class') deleteCalOne();
   else {
+    removeTasksForSchedule({id:d.id, title:d.title, date:date, start:d.start}, 'one');
     if(d.id) state.studyBlocks = (state.studyBlocks||[]).filter(b=>String(b.id)!==String(d.id));
     if(d.kind==='external' && d.id) state.externalBusy = (state.externalBusy||[]).filter(b=>String(b.id)!==String(d.id));
     dropCopiesOnDate(date, d.title, d.start);
@@ -10030,14 +10178,20 @@ function viewNudge(){
   const labels={chime:'Chime',bell:'Bell',beep:'Beep',digital:'Digital',radar:'Radar',knock:'Wake burst'};
   const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   const editing=state.nudgeEditId ? (state.nudges||[]).find(function(n){ return String(n.id)===String(state.nudgeEditId); }) : null;
+  const draft=!editing && state.nudgeFormDraft ? state.nudgeFormDraft : null;
   const wa=editing||{};
-  const curSound=(editing&&editing.sound)||(state.settings&&state.settings.alarmSound)||'chime';
+  const curSound=(editing&&editing.sound)||(draft&&draft.sound)||(state.settings&&state.settings.alarmSound)||'chime';
   const now=new Date();
   const nowClock=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
-  const savedRepeat=!!(editing && !editing.onceDate && (editing.days||[]).length);
-  const timeVal=editing ? (editing.time||nowClock) : nowClock;
-  const dateVal=editing ? (editing.onceDate||todayStr()) : todayStr();
-  const dayOn=function(i){ return !!(editing && (editing.days||[]).indexOf(i)>=0); };
+  const savedRepeat=editing ? !!(editing && !editing.onceDate && (editing.days||[]).length) : !!(draft&&draft.repeating);
+  const timeVal=editing ? (editing.time||nowClock) : ((draft&&draft.time)||nowClock);
+  const dateVal=editing ? (editing.onceDate||todayStr()) : ((draft&&draft.onceDate)||todayStr());
+  const dayOn=function(i){
+    if(editing) return (editing.days||[]).indexOf(i)>=0;
+    return !!(draft && (draft.days||[]).indexOf(i)>=0);
+  };
+  const mathOn=editing ? wa.math!==false : (!draft || draft.math!==false);
+  const silent=editing ? wa.alert==='silent' : !!(draft && draft.alert==='silent');
   const form=`
     <div style="font-size:.78rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase">Current time</div>
     <div id="nudgeNowClock" style="font-size:2.1rem;font-weight:800;margin:2px 0 10px">${nowClock}</div>
@@ -10058,10 +10212,10 @@ function viewNudge(){
         ${['chime','bell','beep','digital','radar','knock'].map(v=>`<option value="${v}" ${curSound===v?'selected':''}>${labels[v]||v}</option>`).join('')}
       </select>
     </div>
-    <label style="display:flex;align-items:center;margin-top:12px"><input type="checkbox" id="wakeMathOn" ${wa.math===false?'':'checked'}> Ask a math problem to stop this Nudge</label>
+    <label style="display:flex;align-items:center;margin-top:12px"><input type="checkbox" id="wakeMathOn" ${mathOn?'checked':''}> Ask a math problem to stop this Nudge</label>
     <div style="margin-top:12px;font-weight:700">Notification</div>
-    <label style="display:flex;align-items:center;margin-top:6px"><input type="radio" name="wakeAlert" value="regular" ${wa.alert==='silent'?'':'checked'}> Regular notification</label>
-    <label style="display:flex;align-items:center;margin-top:6px"><input type="radio" name="wakeAlert" value="silent" ${wa.alert==='silent'?'checked':''}> Silent notification</label>
+    <label style="display:flex;align-items:center;margin-top:6px"><input type="radio" name="wakeAlert" value="regular" ${silent?'':'checked'}> Regular notification</label>
+    <label style="display:flex;align-items:center;margin-top:6px"><input type="radio" name="wakeAlert" value="silent" ${silent?'checked':''}> Silent notification</label>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;max-width:280px">
       <button class="btn" id="saveWakeBtn" type="button">${editing?'Save changes':'Save Nudge'}</button>
       <button class="btn ghost" id="testWakeBtn" type="button">Preview</button>
@@ -10100,6 +10254,43 @@ function schedBox(key, title, inner){
     </button>
     ${open?`<div style="padding:0 16px 16px">${inner}</div>`:''}
   </div>`;
+}
+function scheduleMatchesHtml(q){
+  const query=String(q||'').trim().toLowerCase();
+  if(query.length<2) return '<p style="margin:8px 0 0;color:var(--muted);font-size:.85rem">Type at least two letters.</p>';
+  const rows=[];
+  const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  (state.classes||[]).forEach(function(c){
+    if(cleanCalTitle(c.title).toLowerCase().indexOf(query)<0) return;
+    rows.push({title:c.title, when:(dayNames[c.day]||'')+' '+(c.start||'')+(c.end?'–'+c.end:''), note:'Repeats every week', kind:'class', id:c.id, date:c.semStart||todayStr()});
+  });
+  const seen={};
+  (state.studyBlocks||[]).slice().sort(function(a,b){ return String(a.date||'').localeCompare(String(b.date||'')); }).forEach(function(b){
+    if(cleanCalTitle(b.label).toLowerCase().indexOf(query)<0) return;
+    const key=cleanCalTitle(b.label).toLowerCase()+'|'+String(b.start||'').slice(0,5);
+    const mates=(state.studyBlocks||[]).filter(function(x){ return cleanCalTitle(x.label).toLowerCase()+'|'+String(x.start||'').slice(0,5)===key; });
+    if(mates.length>1){
+      if(seen[key]) return;
+      seen[key]=1;
+      const first=mates.slice().sort(function(a,b){ return String(a.date||'').localeCompare(String(b.date||'')); })[0];
+      rows.push({title:first.label, when:(first.start||'')+(first.end?'–'+first.end:''), note:'Repeats · '+mates.length+' dates. First date '+first.date, kind:'block', id:first.id, date:first.date});
+    } else {
+      rows.push({title:b.label, when:(b.start||'')+(b.end?'–'+b.end:''), note:'One time · '+b.date, kind:'block', id:b.id, date:b.date});
+    }
+  });
+  (state.tasks||[]).forEach(function(t){
+    if(t.done) return;
+    if(String(t.title||'').toLowerCase().indexOf(query)<0) return;
+    rows.push({title:t.title, when:t.date||'No date', note:'Task'+(t.time?' · '+t.time:''), kind:'task', id:t.id, date:t.date||todayStr()});
+  });
+  if(!rows.length) return '<p style="margin:8px 0 0">Nothing with that name.</p>';
+  return rows.slice(0,30).map(function(r){
+    return `<div style="border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:8px">
+      <div style="font-weight:700">${escapeHtml(r.title)}</div>
+      <div style="font-size:.85rem;color:var(--muted);margin:4px 0">${escapeHtml(r.when)} · ${escapeHtml(r.note)}</div>
+      <button type="button" class="btn ghost sm" data-action="cal-find-open" data-kind="${escapeHtml(r.kind)}" data-id="${escapeHtml(r.id)}" data-date="${escapeHtml(r.date||'')}">Open</button>
+    </div>`;
+  }).join('');
 }
 function viewCalendar(){
   if(!state.calTwins || !state.calTwins.length){
@@ -10193,6 +10384,12 @@ function viewCalendar(){
     <div class="eyebrow">Week &amp; month at a glance</div>
     <h1>Your Schedule</h1>
     <p>Day, week, or month. Tap an empty day to add something. Tap an event to change or delete it.</p>
+  </div>
+  <div class="card" style="padding:14px 16px;margin-bottom:10px">
+    <div style="font-weight:700;margin-bottom:6px">Find an event</div>
+    <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Type a name. Each result says whether it is one time or repeating. Open it to delete it.</p>
+    <input id="calFindInput" value="${escapeHtml(state.calFind||'')}" placeholder="For example, AMALTAS" style="width:100%">
+    <div id="calFindResults">${scheduleMatchesHtml(state.calFind||'')}</div>
   </div>
   ${schedBox('glance','Quick glance', `
   <div class="calnav">
@@ -12284,6 +12481,59 @@ function needsDistance(focus){
   if(f==='other') return true;
   return /run|walk|cycl|swim|row|tread|hik|jog/.test(f);
 }
+function nextDateForDow(dow){
+  const base=todayStr();
+  const todayDow=mondayIndex(new Date(base+'T12:00:00'));
+  const add=(Number(dow)-todayDow+7)%7;
+  return icsAddDays(base, add);
+}
+function exerciseTaskTitle(r){
+  const bits=[r.focus||'Exercise'];
+  if(r.details) bits.push(r.details);
+  if(r.km) bits.push(String(r.km)+' km');
+  return bits.join(' · ');
+}
+function syncExerciseLinks(){
+  ensureHabitPlans();
+  const ids={};
+  (state.exercisePlan||[]).forEach(function(r){
+    if(!r.id) r.id=uid();
+    ids[String(r.id)]=1;
+    const title=exerciseTaskTitle(r);
+    const date=nextDateForDow(r.day);
+    let t=(state.tasks||[]).find(function(x){ return String(x.exerciseId)===String(r.id) && !x.done; });
+    if(!t){
+      t={id:uid(), title:title, notes:r.details||'', date:date, time:r.start||'', priority:'medium', urgent:false, important:false, tier:'could', frog:false, context:'personal', meetingUrl:'', reminderLeads:[], reminderTime:'', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{}, strategic:{}, flip:{}, exerciseId:r.id, created:Date.now()};
+      if(!Array.isArray(state.tasks)) state.tasks=[];
+      state.tasks.unshift(t);
+    } else {
+      t.title=title;
+      t.notes=r.details||'';
+      t.time=r.start||'';
+      if(!t.done) t.date=date;
+      t.exerciseId=r.id;
+    }
+    r.taskId=t.id;
+  });
+  state.tasks=(state.tasks||[]).filter(function(t){ return !t.exerciseId || ids[String(t.exerciseId)]; });
+  const sig=todayStr()+'|'+(state.exercisePlan||[]).map(function(r){ return [r.id,r.day,r.start,r.end,r.focus,r.details,r.km,r.taskId].join(':'); }).join(';');
+  if(state._exSig!==sig){
+    state._exSig=sig;
+    try{ saveState(); }catch(e){}
+  }
+}
+function beginExerciseEdit(id){
+  ensureHabitPlans();
+  const r=(state.exercisePlan||[]).find(function(x){ return String(x.id)===String(id); });
+  if(!r) return;
+  const known=['Aerobics','Aqua Zumba','Barre','Bodybuilding','Bouldering','Boxing','Calisthenics','Cardio','CrossFit','Cycling','Dance','Dance Fitness','HIIT','Hip-Hop Cardio','Kickboxing','Meditation','Pilates','Powerlifting','Qi Gong','Rowing','Running','Stretch Therapy','Swimming','Tabata','Tai Chi','Treadmill','Walking','Weight Training','Yoga','Zumba'];
+  const isKnown=known.indexOf(r.focus)>=0;
+  state.exForm={editId:r.id, day:String(r.day), focus:isKnown?r.focus:'Other', other:isKnown?'':(r.focus||''), details:r.details||'', start:r.start||'07:30', end:r.end||'08:15', km:r.km||''};
+  if(!state.habitOpen) state.habitOpen={};
+  state.habitOpen.exercise=true;
+  state.habitOpen.exKey=true;
+  persistRender();
+}
 function saveExercisePlan(){
   ensureHabitPlans();
   const dayEl=document.getElementById('exDay');
@@ -12301,15 +12551,30 @@ function saveExercisePlan(){
   }
   const label = focus==='Other' ? (other||'Workout') : focus;
   const n=Number(day);
-  state.exercisePlan=state.exercisePlan.filter(function(r){ return !(r.day===n && r.start===start && r.focus===label); });
-  state.exercisePlan.push({id:uid(), day:n, start:start, end:end, focus:label, details:details, km: needsDistance(focus)?km:''});
+  const editId=state.exForm&&state.exForm.editId;
+  let row=editId?(state.exercisePlan||[]).find(function(r){ return String(r.id)===String(editId); }):null;
+  if(!row){
+    state.exercisePlan=state.exercisePlan.filter(function(r){ return !(r.day===n && r.start===start && r.focus===label); });
+    row={id:uid()};
+    state.exercisePlan.push(row);
+  }
+  row.day=n;
+  row.start=start;
+  row.end=end;
+  row.focus=label;
+  row.details=details;
+  row.km=needsDistance(focus)?km:'';
+  state.exForm={day:'', focus:focus, other:'', details:'', start:start, end:end, km:'', editId:''};
+  syncExerciseLinks();
   try{ saveState(); }catch(e){}
-  showAppMessage('Saved','Saved.');
+  persistRender();
+  showAppMessage('Saved','Updated on Healthy Habits, Today, the schedule, and Tasks.');
 }
 function clearExercisePlan(which){
   ensureHabitPlans();
   if(which==='all') state.exercisePlan=[];
   else state.exercisePlan=state.exercisePlan.filter(function(r){ return String(r.day)!==String(which); });
+  syncExerciseLinks();
   try{ saveState(); }catch(e){}
   persistRender();
 }
@@ -12339,6 +12604,7 @@ function exerciseTableHtml(){
       <th style="background:#f59e0b;color:#fff;padding:8px">Focus</th>
       <th style="background:#7c3aed;color:#fff;padding:8px">Details</th>
       <th style="background:#ef4444;color:#fff;padding:8px">Duration</th>
+      <th style="background:#64748b;color:#fff;padding:8px"></th>
     </tr>
     ${rows.map(function(r){
       const bg=colors[r.day%colors.length];
@@ -12350,7 +12616,7 @@ function exerciseTableHtml(){
         if(mins>0) dur=mins+' min';
       }catch(e){}
       const detail=escapeHtml(r.details||'')+(r.km?(' · '+escapeHtml(String(r.km))+' km'):'');
-      return `<tr style="background:${bg}"><td style="padding:8px;font-weight:700">${names[r.day]||''}</td><td style="padding:8px">${escapeHtml(formatTime12(r.start))} – ${escapeHtml(formatTime12(r.end))}</td><td style="padding:8px">${escapeHtml(r.focus||'')}</td><td style="padding:8px">${detail}</td><td style="padding:8px">${dur}</td></tr>`;
+      return `<tr style="background:${bg}"><td style="padding:8px;font-weight:700">${names[r.day]||''}</td><td style="padding:8px">${escapeHtml(formatTime12(r.start))} – ${escapeHtml(formatTime12(r.end))}</td><td style="padding:8px">${escapeHtml(r.focus||'')}</td><td style="padding:8px">${detail}</td><td style="padding:8px">${dur}</td><td style="padding:8px"><button type="button" class="btn ghost sm" data-action="ex-edit" data-id="${escapeHtml(r.id)}">Edit</button></td></tr>`;
     }).join('')}
   </table></div>`;
 }
@@ -12369,6 +12635,7 @@ function nudgeRow(key, label){
 }
 function viewHabits(){
   ensureHabitPlans();
+  try{ syncExerciseLinks(); }catch(e){}
   const names=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   const full=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
   const focuses=['Aerobics','Aqua Zumba','Barre','Bodybuilding','Bouldering','Boxing','Calisthenics','Cardio','CrossFit','Cycling','Dance','Dance Fitness','HIIT','Hip-Hop Cardio','Kickboxing','Meditation','Pilates','Powerlifting','Qi Gong','Rowing','Running','Stretch Therapy','Swimming','Tabata','Tai Chi','Treadmill','Walking','Weight Training','Yoga','Zumba','Other'];
@@ -12406,7 +12673,8 @@ function viewHabits(){
         <div class="field"><label>End</label><input type="time" id="exEnd" value="${escapeHtml(form.end||'08:15')}"></div>
         <div class="field" id="exKmWrap" style="${showKm?'':'display:none'}"><label>Distance (km)</label><input id="exKm" inputmode="decimal" value="${escapeHtml(form.km||'')}" placeholder="3"></div>
       </div>
-      <button type="button" class="btn" id="exSave" style="margin-top:8px">Save session</button>
+      <button type="button" class="btn" id="exSave" style="margin-top:8px">${form.editId?'Update this day':'Save session'}</button>
+      ${form.editId?'<button type="button" class="btn ghost" id="exEditCancel" style="margin-top:8px;margin-left:8px">Cancel edit</button>':''}
       <div class="row" style="margin-top:14px;align-items:flex-end">
         <div class="field"><label>Clear</label>
           <select id="exClearDay">
@@ -14148,6 +14416,7 @@ function wireView(){
     else if(action==='nav') el.addEventListener('click', ()=>{ const v=el.getAttribute('data-view')||'today'; state.view=v; try{persistRender();}catch(e){render();} });
     else if(action==='accept-terms') el.addEventListener('click', ()=>{ acceptTermsAndContinue(); });
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
+    else if(action==='ex-edit') el.addEventListener('click', ()=>{ beginExerciseEdit(el.dataset.id); });
     else if(action==='sched-toggle' || action==='habit-sec') el.addEventListener('click', ()=>{
       const bag = action==='habit-sec' ? 'habitOpen' : 'schedOpen';
       if(!state[bag]) state[bag] = action==='sched-toggle' ? {glance:true} : {today:true};
@@ -14722,6 +14991,41 @@ function wireView(){
         openCalDraft({id:b.id, kind:'block', title:b.label, date:b.date, start:b.start, end:b.end, room:b.room||'', repeat:'once', seriesId:b.seriesId||'', source:b.source||''});
       }
     }));
+    function wireCalFind(){
+      main.querySelectorAll('[data-action="cal-find-open"]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          const kind=btn.dataset.kind, id=btn.dataset.id, date=btn.dataset.date||todayStr();
+          if(kind==='task'){
+            if(typeof openTaskMenu==='function') openTaskMenu(id);
+            return;
+          }
+          state.selectedDay=date;
+          state.calRef=date;
+          calendarBrowsing=true;
+          if(kind==='class'){
+            const c=(state.classes||[]).find(function(x){ return String(x.id)===String(id); });
+            if(!c) return;
+            openCalDraft({id:c.id, kind:'class', title:c.title, start:c.start, end:c.end, room:c.room||'', repeat:'weekly', date:date, seriesId:c.seriesId||'', source:c.source||''});
+            return;
+          }
+          const b=(state.studyBlocks||[]).find(function(x){ return String(x.id)===String(id); });
+          if(!b) return;
+          state.dayPop={date:b.date, mode:'list'};
+          openListedEvent({kind:'block', id:b.id, label:b.label, time:b.start||'', end:b.end||'', seriesId:b.seriesId||'', source:b.source||''});
+        });
+      });
+    }
+    const find=document.getElementById('calFindInput');
+    if(find){
+      find.addEventListener('input', function(){
+        state.calFind=find.value;
+        const box=document.getElementById('calFindResults');
+        if(!box) return;
+        box.innerHTML=scheduleMatchesHtml(state.calFind);
+        wireCalFind();
+      });
+    }
+    wireCalFind();
     const startNew=document.getElementById('calStartNew');
     if(startNew) startNew.addEventListener('click', ()=>openDayPop(state.selectedDay||todayStr()));
     const cds=document.getElementById('calDraftSave'); if(cds) cds.addEventListener('click', saveCalDraftFromForm);
@@ -15127,6 +15431,11 @@ function wireView(){
       const w=document.getElementById('exClearDay');
       clearExercisePlan(w?w.value:'all');
     });
+    const exCancel=document.getElementById('exEditCancel');
+    if(exCancel) exCancel.addEventListener('click', function(){
+      state.exForm={day:'', focus:'Weight Training', other:'', details:'', start:'07:30', end:'08:15', km:'', editId:''};
+      persistRender();
+    });
     const exFocus=document.getElementById('exFocus');
     if(exFocus) exFocus.addEventListener('change', function(){
       state.exForm={
@@ -15525,16 +15834,7 @@ function wireView(){
     const testWake=document.getElementById('testWakeBtn');
     if(testWake) testWake.addEventListener('click', function(e){
       e.preventDefault();
-      try{
-        if(!state.wakeAlarm) state.wakeAlarm={};
-        const alertEl=document.querySelector('input[name="wakeAlert"]:checked');
-        state.wakeAlarm.alert = alertEl && alertEl.value==='silent' ? 'silent' : 'regular';
-        const mathEl=document.getElementById('wakeMathOn');
-        state.wakeAlarm.math = !mathEl || !!mathEl.checked;
-        const snd=document.getElementById('wakeSoundSelect');
-        if(snd && snd.value) state.wakeAlarm.sound=snd.value;
-        triggerWakeMath('test');
-      }catch(err){ showAppMessage('Preview failed', String(err&&err.message||err)); }
+      try{ startNudgePreview(); }catch(err){ showAppMessage('Preview failed', String(err&&err.message||err)); }
     });
     const editN=document.getElementById('nudgeEditBtn');
     if(editN) editN.addEventListener('click', function(){ state.nudgeEditing=true; persistRender(); });
@@ -15890,16 +16190,7 @@ function wireView(){
     const testWake=document.getElementById('testWakeBtn');
     if(testWake) testWake.addEventListener('click', function(e){
       e.preventDefault(); e.stopPropagation();
-      try{
-        if(!state.wakeAlarm) state.wakeAlarm={};
-        const alertEl=document.querySelector('input[name="wakeAlert"]:checked');
-        state.wakeAlarm.alert = alertEl && alertEl.value==='silent' ? 'silent' : 'regular';
-        const mathEl=document.getElementById('wakeMathOn');
-        state.wakeAlarm.math = !mathEl || !!mathEl.checked;
-        const snd=document.getElementById('wakeSoundSelect');
-        if(snd && snd.value && state.wakeAlarm.alert!=='silent') state.wakeAlarm.sound=snd.value;
-        triggerWakeMath('test');
-      }catch(err){ showAppMessage('Preview failed', String(err&&err.message||err)); }
+      try{ startNudgePreview(); }catch(err){ showAppMessage('Preview failed', String(err&&err.message||err)); }
     });
     const offWake=document.getElementById('turnOffWakeBtn');
     if(offWake) offWake.addEventListener('click', function(e){
