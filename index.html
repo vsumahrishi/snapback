@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="296">
+<meta name="snapback-build" content="301">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1562,12 +1562,20 @@ function triggerWakeMath(reason, note){
     setPendingNudge(true);
   }
   if(state.wakeAlarm.sound && state.settings) state.settings.alarmSound = state.wakeAlarm.sound;
-  const a=2+Math.floor(Math.random()*8);
-  const b=2+Math.floor(Math.random()*8);
-  state.wakeMath = { a, b, answer: a+b, reason: reason||'', note: note||'' };
+  const wa=state.wakeAlarm;
+  const silent=wa.alert==='silent';
+  const wantMath=wa.math!==false;
+  if(wantMath){
+    const q=makeGrade8Math();
+    state.wakeMath={ text:q.text, answer:q.answer, reason:reason||'', note:note||'', dismissOnly:false };
+  } else {
+    state.wakeMath={ text:'', answer:'', reason:reason||'', note:note||'', dismissOnly:true };
+  }
   state.wakeMathOpen = true;
-  try{ playAlarmRamp(55); }catch(e){}
-  try{ if(navigator.vibrate) navigator.vibrate([400,200,400,200,400]); }catch(e){}
+  if(!silent){
+    try{ playAlarmRamp(55); }catch(e){}
+    try{ if(navigator.vibrate) navigator.vibrate([400,200,400,200,400]); }catch(e){}
+  }
   persistRender();
 }
 function consumePendingNudge(){
@@ -3701,7 +3709,7 @@ function checkHabitNudges(now){
   if(state.habitNudges.water!==false){
     [8,11,14,17].forEach(function(h){
       const t=hm(String(h).padStart(2,'0')+':00');
-      if(now>=t && now<t+25*60*1000) once('water:'+today+':'+h, 'Take a sip of water. Hydrate.', null);
+      if(now>=t && now<t+25*60*1000) once('water:'+today+':'+h, 'Hydrate now - just a sip of water!', null);
     });
   }
   if(state.habitNudges.exercise!==false){
@@ -3848,11 +3856,15 @@ function saveWakeAlarmFromForm(){
     state.wakeAlarm.enabled = true;
     state.wakeAlarm.time = (tm && tm.value) ? tm.value : (state.wakeAlarm.time || '07:00');
     state.wakeAlarm.onceDate = (once && once.value) ? once.value : '';
-    if(snd && snd.value){
+    if(snd && snd.value && state.wakeAlarm.alert!=='silent'){
       state.wakeAlarm.sound = snd.value;
       if(!state.settings) state.settings={};
       state.settings.alarmSound = snd.value;
     }
+    const mathEl=document.getElementById('wakeMathOn');
+    state.wakeAlarm.math = !mathEl || mathEl.checked;
+    const alertEl=document.querySelector('input[name="wakeAlert"]:checked');
+    state.wakeAlarm.alert = alertEl && alertEl.value==='silent' ? 'silent' : 'regular';
     const days=[];
     for(let i=0;i<7;i++){
       const el=document.getElementById('wakeDay'+i);
@@ -4496,9 +4508,9 @@ function renderModal(){
       <div class="quotecard" style="text-align:center;max-width:360px">
         <div class="qeyebrow">Nudge</div>
         ${m.note?`<div style="font-size:.95rem;margin:4px 0 8px">${escapeHtml(m.note)}</div>`:''}
-        <div class="qtext" style="font-size:1.15rem;margin:8px 0 12px">Solve to stop</div>
-        <div style="font-size:1.6rem;font-weight:800;margin:12px 0">${m.a} + ${m.b} = ?</div>
-        <input id="wakeMathInput" type="number" inputmode="numeric" placeholder="Answer" style="width:100%;padding:12px;font-size:1.1rem;text-align:center;border-radius:12px;border:1px solid var(--line)">
+        <div class="qtext" style="font-size:1.15rem;margin:8px 0 12px">${m.dismissOnly?'Nudge':'Solve to stop'}</div>
+        ${m.dismissOnly?'':`<div style="font-size:1.6rem;font-weight:800;margin:12px 0">${escapeHtml(m.text||((m.a||'')+' + '+(m.b||'')))} = ?</div>
+        <input id="wakeMathInput" type="number" inputmode="numeric" placeholder="Answer" style="width:100%;padding:12px;font-size:1.1rem;text-align:center;border-radius:12px;border:1px solid var(--line)">`}
         <div class="qactions" style="margin-top:14px;display:flex;flex-direction:column;gap:8px">
           <button class="btn" id="wakeMathSubmit" style="width:100%">Stop</button>
           <button class="btn ghost sm" id="wakeMathSnooze5" style="width:100%">Snooze 5 min</button>
@@ -4507,6 +4519,7 @@ function renderModal(){
       </div>
     </div>`;
     const submit = () => {
+      if(m.dismissOnly){ wakeDismissMath(m.answer); return; }
       const v = document.getElementById('wakeMathInput')?.value;
       wakeDismissMath(v);
     };
@@ -4721,6 +4734,95 @@ function renderModal(){
     document.getElementById('appMsgOk').onclick=()=>closeAppMsg('ok');
     const c=document.getElementById('appMsgCancel');
     if(c) c.onclick=()=>closeAppMsg('cancel');
+    return;
+  }
+  if(state.seriesAsk){
+    const s=state.seriesAsk;
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:420px;text-align:left">
+      <div style="font-weight:800;font-size:1.05rem;margin-bottom:8px">Open repeating appointment</div>
+      <p style="margin:0 0 12px">This is one appointment in a series. What do you want to open?</p>
+      <p style="margin:0 0 12px;font-weight:700">${escapeHtml(s.title||'')}</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn" id="seriesOne" type="button">Just this one</button>
+        <button class="btn ghost" id="seriesAll" type="button">The entire series</button>
+        <button class="btn ghost" id="seriesCancel" type="button">Cancel</button>
+      </div>
+    </div></div>`;
+    document.getElementById('seriesOne').onclick=function(){ seriesChoice('one'); };
+    document.getElementById('seriesAll').onclick=function(){ seriesChoice('series'); };
+    document.getElementById('seriesCancel').onclick=function(){ seriesChoice('cancel'); };
+    return;
+  }
+  if(state.calClashes && state.calClashes.length && !state.dayPop){
+    const c=state.calClashes[0];
+    const when=prettyDate(c.date);
+    const clock=(c.oldStart||c.start||'')+(c.oldEnd||c.end?('–'+(c.oldEnd||c.end)):'');
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:440px;text-align:left">
+      <div style="font-weight:800;font-size:1.05rem;margin-bottom:8px">This time is already taken</div>
+      <p style="margin:0 0 8px">${escapeHtml(when)}${clock?' · '+escapeHtml(clock):''}</p>
+      <p style="margin:0 0 4px">Already in SnapBack: <b>${escapeHtml(c.oldTitle||'')}</b></p>
+      <p style="margin:0 0 12px">From the calendar file: <b>${escapeHtml(c.newTitle||'')}</b></p>
+      <p style="margin:0 0 12px;color:var(--muted);font-size:.9rem">Edit either appointment, or keep both.</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn" id="clashOld" type="button">Edit the SnapBack appointment</button>
+        <button class="btn ghost" id="clashNew" type="button">Edit the imported appointment</button>
+        <button class="btn ghost" id="clashKeep" type="button">Keep both</button>
+        <button class="btn ghost" id="clashKeepAll" type="button">Keep both for the rest</button>
+      </div>
+    </div></div>`;
+    document.getElementById('clashOld').onclick=function(){ clashEdit('old'); };
+    document.getElementById('clashNew').onclick=function(){ clashEdit('new'); };
+    document.getElementById('clashKeep').onclick=function(){ state.calClashes=state.calClashes.slice(1); persistRender(); };
+    document.getElementById('clashKeepAll').onclick=function(){ state.calClashes=[]; persistRender(); };
+    return;
+  }
+  if(state.dayPop){
+    const ds=state.dayPop.date;
+    const when=prettyDate(ds)||ds;
+    if(state.dayPop.mode==='list'){
+      const items=itemsForDate(ds);
+      const rows=items.map(function(it, idx){
+        const t=it.time ? (it.time+(it.end?'–'+it.end:'')) : 'All day';
+        return `<div style="display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:6px 0">
+          <div style="flex:1"><b>${escapeHtml(t)}</b> ${escapeHtml(it.label||'')}</div>
+          <button type="button" class="btn ghost sm day-open" data-idx="${idx}">Open</button>
+        </div>`;
+      }).join('');
+      root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:460px;text-align:left">
+        <div style="font-weight:800;font-size:1.05rem;margin-bottom:8px">${escapeHtml(when)}</div>
+        ${rows || '<p>Nothing on this day.</p>'}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+          <button class="btn" id="dayAdd" type="button">Add event</button>
+          <button class="btn ghost" id="dayClose" type="button">Close</button>
+        </div>
+      </div></div>`;
+      document.getElementById('dayClose').onclick=closeDayPop;
+      document.getElementById('dayAdd').onclick=function(){
+        state.dayPop.mode='add';
+        state.calDraft={title:'', date:ds, start:'09:00', end:'10:00', repeat:'once', room:'', id:'', kind:'', nudge:true};
+        persistRender();
+      };
+      root.querySelectorAll('.day-open').forEach(function(btn){
+        btn.onclick=function(){ openListedEvent(items[Number(btn.dataset.idx)]); };
+      });
+      return;
+    }
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:460px;text-align:left;max-height:86vh;overflow:auto">
+      <div style="font-weight:800;font-size:1.05rem;margin-bottom:8px">${state.dayPop.mode==='add'?'Add event':(state.calDraft&&state.calDraft.id?'Edit event':'Event')} · ${escapeHtml(when)}</div>
+      ${state.calDraft?calDraftCard():''}
+      <button class="btn ghost" id="dayClose" type="button" style="margin-top:8px">Close</button>
+    </div></div>`;
+    document.getElementById('dayClose').onclick=closeDayPop;
+    const cds=document.getElementById('calDraftSave'); if(cds) cds.onclick=saveCalDraftFromForm;
+    const cdc=document.getElementById('calDraftCancel'); if(cdc) cdc.onclick=function(){
+      state.calDraft=null;
+      const left=itemsForDate(ds);
+      if(left.length) state.dayPop.mode='list'; else closeDayPop();
+      if(left.length) persistRender();
+    };
+    const cdd=document.getElementById('calDraftDelete'); if(cdd) cdd.onclick=deleteCalDraft;
+    const cd1=document.getElementById('calDeleteOne'); if(cd1) cd1.onclick=deleteCalOne;
+    const cd2=document.getElementById('calDeleteFollowing'); if(cd2) cd2.onclick=deleteCalFollowing;
     return;
   }
   if(state.appPrompt){
@@ -5324,6 +5426,7 @@ function syncPayloadFromState(){
 function applyCloudPayload(payload){
   if(!payload || typeof payload!=='object') return;
   if(state._icsImportGuard && Date.now() < state._icsImportGuard) return;
+  if(state._calEditGuard && Date.now() < state._calEditGuard) return;
   _syncApplying = true;
   const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm'];
   keys.forEach(k=>{ if(payload[k]!==undefined) state[k]=payload[k]; });
@@ -8590,11 +8693,11 @@ function itemsForDate(dateStr){
     if(c.scope==='session'){ show = c.date===dateStr; }
     else{ show = c.day===dow && (!c.semStart || dateStr>=c.semStart) && (!c.semEnd || dateStr<=c.semEnd); }
     if(show && Array.isArray(c.exdates) && c.exdates.indexOf(dateStr)>=0) show=false;
-    if(show) items.push({type:'class', kind:'class', id:c.id, color:'var(--blue)', time:c.start, end:c.end||'', label:c.title+(c.room?' · '+c.room:''), meetingUrl:c.meetingUrl});
+    if(show) items.push({type:'class', kind:'class', id:c.id, color:'var(--blue)', time:c.start, end:c.end||'', label:c.title+(c.room?' · '+c.room:''), meetingUrl:c.meetingUrl, seriesId:c.seriesId||'', source:c.source||''});
   });
   state.tasks.filter(t=>t.date===dateStr).forEach(t=>items.push({type:'task', kind:'task', id:t.id, color: t.priority==='high'?'var(--brick)':t.priority==='medium'?'var(--amber)':'var(--pine)',time:t.time||'',label:t.title,meetingUrl:t.meetingUrl}));
   state.tasks.filter(t=>t.startDate===dateStr && t.startDate!==t.date).forEach(t=>items.push({type:'taskstart', kind:'task', id:t.id, color:'var(--blue-soft)',time:t.startTime||'',label:t.title,meetingUrl:t.meetingUrl}));
-  state.studyBlocks.filter(b=>b.date===dateStr).forEach(b=>items.push({type:'block', kind:'block', id:b.id, color:'var(--purple)', time:b.start, end:b.end||'', label:b.label, meetingUrl:b.meetingUrl}));
+  state.studyBlocks.filter(b=>b.date===dateStr).forEach(b=>items.push({type:'block', kind:'block', id:b.id, color:'var(--purple)', time:b.start, end:b.end||'', label:b.label, meetingUrl:b.meetingUrl, seriesId:b.seriesId||'', source:b.source||''}));
   (state.externalBusy||[]).forEach(ev=>{
     if(ev.date!==dateStr) return;
     if(!ev.id) ev.id='ext_'+dateStr+'_'+(ev.start||'')+'_'+(ev.title||'');
@@ -8607,7 +8710,7 @@ function itemsForDate(dateStr){
     return score(a)-score(b);
   });
   return ranked.filter(it=>{
-    const lab=String(it.label||'').toLowerCase().replace(/\s*\((due|google|calendar)\)/g,'').replace(/\s+/g,' ').trim();
+    const lab=cleanCalTitle(it.label||'').toLowerCase();
     const k=(it.time||'')+'|'+lab;
     if(seen[k]) return false;
     seen[k]=1;
@@ -8615,6 +8718,77 @@ function itemsForDate(dateStr){
   }).sort((a,b)=>(a.time||'').localeCompare(b.time||''));
 }
 
+function cleanCalTitle(s){
+  let t=String(s||'').replace(/\s+/g,' ').trim();
+  t=t.replace(/^(ET|EST|EDT|CT|CST|CDT|MT|MST|MDT|PT|PST|PDT|IST|GMT|UTC|BST)\s*[-–:]\s*/i,'');
+  t=t.replace(/\s*\/\s*/g,' / ');
+  return t.trim();
+}
+function calTitleKey(s){ return cleanCalTitle(s).toLowerCase(); }
+function calMinutes(t){
+  if(!t || !/^\d{1,2}:\d{2}/.test(String(t))) return null;
+  const p=String(t).slice(0,5).split(':').map(Number);
+  return p[0]*60+(p[1]||0);
+}
+function calTimesOverlap(aStart,aEnd,bStart,bEnd){
+  const as=calMinutes(aStart), bs=calMinutes(bStart);
+  if(as==null || bs==null) return false;
+  const ae=calMinutes(aEnd); const be=calMinutes(bEnd);
+  const a2=ae==null||ae<=as ? as+60 : ae;
+  const b2=be==null||be<=bs ? bs+60 : be;
+  return as<b2 && bs<a2;
+}
+function classCoversDate(c, dateStr){
+  if(!c || c.scope==='session') return c && c.date===dateStr;
+  const dow=mondayIndex(new Date(dateStr+'T12:00:00'));
+  if(c.day!==dow) return false;
+  if(c.semStart && dateStr<c.semStart) return false;
+  if(c.semEnd && dateStr>c.semEnd) return false;
+  if(Array.isArray(c.exdates) && c.exdates.indexOf(dateStr)>=0) return false;
+  return true;
+}
+function compactDuplicateEvents(){
+  const seenB={};
+  state.studyBlocks=(state.studyBlocks||[]).filter(b=>{
+    b.label=cleanCalTitle(b.label);
+    const k=(b.date||'')+'|'+(String(b.start||'').slice(0,5))+'|'+calTitleKey(b.label);
+    if(seenB[k]) return false;
+    seenB[k]=1;
+    return true;
+  });
+  const seenC={};
+  state.classes=(state.classes||[]).filter(c=>{
+    c.title=cleanCalTitle(c.title);
+    const k=String(c.day)+'|'+(String(c.start||'').slice(0,5))+'|'+calTitleKey(c.title);
+    if(seenC[k]) return false;
+    seenC[k]=1;
+    return true;
+  });
+  state.studyBlocks=(state.studyBlocks||[]).filter(b=>{
+    return !(state.classes||[]).some(c=>classCoversDate(c, b.date) && calTitleKey(c.title)===calTitleKey(b.label) && String(c.start||'').slice(0,5)===String(b.start||'').slice(0,5));
+  });
+}
+function makeGrade8Math(){
+  const kind=Math.floor(Math.random()*4);
+  if(kind===0){
+    const a=12+Math.floor(Math.random()*78);
+    const b=12+Math.floor(Math.random()*68);
+    return { text:a+' + '+b, answer:String(a+b) };
+  }
+  if(kind===1){
+    const a=30+Math.floor(Math.random()*60);
+    const b=8+Math.floor(Math.random()*22);
+    return { text:a+' − '+b, answer:String(a-b) };
+  }
+  if(kind===2){
+    const a=4+Math.floor(Math.random()*9);
+    const b=4+Math.floor(Math.random()*9);
+    return { text:a+' × '+b, answer:String(a*b) };
+  }
+  const b=4+Math.floor(Math.random()*9);
+  const q=4+Math.floor(Math.random()*9);
+  return { text:(b*q)+' ÷ '+b, answer:String(q) };
+}
 function unfoldIcs(text){
   return String(text||'').replace(/^\uFEFF/, '').replace(/\u0000/g,'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').replace(/=\n/g,'').replace(/\n[ \t]/g,'');
 }
@@ -8734,22 +8908,24 @@ function importIcsText(text, source){
   const batch=uid();
   function remember(ds){ if(ds) focusDates.push(ds); }
   function pushBlock(date, start, end, summary, loc, allDay, seriesId){
-    const key=date+'|'+(allDay?'all':start)+'|'+summary.toLowerCase();
+    const clean=cleanCalTitle(summary);
+    const key=date+'|'+(allDay?'all':String(start||'').slice(0,5))+'|'+calTitleKey(clean);
     if(seen[key]) return;
     seen[key]=1;
     state.studyBlocks.push({
       id:uid(), date:date, start:allDay?'':(start||'09:00'), end:allDay?'':(end||''),
-      label:summary, meetingUrl:'', room:loc||'', source:tag, allDay:!!allDay, seriesId:seriesId||'', importBatch:batch
+      label:clean, meetingUrl:'', room:loc||'', source:tag, allDay:!!allDay, seriesId:seriesId||'', importBatch:batch
     });
     added++;
     remember(date);
   }
   function pushWeekly(summary, loc, start, end, day, semStart, semEnd, seriesId){
-    const key='w|'+day+'|'+(start||'')+'|'+summary.toLowerCase();
+    const clean=cleanCalTitle(summary);
+    const key='w|'+day+'|'+(String(start||'').slice(0,5))+'|'+calTitleKey(clean);
     if(seen[key]) return;
     seen[key]=1;
     state.classes.push({
-      id:uid(), title:summary, day:day, start:start||'09:00', end:end||'', room:loc||'',
+      id:uid(), title:clean, day:day, start:start||'09:00', end:end||'', room:loc||'',
       textbook:'', meetingUrl:'', scope:'semester', kind:'class', source:tag,
       semStart:semStart||today, semEnd:semEnd||'', alarmMinutes:0, seriesId:seriesId||'', exdates:[], importBatch:batch
     });
@@ -8767,7 +8943,7 @@ function importIcsText(text, source){
     const block = parts[i].split('END:VEVENT')[0];
     if(/STATUS[^:\n]*:CANCELLED/i.test(block)) continue;
     const summary = (icsProp(block,'SUMMARY') || 'Busy').slice(0,140);
-    names[summary]=1;
+    names[cleanCalTitle(summary)]=1;
     const seriesId=uid();
     const loc = icsProp(block,'LOCATION');
     const start = icsWhen(icsProp(block,'DTSTART'));
@@ -8828,11 +9004,50 @@ function importIcsText(text, source){
   if(!state.schedOpen) state.schedOpen={};
   state.schedOpen.glance = true;
   state._icsImportGuard = Date.now()+8000;
+  try{ compactDuplicateEvents(); }catch(e){}
+  state._calCompacted=true;
+  const before=state.icsUndo||{classes:[], studyBlocks:[]};
+  const clashes=[];
+  function oldAt(date){
+    const list=[];
+    (before.studyBlocks||[]).forEach(function(b){
+      if(b.source==='ics-file'||b.source==='ics') return;
+      if(b.date===date) list.push({title:b.label, start:b.start||'', end:b.end||'', kind:'block', id:b.id});
+    });
+    (before.classes||[]).forEach(function(c){
+      if(c.source==='ics-file'||c.source==='ics') return;
+      if(classCoversDate(c, date)) list.push({title:c.title, start:c.start||'', end:c.end||'', kind:'class', id:c.id});
+    });
+    return list;
+  }
+  function noteClash(date, start, end, title, kind, id){
+    oldAt(date).forEach(function(o){
+      if(calTitleKey(o.title)===calTitleKey(title)) return;
+      if(!calTimesOverlap(start, end, o.start, o.end)) return;
+      if(clashes.length>=8) return;
+      clashes.push({date:date, start:start||'', end:end||'', newTitle:title, newKind:kind, newId:id, oldTitle:o.title, oldKind:o.kind, oldId:o.id, oldStart:o.start||'', oldEnd:o.end||''});
+    });
+  }
+  (state.studyBlocks||[]).forEach(function(b){
+    if(b.importBatch!==batch) return;
+    noteClash(b.date, b.start, b.end, b.label, 'block', b.id);
+  });
+  (state.classes||[]).forEach(function(c){
+    if(c.importBatch!==batch) return;
+    for(let i=0;i<45;i++){
+      const ds=icsAddDays(today, i);
+      if(!classCoversDate(c, ds)) continue;
+      noteClash(ds, c.start, c.end, c.title, 'class', c.id);
+      break;
+    }
+  });
+  state.calClashes=clashes;
   try{ saveState(); }catch(e){}
   const list=Object.keys(names);
-  const message = list.length===1
-    ? '“'+list[0]+'” is on the schedule. Tap a day with a dot to see it below.'
-    : list.length+' appointments are on the schedule. Tap a day with a dot to see that day below.';
+  let message = list.length===1
+    ? '“'+list[0]+'” is on the schedule. Tap a day to open it.'
+    : list.length+' appointments are on the schedule. Tap a day to open it.';
+  if(clashes.length) message+=' Where a different appointment was already at that time, SnapBack will ask which one to edit.';
   return { ok:true, added:added, first:message };
 }
 function parseICS(text){
@@ -9307,16 +9522,74 @@ function calDraftCard(){
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
       <button type="button" class="btn" id="calDraftSave">Save</button>
       <button type="button" class="btn ghost" id="calDraftCancel">Cancel</button>
-      ${d.id ? (calRepeats(d) ? `<button type="button" class="btn ghost" id="calDeleteOne">This date only</button><button type="button" class="btn ghost" id="calDeleteFollowing">This and all following</button>` : `<button type="button" class="btn ghost" id="calDraftDelete">Delete</button>`) : ''}
+      ${d.id ? (calRepeats(d) ? `<button type="button" class="btn ghost" id="calDeleteOne">Delete this date only</button><button type="button" class="btn ghost" id="calDeleteFollowing">Delete this and all following</button>` : `<button type="button" class="btn ghost" id="calDraftDelete">Delete</button>`) : ''}
     </div>
   </div>`;
+}
+function eventRepeats(it){
+  if(!it) return false;
+  if(it.kind==='class') return true;
+  if(it.seriesId && (state.studyBlocks||[]).filter(b=>b.seriesId===it.seriesId).length>1) return true;
+  return false;
+}
+function openDayPop(ds){
+  state.selectedDay=ds;
+  state.calRef=ds;
+  calendarBrowsing=true;
+  state.seriesAsk=null;
+  const items=itemsForDate(ds);
+  if(!items.length){
+    state.dayPop={date:ds, mode:'add'};
+    state.calDraft={title:'', date:ds, start:'09:00', end:'10:00', repeat:'once', room:'', id:'', kind:'', nudge:true};
+  } else {
+    state.dayPop={date:ds, mode:'list'};
+    state.calDraft=null;
+  }
+  persistRender();
+}
+function openListedEvent(it){
+  const date=(state.dayPop&&state.dayPop.date)||state.selectedDay||todayStr();
+  const title=String(it.label||'').split('·')[0].trim();
+  if(eventRepeats(it)){
+    state.seriesAsk={kind:it.kind, id:it.id, date:date, title:title, start:it.time||'', end:it.end||'', seriesId:it.seriesId||'', source:it.source||''};
+    persistRender();
+    return;
+  }
+  openCalDraft({id:it.id, kind:it.kind, title:title, date:date, start:it.time||'09:00', end:it.end||'10:00', repeat:'once', seriesId:it.seriesId||'', source:it.source||''});
+}
+function seriesChoice(which){
+  const s=state.seriesAsk;
+  state.seriesAsk=null;
+  if(!s || which==='cancel'){ persistRender(); return; }
+  openCalDraft({id:s.id, kind:s.kind, title:s.title, date:s.date, start:s.start||'09:00', end:s.end||'10:00', repeat: which==='series'?'weekly':'once', seriesId:s.seriesId||'', source:s.source||''});
+}
+function closeDayPop(){
+  state.dayPop=null;
+  state.calDraft=null;
+  state.seriesAsk=null;
+  persistRender();
+}
+function clashEdit(which){
+  const c=(state.calClashes||[])[0];
+  if(!c){ state.calClashes=[]; persistRender(); return; }
+  state.calClashes=state.calClashes.slice(1);
+  const use = which==='old'
+    ? {id:c.oldId, kind:c.oldKind, title:c.oldTitle, start:c.oldStart, end:c.oldEnd}
+    : {id:c.newId, kind:c.newKind, title:c.newTitle, start:c.start, end:c.end};
+  state.dayPop={date:c.date, mode:'edit'};
+  state.selectedDay=c.date;
+  openCalDraft({id:use.id, kind:use.kind, title:use.title, date:c.date, start:use.start||'09:00', end:use.end||'10:00', repeat:use.kind==='class'?'weekly':'once'});
 }
 function openCalDraft(opts){
   const o = Object.assign({title:'', date: state.selectedDay||todayStr(), start:'09:00', end:'10:00', repeat:'once', room:'', id:'', kind:'', nudge:true}, opts||{});
   if(o.alarmMinutes===0) o.nudge=false;
   state.calDraft = o;
   if(!state.schedOpen) state.schedOpen={glance:true};
-  state.schedOpen.event=true;
+  state.schedOpen.glance=true;
+  if(!state.dayPop) state.dayPop={date:o.date||state.selectedDay||todayStr(), mode:'edit'};
+  else state.dayPop.mode='edit';
+  state.seriesAsk=null;
+  markCalEdit();
   persistRender();
 }
 function saveCalDraftFromForm(){
@@ -9349,6 +9622,7 @@ function saveCalDraftFromForm(){
     state.studyBlocks.push({id:uid(), date, start, end, label:title, meetingUrl:'', room, alarmMinutes:alarmMinutes});
   }
   state.calDraft=null;
+  state.dayPop=null;
   state.selectedDay=date;
   state.calRef=date;
   calendarBrowsing=true;
@@ -9371,10 +9645,41 @@ function calRepeats(d){
   }
   return false;
 }
+function markCalEdit(){ state._calEditGuard = Date.now()+12000; }
+function normCalTitle(s){
+  return String(s||'').toLowerCase().split('·')[0].replace(/\s+/g,' ').trim();
+}
+function sameCalTime(a,b){
+  if(!a||!b) return true;
+  return String(a).slice(0,5)===String(b).slice(0,5);
+}
+function dropCopiesOnDate(date, title, start){
+  const lab=normCalTitle(title);
+  (state.classes||[]).forEach(c=>{
+    if(normCalTitle(c.title)!==lab) return;
+    if(!sameCalTime(c.start, start)) return;
+    if(!Array.isArray(c.exdates)) c.exdates=[];
+    if(c.exdates.indexOf(date)<0) c.exdates.push(date);
+  });
+  state.studyBlocks=(state.studyBlocks||[]).filter(b=>{
+    if(b.date!==date) return true;
+    if(normCalTitle(b.label)!==lab) return true;
+    if(!sameCalTime(b.start, start)) return true;
+    return false;
+  });
+  state.externalBusy=(state.externalBusy||[]).filter(b=>{
+    if(b.date!==date) return true;
+    if(normCalTitle(b.title||b.label)!==lab) return true;
+    if(!sameCalTime(b.start, start)) return true;
+    return false;
+  });
+}
 function deleteCalOne(){
   const d=state.calDraft||{};
   const date=d.date||state.selectedDay||todayStr();
-  const label=String(d.title||'').toLowerCase();
+  markCalEdit();
+  if(d.kind==='block' && d.id) state.studyBlocks=(state.studyBlocks||[]).filter(b=>String(b.id)!==String(d.id));
+  if(d.kind==='external' && d.id) state.externalBusy=(state.externalBusy||[]).filter(b=>String(b.id)!==String(d.id));
   if(d.kind==='class' && d.id){
     const c=(state.classes||[]).find(x=>String(x.id)===String(d.id));
     if(c){
@@ -9382,42 +9687,50 @@ function deleteCalOne(){
       if(c.exdates.indexOf(date)<0) c.exdates.push(date);
     }
   }
-  state.studyBlocks=(state.studyBlocks||[]).filter(b=>{
-    if(b.date!==date) return true;
-    if(d.kind==='block' && String(b.id)===String(d.id)) return false;
-    if(d.seriesId && b.seriesId===d.seriesId) return false;
-    if(label && String(b.label||'').toLowerCase()===label && (b.start||'')===(d.start||'') && b.source==='ics-file') return false;
-    return true;
-  });
-  if(d.kind==='external' && d.id) state.externalBusy=(state.externalBusy||[]).filter(b=>String(b.id)!==String(d.id));
+  dropCopiesOnDate(date, d.title, d.start);
   state.calDraft=null;
-  try{ saveState(); }catch(e){}
+  if(state.dayPop){
+    const left=itemsForDate(date);
+    if(left.length) state.dayPop.mode='list';
+    else state.dayPop=null;
+  }
   persistRender();
 }
 function deleteCalFollowing(){
   const d=state.calDraft||{};
   const date=d.date||state.selectedDay||todayStr();
   const prev=icsAddDays(date,-1);
-  const label=String(d.title||'').toLowerCase();
+  const lab=normCalTitle(d.title);
+  markCalEdit();
   function endClass(c){
-    if(!c) return;
+    if(!c || c._drop) return;
     if(!c.semStart || date<=c.semStart) c._drop=true;
     else c.semEnd=prev;
   }
-  if(d.kind==='class' && d.id) endClass((state.classes||[]).find(x=>String(x.id)===String(d.id)));
   (state.classes||[]).forEach(c=>{
-    if(d.seriesId && c.seriesId===d.seriesId) endClass(c);
+    if(d.kind==='class' && String(c.id)===String(d.id)) endClass(c);
+    else if(d.seriesId && c.seriesId===d.seriesId) endClass(c);
+    else if(lab && normCalTitle(c.title)===lab && sameCalTime(c.start, d.start)) endClass(c);
   });
   state.classes=(state.classes||[]).filter(c=>!c._drop);
   state.studyBlocks=(state.studyBlocks||[]).filter(b=>{
     if(!b.date || b.date<date) return true;
     if(d.kind==='block' && String(b.id)===String(d.id)) return false;
     if(d.seriesId && b.seriesId===d.seriesId) return false;
-    if(label && String(b.label||'').toLowerCase()===label && (b.start||'')===(d.start||'') && (b.source==='ics-file' || b.seriesId)) return false;
+    if(lab && normCalTitle(b.label)===lab && sameCalTime(b.start, d.start)) return false;
+    return true;
+  });
+  state.externalBusy=(state.externalBusy||[]).filter(b=>{
+    if(!b.date || b.date<date) return true;
+    if(lab && normCalTitle(b.title||b.label)===lab && sameCalTime(b.start, d.start)) return false;
     return true;
   });
   state.calDraft=null;
-  try{ saveState(); }catch(e){}
+  if(state.dayPop){
+    const left=itemsForDate(date);
+    if(left.length) state.dayPop.mode='list';
+    else state.dayPop=null;
+  }
   persistRender();
 }
 function undoIcsUpload(){
@@ -9437,12 +9750,21 @@ function undoIcsUpload(){
 }
 function deleteCalDraft(){
   const d = state.calDraft||{};
-  if(d.kind==='class' && d.id) state.classes = (state.classes||[]).filter(c=>c.id!==d.id);
-  if(d.kind==='block' && d.id) state.studyBlocks = (state.studyBlocks||[]).filter(b=>b.id!==d.id);
-  if(d.kind==='external' && d.id) state.externalBusy = (state.externalBusy||[]).filter(b=>String(b.id)!==String(d.id));
-  state.calDraft=null;
-  try{ saveState(); }catch(e){}
-  persistRender();
+  const date=d.date||state.selectedDay||todayStr();
+  markCalEdit();
+  if(d.kind==='class') deleteCalOne();
+  else {
+    if(d.id) state.studyBlocks = (state.studyBlocks||[]).filter(b=>String(b.id)!==String(d.id));
+    if(d.kind==='external' && d.id) state.externalBusy = (state.externalBusy||[]).filter(b=>String(b.id)!==String(d.id));
+    dropCopiesOnDate(date, d.title, d.start);
+    state.calDraft=null;
+    if(state.dayPop){
+      const left=itemsForDate(date);
+      if(left.length) state.dayPop.mode='list';
+      else state.dayPop=null;
+    }
+    persistRender();
+  }
 }
 function viewNudge(){
   const native = (typeof isNativeApp==='function' && isNativeApp());
@@ -9460,11 +9782,15 @@ function viewNudge(){
     <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${escapeHtml(wa.time||'07:00')}"></div>
     <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">The clock above is the time now. The time you set is when Nudge should ring.</p>
     <div class="field" style="margin-top:8px"><label>One-time date</label><input type="date" id="wakeOnceDate" value="${escapeHtml(wa.onceDate||'')}"></div>
-    <div class="field" style="margin-top:8px"><label>Sound</label>
+    <div class="field" style="margin-top:8px" id="wakeSoundWrap"><label>Sound</label>
       <select id="wakeSoundSelect">
         ${['chime','bell','beep','digital','radar','knock'].map(v=>`<option value="${v}" ${curSound===v?'selected':''}>${labels[v]||v}</option>`).join('')}
       </select>
     </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px"><input type="checkbox" id="wakeMathOn" ${wa.math===false?'':'checked'}> Ask a math problem to stop this Nudge</label>
+    <div style="margin-top:12px;font-size:.85rem">Notification</div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="radio" name="wakeAlert" value="regular" ${wa.alert==='silent'?'':'checked'}> Regular notification</label>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:6px"><input type="radio" name="wakeAlert" value="silent" ${wa.alert==='silent'?'checked':''}> Silent notification</label>
     <div style="margin-top:10px;font-size:.85rem">Or repeat on</div>
     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">
       ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<label style="font-size:.82rem"><input type="checkbox" id="wakeDay${i}" ${(wa.days||[]).indexOf(i)>=0?'checked':''}> ${d}</label>`).join('')}
@@ -9491,6 +9817,9 @@ function schedBox(key, title, inner){
   </div>`;
 }
 function viewCalendar(){
+  if(!state._calCompacted){
+    try{ compactDuplicateEvents(); state._calCompacted=true; saveState(); }catch(e){}
+  }
   if(!calendarBrowsing){
     const tday=todayStr();
     if(!state.calRef || String(state.calRef).slice(0,7)!==tday.slice(0,7)){
@@ -9601,9 +9930,8 @@ function viewCalendar(){
       <span><span class="dotcolor" style="background:var(--purple)"></span>Study block</span>
       <span><span class="dotcolor" style="background:var(--gold)"></span>Non-negotiable</span>
     </div>
-    ${mode==='month' ? `<div class="agenda"><h3>Agenda — ${state.selectedDay}</h3>${selItems.length ? selItems.map(it=>calEventButton(it)).join('') : '<div class="empty">Nothing on this day yet.</div>'}<button type="button" class="btn ghost sm" data-action="cal-new" data-date="${state.selectedDay}" style="margin-top:8px">Add on this day</button></div>` : ''}
   `)}
-  ${schedBox('event', (state.calDraft&&state.calDraft.id)?'Edit event':'New event', state.calDraft?calDraftCard():'<p style="margin:0 0 8px;color:var(--muted);font-size:.9rem">Or tap a day in the month, then type the name here.</p><button type="button" class="btn" id="calStartNew">Add an event</button>')}
+  ${schedBox('event', (state.calDraft&&state.calDraft.id)?'Edit event':'New event', '<p style="margin:0 0 8px;color:var(--muted);font-size:.9rem">Tap a day in the month. Appointments open in a window. An empty day opens Add event.</p><button type="button" class="btn" id="calStartNew">Add an event</button>')}
   ${schedBox('quick','Quick add', `
     <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Type a line, paste a timetable, or upload a screenshot. Edit the text, then choose Yes or Cancel. Nothing is added until you say Yes.</p>
     <div class="field"><label>These items are</label>
@@ -12182,6 +12510,17 @@ function viewHelp(){
     <details class="faqitem"><summary>Bring in Google or Outlook</summary>
       <p>Plan → Schedule → Bring in my calendar. Sign in with Google, or download a calendar file (.ics) and tap Upload calendar file. This copies events into SnapBack. It does not change Google or Outlook.</p>
     </details>
+    <details class="faqitem"><summary>How do I download a .ics calendar file?</summary>
+      <p>Download the calendar as a .ics file, then in SnapBack open Plan → Schedule → Bring in my calendar → Upload calendar file.</p>
+      <p>Outlook: <a href="https://support.microsoft.com/en-us/outlook/export-an-outlook-calendar-to-google-calendar" target="_blank" rel="noopener">Microsoft’s export steps</a></p>
+      <p>Google Calendar: <a href="https://support.google.com/calendar/answer/37111" target="_blank" rel="noopener">Google’s export steps</a>. On a computer, Settings → Import & export → Export. If a .zip downloads, open it and upload the .ics file inside.</p>
+      <p>Apple Calendar: <a href="https://support.apple.com/guide/calendar/import-or-export-calendars-icl1023/mac" target="_blank" rel="noopener">Apple’s export steps</a>. On a Mac: File → Export → Export.</p>
+      <p>Notion: Notion does not download a .ics file from a database. If the dates are in Notion Calendar, export the Google, Outlook, or Apple calendar they come from, using the links above. <a href="https://www.notion.com/help/manage-your-calendars-and-events" target="_blank" rel="noopener">Notion Calendar help</a></p>
+    </details>
+    <details class="faqitem"><summary>What happens to events already in SnapBack?</summary>
+      <p>Events you typed in SnapBack stay. Tasks stay. A new file replaces only the appointments brought in from the last calendar file. It does not change Outlook, Google, or Apple.</p>
+      <p>If the file has the same appointment twice (same day, time, and name), SnapBack keeps one. If it lands on something you already typed, both remain. Tap the day, open the appointment, then Delete, Delete this date only, or Delete this and all following. Undo upload removes the file’s appointments.</p>
+    </details>
     <details class="faqitem"><summary>See my week</summary>
       <p>Plan → Schedule. Use Day, Week, Columns, or Month. Tap an event to edit it. Tap Add on a day, or a time in Day view, to create one.</p>
     </details>
@@ -14073,13 +14412,18 @@ function wireView(){
       }
     }));
     const startNew=document.getElementById('calStartNew');
-    if(startNew) startNew.addEventListener('click', ()=>openCalDraft({date: state.selectedDay||todayStr()}));
+    if(startNew) startNew.addEventListener('click', ()=>openDayPop(state.selectedDay||todayStr()));
     const cds=document.getElementById('calDraftSave'); if(cds) cds.addEventListener('click', saveCalDraftFromForm);
     const cdc=document.getElementById('calDraftCancel'); if(cdc) cdc.addEventListener('click', ()=>{ state.calDraft=null; persistRender(); });
     const cdd=document.getElementById('calDraftDelete'); if(cdd) cdd.addEventListener('click', deleteCalDraft);
     const cd1=document.getElementById('calDeleteOne'); if(cd1) cd1.addEventListener('click', deleteCalOne);
     const cd2=document.getElementById('calDeleteFollowing'); if(cd2) cd2.addEventListener('click', deleteCalFollowing);
     const undoIcs=document.getElementById('undoIcsBtn'); if(undoIcs) undoIcs.addEventListener('click', undoIcsUpload);
+    if(state._scrollCalDraft){
+      state._scrollCalDraft=false;
+      const anchor=document.getElementById('calDraftAnchor')||document.getElementById('calAgenda');
+      if(anchor) setTimeout(function(){ try{ anchor.scrollIntoView({block:'nearest'}); }catch(e){} }, 40);
+    }
 
     const freeBtn=document.getElementById('freeSlotBtn');
     if(freeBtn) freeBtn.addEventListener('click', ()=>{
@@ -14146,12 +14490,7 @@ function wireView(){
     wireIcsFilePicker('icsFileSettings','icsUploadSettingsBtn');
     main.querySelectorAll('[data-day]').forEach(el=>el.addEventListener('click', (e)=>{
       if(e.target.closest('button,a,input,select,textarea')) return;
-      const ds=el.dataset.day;
-      state.selectedDay=ds;
-      state.calRef=ds;
-      const items=itemsForDate(ds);
-      if(!items.length){ openCalDraft({date:ds, start:'09:00', end:'10:00', repeat:'once'}); return; }
-      persistRender();
+      openDayPop(el.dataset.day);
     }));
     const addClassBtn=document.getElementById('addClassBtn'); if(addClassBtn) addClassBtn.addEventListener('click', addClass);
     if(document.getElementById('addSchedBtn')) wireSchedForm();
@@ -15166,16 +15505,25 @@ function wireView(){
       e.preventDefault(); e.stopPropagation();
       try{ saveWakeAlarmFromForm(); }catch(err){ showAppMessage('Save failed', String(err&&err.message||err)); }
     });
+    function syncWakeAlertUi(){
+      const sel=document.querySelector('input[name="wakeAlert"]:checked');
+      const wrap=document.getElementById('wakeSoundWrap');
+      if(wrap) wrap.style.display = sel && sel.value==='silent' ? 'none' : '';
+    }
+    document.querySelectorAll('input[name="wakeAlert"]').forEach(function(el){ el.addEventListener('change', syncWakeAlertUi); });
+    syncWakeAlertUi();
     const testWake=document.getElementById('testWakeBtn');
     if(testWake) testWake.addEventListener('click', function(e){
       e.preventDefault(); e.stopPropagation();
       try{
-        const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
-        if(plug && typeof plug.preview === 'function'){
-          plug.preview().catch(function(){ triggerWakeMath('test'); });
-        } else {
-          triggerWakeMath('test');
-        }
+        if(!state.wakeAlarm) state.wakeAlarm={};
+        const alertEl=document.querySelector('input[name="wakeAlert"]:checked');
+        state.wakeAlarm.alert = alertEl && alertEl.value==='silent' ? 'silent' : 'regular';
+        const mathEl=document.getElementById('wakeMathOn');
+        state.wakeAlarm.math = !mathEl || !!mathEl.checked;
+        const snd=document.getElementById('wakeSoundSelect');
+        if(snd && snd.value && state.wakeAlarm.alert!=='silent') state.wakeAlarm.sound=snd.value;
+        triggerWakeMath('test');
       }catch(err){ showAppMessage('Preview failed', String(err&&err.message||err)); }
     });
     const offWake=document.getElementById('turnOffWakeBtn');
