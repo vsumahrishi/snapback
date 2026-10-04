@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="306">
+<meta name="snapback-build" content="307">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -2034,7 +2034,7 @@ function setActiveTask(id){ state.timer.activeTaskId = id ? Number(id) : null; p
    ============================================================ */
 function uid(){ return Date.now()+Math.floor(Math.random()*1000); }
 function findTask(id){ if(id==null||id==="") return null; return (state.tasks||[]).find(t=>String(t.id)===String(id)); }
-function escapeHtml(s){ return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeHtml(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 /* Native confirm()/alert() are blocked (return nothing / throw) inside sandboxed iframes like this one —
    that's why Delete, Reset, etc. did nothing before. This renders an inline Yes/Cancel instead. */
 function deleteControl(kind, id, label){
@@ -4843,12 +4843,14 @@ function renderModal(){
       <p style="margin:0 0 8px">${escapeHtml(when)}${clock?' · '+escapeHtml(clock):''}</p>
       <p style="margin:0 0 4px">Already in SnapBack: <b>${escapeHtml(c.oldTitle||'')}</b></p>
       <p style="margin:0 0 12px">From the calendar file: <b>${escapeHtml(c.newTitle||'')}</b></p>
-      <p style="margin:0 0 12px;color:var(--muted);font-size:.9rem">Choose what to do with each appointment.</p>
+      <p style="margin:0 0 12px;color:var(--muted);font-size:.9rem">${c.repeat?'This repeats. Choose this date only, or every date in the series.':'Choose what to do with each appointment.'}</p>
       <div style="display:flex;flex-direction:column;gap:8px">
         <button class="btn" id="clashOld" type="button">Edit the SnapBack appointment</button>
-        <button class="btn ghost" id="clashOldDel" type="button">Delete the SnapBack appointment</button>
+        <button class="btn ghost" id="clashOldDel" type="button">${c.repeat?'Delete the SnapBack appointment on this date':'Delete the SnapBack appointment'}</button>
+        ${c.repeat?'<button class="btn ghost" id="clashOldAll" type="button">Delete the SnapBack appointment on every date</button>':''}
         <button class="btn ghost" id="clashNew" type="button">Edit the imported appointment</button>
-        <button class="btn ghost" id="clashNewDel" type="button">Delete the imported appointment</button>
+        <button class="btn ghost" id="clashNewDel" type="button">${c.repeat?'Delete the imported appointment on this date':'Delete the imported appointment'}</button>
+        ${c.repeat?'<button class="btn ghost" id="clashNewAll" type="button">Delete the imported appointment on every date</button>':''}
         <button class="btn ghost" id="clashKeep" type="button">Keep both</button>
       </div>
     </div></div>`;
@@ -4856,6 +4858,10 @@ function renderModal(){
     document.getElementById('clashNew').onclick=function(){ clashEdit('new'); };
     document.getElementById('clashOldDel').onclick=function(){ clashDelete('old'); };
     document.getElementById('clashNewDel').onclick=function(){ clashDelete('new'); };
+    if(c.repeat){
+      document.getElementById('clashOldAll').onclick=function(){ clashDelete('old-all'); };
+      document.getElementById('clashNewAll').onclick=function(){ clashDelete('new-all'); };
+    }
     document.getElementById('clashKeep').onclick=function(){ state.calClashes=state.calClashes.slice(1); persistRender(); };
     return;
   }
@@ -8834,11 +8840,17 @@ function meetingKey(s){
   let t=cleanCalTitle(s);
   t=t.replace(/\s*[·•|]\s*(microsoft teams meeting|teams meeting|zoom meeting|google meet).*$/i,'').trim();
   t=t.replace(/\b(microsoft teams meeting|teams meeting|zoom meeting|google meet)\b/ig,'').trim();
-  t=t.replace(/^[A-Z]{2,5}\s+/,'');
+  t=t.replace(/^[A-Z0-9]{2,10}\s*[-–:]\s*/,'');
+  t=t.replace(/^[A-Z]{2,6}\s+/,'');
   const parts=t.toLowerCase().split(/\s*\/\s*/).map(function(p){ return p.trim(); }).filter(Boolean).sort();
   return parts.join(' / ');
 }
 function queueTwinChoices(){
+  if(state._twinAskV!==2){
+    state.calTwinSkip={};
+    state.calTwins=[];
+    state._twinAskV=2;
+  }
   const bySlot={};
   function add(it){
     const key=meetingKey(it.title);
@@ -8886,6 +8898,16 @@ function queueTwinChoices(){
     pairs.push({sig:pk, recurring:recurring, a:first.a, b:first.b, extra:first.extra||[], slots:slots});
   });
   state.calTwins=pairs.slice(0,6);
+  state.calClashes=(state.calClashes||[]).filter(function(c){
+    return meetingKey(c.oldTitle)!==meetingKey(c.newTitle);
+  });
+  const grouped={};
+  (state.calClashes||[]).forEach(function(c){
+    const k=cleanCalTitle(c.oldTitle).toLowerCase()+'|'+cleanCalTitle(c.newTitle).toLowerCase()+'|'+String(c.start||c.oldStart||'').slice(0,5);
+    if(!grouped[k]) grouped[k]=Object.assign({}, c, {repeat:false});
+    else grouped[k].repeat=true;
+  });
+  state.calClashes=Object.keys(grouped).map(function(k){ return grouped[k]; });
 }
 function dropCalById(kind, id){
   if(id==null) return;
@@ -8905,24 +8927,24 @@ function dropOneTwin(it){
   }
   dropCalById(it.kind, it.id);
 }
-function dropAllTwin(it){
+function dropAllTwin(it, keepTitle){
   if(!it) return;
-  const shown=cleanCalTitle(it.title).toLowerCase();
+  const key=meetingKey(it.title);
   const st=String(it.start||'').slice(0,5);
-  if(it.seriesId){
+  const keepShown=keepTitle?cleanCalTitle(keepTitle).toLowerCase():'';
+  function shouldDrop(title, start){
+    if(String(start||'').slice(0,5)!==st) return false;
+    if(meetingKey(title)!==key) return false;
+    if(keepShown && cleanCalTitle(title).toLowerCase()===keepShown) return false;
+    return true;
+  }
+  if(it.seriesId && (!keepTitle || cleanCalTitle(it.title).toLowerCase()!==keepShown)){
     state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return b.seriesId!==it.seriesId; });
     state.classes=(state.classes||[]).filter(function(c){ return c.seriesId!==it.seriesId; });
   }
-  state.studyBlocks=(state.studyBlocks||[]).filter(function(b){
-    if(cleanCalTitle(b.label).toLowerCase()!==shown) return true;
-    if(String(b.start||'').slice(0,5)!==st) return true;
-    return false;
-  });
-  state.classes=(state.classes||[]).filter(function(c){
-    if(cleanCalTitle(c.title).toLowerCase()!==shown) return true;
-    if(String(c.start||'').slice(0,5)!==st) return true;
-    return false;
-  });
+  state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return !shouldDrop(b.label, b.start); });
+  state.classes=(state.classes||[]).filter(function(c){ return !shouldDrop(c.title, c.start); });
+  state.externalBusy=(state.externalBusy||[]).filter(function(b){ return !shouldDrop(b.title||b.label, b.start); });
 }
 function keepTwin(which, scope){
   const t=(state.calTwins||[])[0];
@@ -8938,14 +8960,9 @@ function keepTwin(which, scope){
   markCalEdit();
   if(which!=='both'){
     const drop=which==='a'?t.b:t.a;
-    const extras=(t.slots||[{extra:t.extra}]).reduce(function(acc, slot){ return acc.concat(slot.extra||[]); }, t.extra||[]);
-    if(scope==='all'){
-      dropAllTwin(drop);
-      extras.forEach(function(it){ dropAllTwin(it); });
-    } else {
-      dropOneTwin(drop);
-      (t.extra||[]).forEach(function(it){ dropOneTwin(it); });
-    }
+    const keep=which==='a'?t.a:t.b;
+    if(scope==='all') dropAllTwin(drop, keep.title);
+    else dropOneTwin(drop);
   }
   if(!state.calTwinSkip) state.calTwinSkip={};
   state.calTwinSkip[t.sig]=scope||'one';
@@ -9206,9 +9223,9 @@ function importIcsText(text, source){
   }
   function noteClash(date, start, end, title, kind, id){
     oldAt(date).forEach(function(o){
+      if(meetingKey(o.title)===meetingKey(title)) return;
       if(calTitleKey(o.title)===calTitleKey(title)) return;
       if(!calTimesOverlap(start, end, o.start, o.end)) return;
-      if(clashes.length>=8) return;
       clashes.push({date:date, start:start||'', end:end||'', newTitle:title, newKind:kind, newId:id, oldTitle:o.title, oldKind:o.kind, oldId:o.id, oldStart:o.start||'', oldEnd:o.end||''});
     });
   }
@@ -9773,9 +9790,25 @@ function removeNamedOnDate(kind, id, date, title, start){
 function clashDelete(which){
   const c=(state.calClashes||[])[0];
   if(!c){ state.calClashes=[]; persistRender(); return; }
-  if(which==='old') removeNamedOnDate(c.oldKind, c.oldId, c.date, c.oldTitle, c.oldStart);
-  else removeNamedOnDate(c.newKind, c.newId, c.date, c.newTitle, c.start);
-  state.calClashes=(state.calClashes||[]).slice(1);
+  const all=which==='old-all'||which==='new-all';
+  const side=(which==='old'||which==='old-all')?'old':'new';
+  markCalEdit();
+  if(all){
+    const title=side==='old'?c.oldTitle:c.newTitle;
+    const keep=side==='old'?c.newTitle:c.oldTitle;
+    const start=side==='old'?(c.oldStart||c.start):(c.start||c.oldStart);
+    dropAllTwin({title:title, start:start}, keep);
+    const ok=cleanCalTitle(c.oldTitle).toLowerCase();
+    const nk=cleanCalTitle(c.newTitle).toLowerCase();
+    const st=String(c.start||c.oldStart||'').slice(0,5);
+    state.calClashes=(state.calClashes||[]).filter(function(x){
+      return !(cleanCalTitle(x.oldTitle).toLowerCase()===ok && cleanCalTitle(x.newTitle).toLowerCase()===nk && String(x.start||x.oldStart||'').slice(0,5)===st);
+    });
+  } else {
+    if(side==='old') removeNamedOnDate(c.oldKind, c.oldId, c.date, c.oldTitle, c.oldStart);
+    else removeNamedOnDate(c.newKind, c.newId, c.date, c.newTitle, c.start);
+    state.calClashes=(state.calClashes||[]).slice(1);
+  }
   state.dayPop=null;
   state.calDraft=null;
   persistRender();
@@ -9912,6 +9945,7 @@ function deleteCalFollowing(){
   const date=d.date||state.selectedDay||todayStr();
   const prev=icsAddDays(date,-1);
   const lab=calTitleKey(d.title);
+  const mk=meetingKey(d.title);
   markCalEdit();
   function endClass(c){
     if(!c || c._drop) return;
@@ -9922,6 +9956,7 @@ function deleteCalFollowing(){
     if(d.kind==='class' && String(c.id)===String(d.id)) endClass(c);
     else if(d.seriesId && c.seriesId===d.seriesId) endClass(c);
     else if(lab && calTitleKey(c.title)===lab && sameCalTime(c.start, d.start)) endClass(c);
+    else if(mk && meetingKey(c.title)===mk && sameCalTime(c.start, d.start)) endClass(c);
   });
   state.classes=(state.classes||[]).filter(c=>!c._drop);
   state.studyBlocks=(state.studyBlocks||[]).filter(b=>{
@@ -9929,6 +9964,7 @@ function deleteCalFollowing(){
     if(d.kind==='block' && String(b.id)===String(d.id)) return false;
     if(d.seriesId && b.seriesId===d.seriesId) return false;
     if(lab && calTitleKey(b.label)===lab && sameCalTime(b.start, d.start)) return false;
+    if(mk && meetingKey(b.label)===mk && sameCalTime(b.start, d.start)) return false;
     return true;
   });
   state.externalBusy=(state.externalBusy||[]).filter(b=>{
