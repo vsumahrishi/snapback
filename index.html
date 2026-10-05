@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="316">
+<meta name="snapback-build" content="317">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1591,12 +1591,19 @@ function stopNudgePreview(){
 }
 function setPendingNudge(on){
   try{
-    if(on) localStorage.setItem('snapback_pending_nudge','1');
+    if(on) localStorage.setItem('snapback_pending_nudge', String(Date.now()));
     else localStorage.removeItem('snapback_pending_nudge');
   }catch(e){}
 }
 function hasPendingNudge(){
-  try{ return localStorage.getItem('snapback_pending_nudge')==='1'; }catch(e){ return false; }
+  try{
+    const raw=localStorage.getItem('snapback_pending_nudge');
+    if(!raw) return false;
+    const ts=Number(raw);
+    if(!ts || ts<100000){ localStorage.removeItem('snapback_pending_nudge'); return false; }
+    if(Date.now()-ts > 2*60*1000){ localStorage.removeItem('snapback_pending_nudge'); return false; }
+    return true;
+  }catch(e){ return false; }
 }
 function triggerWakeMath(reason, note){
   if(!state.wakeAlarm) state.wakeAlarm={snoozesLeft:2,snoozesMax:2,time:'07:00',days:[0,1,2,3,4]};
@@ -4013,12 +4020,15 @@ function saveWakeAlarmFromForm(){
       } else {
         showAppMessage(
           state.wakeAlarm.enabled?'Saved':'Nudge off',
-          state.wakeAlarm.enabled ? ('Nudge is set for '+state.wakeAlarm.time+'.') : 'No Nudge until you save again.'
+          state.wakeAlarm.enabled ? ('Nudge is set for '+state.wakeAlarm.time+'. Keep this browser tab open. It rings at that time even if you are in another window. Opening SnapBack after the time has passed does not ring a late nudge.') : 'No Nudge until you save again.'
         );
       }
     }catch(e){
-      showAppMessage(state.wakeAlarm.enabled?'Saved':'Nudge off', state.wakeAlarm.enabled?('Nudge is set for '+state.wakeAlarm.time+'.'):'No Nudge until you save again.');
+      showAppMessage(state.wakeAlarm.enabled?'Saved':'Nudge off', state.wakeAlarm.enabled?('Nudge is set for '+state.wakeAlarm.time+'. Keep this browser tab open.'):'No Nudge until you save again.');
     }
+    try{
+      if(typeof Notification!=='undefined' && Notification.permission==='default') Notification.requestPermission();
+    }catch(e){}
   }catch(e){
     console.warn('saveWakeAlarmFromForm', e);
     showAppMessage('Could not save Nudge', String(e&&e.message||e));
@@ -4080,20 +4090,81 @@ function nextWakeDate(){
   return best;
 }
 
+const SNAPBACK_BOOTED_AT = Date.now();
+function freshEnough(targetMs){
+  const now=Date.now();
+  if(!targetMs) return false;
+  if(now < targetMs) return false;
+  if(now - targetMs > 2*60*1000) return false;
+  if(SNAPBACK_BOOTED_AT > targetMs + 4000) return false;
+  return true;
+}
+function nudgeWhenOn(n, dateStr){
+  if(!n || n.enabled===false || !n.time) return null;
+  const parts=String(n.time).slice(0,5).split(':');
+  const hh=parseInt(parts[0],10)||0, mm=parseInt(parts[1],10)||0;
+  if(n.onceDate){
+    if(String(n.onceDate)!==String(dateStr)) return null;
+  } else {
+    const days=Array.isArray(n.days)?n.days:[];
+    const d0=new Date(dateStr+'T12:00:00');
+    const uiDay=(d0.getDay()+6)%7;
+    if(days.indexOf(uiDay)<0) return null;
+  }
+  const d=new Date(dateStr+'T00:00:00');
+  d.setHours(hh, mm, 0, 0);
+  return d;
+}
+function checkDueNudges(){
+  try{ ensureNudges(); }catch(e){}
+  if(!state.notifiedKeys) state.notifiedKeys=[];
+  const today=todayStr();
+  let dirty=false;
+  (state.nudges||[]).forEach(function(n){
+    const when=nudgeWhenOn(n, today);
+    if(!when) return;
+    const key='nudge:'+n.id+':'+today+':'+String(n.time||'').slice(0,5);
+    if(state.notifiedKeys.indexOf(key)>=0) return;
+    const t=when.getTime();
+    if(Date.now() < t) return;
+    state.notifiedKeys.push(key);
+    dirty=true;
+    if(!freshEnough(t)) return;
+    state.wakeAlarm=Object.assign({enabled:true}, n);
+    state.wakeAlarm.snoozesLeft=n.snoozesMax||2;
+    try{ triggerWakeMath('scheduled', ''); }catch(e){}
+    try{
+      if(typeof Notification!=='undefined' && Notification.permission==='granted'){
+        const note=new Notification('SnapBack', {body:'Nudge for '+String(n.time||'').slice(0,5), tag:key});
+        note.onclick=function(){ try{ window.focus(); }catch(e2){} };
+      }
+    }catch(e){}
+  });
+  if(state.notifiedKeys.length>500) state.notifiedKeys=state.notifiedKeys.slice(-300);
+  if(dirty){ try{ saveState(); }catch(e){} }
+}
 function scheduleWakeAlarms(){
   try{
     if(_wakeCheckTimer){ clearTimeout(_wakeCheckTimer); _wakeCheckTimer=null; }
   }catch(e){}
+  try{ checkDueNudges(); }catch(e){}
   const next=nextWakeDate();
-  if(!next) return;
+  if(!next) {
+    if(!window._nudgeWatch) window._nudgeWatch=setInterval(function(){ try{ checkDueNudges(); }catch(e){} }, 15000);
+    return;
+  }
   const ms = next.getTime() - Date.now();
-  if(ms<1000 || ms>14*24*3600*1000) return;
-  _wakeCheckTimer = setTimeout(function(){
-    _wakeCheckTimer=null;
-    try{ nextWakeDate(); }catch(e){}
-    try{ triggerWakeMath('scheduled'); }catch(e){ console.warn(e); }
-    try{ scheduleWakeAlarms(); }catch(e){}
-  }, ms);
+  if(ms>14*24*3600*1000) return;
+  if(ms>=1000){
+    _wakeCheckTimer = setTimeout(function(){
+      _wakeCheckTimer=null;
+      try{ checkDueNudges(); }catch(e){}
+      try{ scheduleWakeAlarms(); }catch(e){}
+    }, ms);
+  }
+  if(!window._nudgeWatch){
+    window._nudgeWatch=setInterval(function(){ try{ checkDueNudges(); }catch(e){} }, 15000);
+  }
 }
 
 async function ensureNativeNotifListeners(){
@@ -4307,9 +4378,15 @@ function checkNotifications(){
   const now=Date.now();
   if(!state.notifiedKeys) state.notifiedKeys=[];
 
-  function ringOnce(key, note, windowMs){
+  function ringOnce(key, note, targetMs){
     if(state.notifiedKeys.includes(key)) return;
-    if(now < 0) return;
+    if(!freshEnough(targetMs)){
+      if(targetMs && Date.now()>=targetMs){
+        state.notifiedKeys.push(key);
+        changed=true;
+      }
+      return;
+    }
     state.notifiedKeys.push(key);
     changed=true;
     if(!state.wakeMathOpen){
@@ -4325,9 +4402,7 @@ function checkNotifications(){
       const [hh,mm]=(t.reminderTime||t.time||'08:00').split(':').map(Number);
       target.setHours(hh,mm,0,0);
       const key=t.id+':due:'+th;
-      if(now>=target.getTime() && now < target.getTime()+2*60*60*1000){
-        ringOnce(key, t.title);
-      }
+      if(now>=target.getTime()) ringOnce(key, t.title, target.getTime());
     });
   });
 
@@ -4340,9 +4415,7 @@ function checkNotifications(){
     const startAt=new Date(today+'T'+c.start+':00');
     const target=new Date(startAt.getTime() - mins*60000);
     const key='class:'+c.id+':'+mins+':'+today;
-    if(now>=target.getTime() && now < startAt.getTime()+5*60*1000){
-      ringOnce(key, (c.title||'Class')+' in '+mins+' min');
-    }
+    if(now>=target.getTime()) ringOnce(key, (c.title||'Class')+' in '+mins+' min', target.getTime());
   });
   (state.studyBlocks||[]).forEach(b=>{
     if(b.date!==today || !b.start) return;
@@ -4351,9 +4424,7 @@ function checkNotifications(){
     const startAt=new Date(today+'T'+b.start+':00');
     const target=new Date(startAt.getTime() - mins*60000);
     const key='block:'+b.id+':'+mins+':'+today;
-    if(now>=target.getTime() && now < startAt.getTime()+5*60*1000){
-      ringOnce(key, (b.label||'Appointment')+' in '+mins+' min');
-    }
+    if(now>=target.getTime()) ringOnce(key, (b.label||'Appointment')+' in '+mins+' min', target.getTime());
   });
 
   try{ if(checkHabitNudges(now)) changed=true; }catch(e){}
@@ -4463,7 +4534,7 @@ function installBannerHtml(){
   if(installBannerDismissed || isAppInstalled()) return '';
   if(deferredInstallPrompt){
     return `<div class="card" style="border-left:4px solid var(--pine);background:var(--pine-soft);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <div style="flex:1;min-width:180px"><b>Install SnapBack</b><div style="font-size:.82rem;color:var(--muted)">Puts a real app icon on your home screen and works offline.</div></div>
+      <div style="flex:1;min-width:180px"><b>Install SnapBack</b><div style="font-size:.82rem;color:var(--muted)">Puts an icon on this device. It still opens with no internet, using the last copy saved here. The laptop and the phone stay matched when both are online and signed in with the same Google account.</div></div>
       <button class="btn sm" id="installBtn">Install</button>
       <button class="btn ghost sm" id="dismissInstallBtn">Not now</button>
     </div>`;
@@ -5693,8 +5764,11 @@ function legacySyncDocRef(){
 function cloudDocRef(){
   return userDocRef() || legacySyncDocRef();
 }
+function cloudSyncKeys(){
+  return ['tasks','classes','studyBlocks','externalBusy','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm','nudges','projects','exercisePlan','ifThen','energyFocus','screenPlan','habitNudges','semester','bodyDouble'];
+}
 function syncPayloadFromState(){
-  const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm','nudges','projects','bodyDouble','whenThen','techniqueTaskId','filter','listMode','audience','playlist','player','semester'];
+  const keys = cloudSyncKeys();
   const payload = {};
   keys.forEach(k=>{ if(state[k]!==undefined) payload[k]=state[k]; });
   payload.updatedAt = new Date().toISOString();
@@ -5709,7 +5783,7 @@ function applyCloudPayload(payload){
   if(state._icsImportGuard && Date.now() < state._icsImportGuard) return;
   if(state._calEditGuard && Date.now() < state._calEditGuard) return;
   _syncApplying = true;
-  const keys = ['tasks','classes','studyBlocks','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm','nudges'];
+  const keys = cloudSyncKeys();
   keys.forEach(k=>{ if(payload[k]!==undefined) state[k]=payload[k]; });
   saveState();
   _syncApplying = false;
@@ -6160,7 +6234,7 @@ function authStatusHtml(){
       return '<div style="padding:12px;border-radius:12px;background:var(--pine-soft);margin-bottom:12px">'
         +'<div style="font-weight:700">Signed in on this device only</div>'
         +'<div style="font-size:.85rem;margin-top:4px">Local login: <b>'+escapeHtml(la.username)+'</b></div>'
-        +'<div style="font-size:.78rem;color:var(--muted);margin-top:4px">Not using Google. Use Sign in with Google below for Gmail login.</div>'
+        +'<div style="font-size:.78rem;color:var(--muted);margin-top:4px">This stays on this device only. It does not sync to the phone. Sign in with Google below so the laptop and the phone stay matched.</div>'
         +'<button type="button" class="btn ghost sm" id="localSignOutBtn" style="width:100%;margin-top:10px">Log out local account</button>'
         +'</div>';
     }
@@ -6169,7 +6243,7 @@ function authStatusHtml(){
       return '<div style="padding:12px;border-radius:12px;background:var(--pine-soft);margin-bottom:12px">'
         + '<div style="font-weight:700;font-size:1rem">Signed in with Google</div>'
         + (email ? '<div style="font-size:.9rem;margin-top:6px">Gmail: <b>' + email + '</b></div>' : '<div style="font-size:.85rem;margin-top:6px">Google account connected</div>')
-        + '<p style="font-size:.8rem;color:var(--muted);margin:8px 0 0">Your name is set under Your profile below — not from Google.</p>'
+        + '<p style="font-size:.8rem;color:var(--muted);margin:8px 0 0">Live sync is on. Use this same Gmail on the laptop and the phone. While both are online, a change on one shows on the other. With no internet, each device keeps the last copy, then catches up.</p>'
         + '<button type="button" class="btn ghost sm" id="googleSignOutBtn" style="margin-top:10px;width:100%">Sign out of Google</button>'
         + '</div>';
     }
@@ -6926,7 +7000,7 @@ const CHALLENGES = [
 ];
 
 const CHALLENGE_PATHS = {
-  cant_start: ['startWizard','biteSize','bugMe','focusPlate','oneAtATime','grabBag'],
+  cant_start: ['startWizard','ifThen','biteSize','bugMe','focusPlate','oneAtATime','grabBag'],
   too_much: ['brainDump','backburner','planAhead','spotlight','oneAtATime','focusPlate','eisenhower'],
   list_freeze: ['popPool','spinPick','tileWall','grabBag','oneAtATime'],
   bounce: ['topOfMind','timeOnTask','oneAtATime','focusPod','bodyDouble','today'],
@@ -10876,7 +10950,7 @@ function viewTimer(){
   <div class="card">
     <div class="row" style="align-items:flex-end">
       <div class="field" style="flex:2"><label>Working on</label>
-        <select id="taskSelect"><option value="">No task selected</option>${state.tasks.filter(x=>!x.done).map(x=>`<option value="${x.id}" ${t.activeTaskId===x.id?'selected':''}>${escapeHtml(x.title)}</option>`).join('')}</select>
+        <select id="taskSelect"><option value="">No task selected</option>${state.tasks.filter(x=>!x.done).map(x=>`<option value="${x.id}" ${String(t.activeTaskId)===String(x.id)?'selected':''}>${escapeHtml(x.title)}</option>`).join('')}</select>
       </div>
       <div class="field">
         <button class="btn ghost sm" data-mode="work">Focus</button>
@@ -13696,9 +13770,7 @@ function viewSettings(){
       <div style="margin-top:12px">
         <button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google (recommended)</button>
         <p style="font-size:.8rem;color:var(--muted);margin:8px 0 0;line-height:1.45">
-          Sign in with Google to keep your tasks, and to open the same account on a laptop and on the phone.
-          This does not import your calendar, and it is not Outlook or Apple sign-in.
-          A username works on this device only.
+          Sign in with the same Google account on the laptop and on the phone. While both are online, tasks, schedule, and nudges stay matched. If the internet is off, each device still works from its last copy, then catches up when you are back online. This does not import your calendar, and it is not Outlook or Apple sign-in. A username works on this device only.
         </p>
       </div>
       <details style="margin-top:12px;display:none" id="devFirebaseBox" data-admin-only="1"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Advanced: Firebase config (admin only — do not use)</summary><div class="field"><label>Firebase config</label>
@@ -14073,6 +14145,7 @@ function wireView(){
       if(v) setView(v);
     });
   }
+  try{ wireTechniqueTaskPicker(); }catch(e){}
   const main=document.getElementById('main');
 
   // Share Calendar privacy + copy (must run on freebusyPreview, not only semester)
