@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="317">
+<meta name="snapback-build" content="318">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4010,7 +4010,7 @@ function saveWakeAlarmFromForm(){
         scheduleNativeWakeAlarms().then(function(n){
           const timeLabel = (state.wakeAlarm && state.wakeAlarm.time) ? state.wakeAlarm.time : '';
           if(state.wakeAlarm && state.wakeAlarm.enabled){
-            showAppMessage('Saved', 'Nudge is set for '+timeLabel+'.');
+            showAppMessage('Saved', 'Nudge is set for '+timeLabel+'. This phone rings even if you close SnapBack. The laptop shows the same nudge.');
           } else {
             showAppMessage('Nudge off', 'No Nudge until you save again.');
           }
@@ -4020,11 +4020,11 @@ function saveWakeAlarmFromForm(){
       } else {
         showAppMessage(
           state.wakeAlarm.enabled?'Saved':'Nudge off',
-          state.wakeAlarm.enabled ? ('Nudge is set for '+state.wakeAlarm.time+'. Keep this browser tab open. It rings at that time even if you are in another window. Opening SnapBack after the time has passed does not ring a late nudge.') : 'No Nudge until you save again.'
+          state.wakeAlarm.enabled ? ('Nudge is set for '+state.wakeAlarm.time+'. This laptop rings at that time only if this browser tab stays open. The phone rings even if the laptop is shut. Opening SnapBack after the time has passed does not ring a late nudge.') : 'No Nudge until you save again.'
         );
       }
     }catch(e){
-      showAppMessage(state.wakeAlarm.enabled?'Saved':'Nudge off', state.wakeAlarm.enabled?('Nudge is set for '+state.wakeAlarm.time+'. Keep this browser tab open.'):'No Nudge until you save again.');
+      showAppMessage(state.wakeAlarm.enabled?'Saved':'Nudge off', state.wakeAlarm.enabled?('Nudge is set for '+state.wakeAlarm.time+'. This laptop rings only if this browser tab stays open. The phone rings even if the laptop is shut.'):'No Nudge until you save again.');
     }
     try{
       if(typeof Notification!=='undefined' && Notification.permission==='default') Notification.requestPermission();
@@ -4212,6 +4212,7 @@ function wireNudgeForegroundHooks(){
   document.addEventListener('visibilitychange', function(){
     if(document.visibilityState==='visible'){
       try{ consumePendingNudge(); }catch(e){}
+      try{ armPhoneCloudNudgeSync(); }catch(e){}
     }
   });
   window.addEventListener('focus', function(){
@@ -4222,9 +4223,46 @@ function wireNudgeForegroundHooks(){
     const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
     if(App && App.addListener){
       App.addListener('appStateChange', function(s){
-        if(s && s.isActive){ try{ consumePendingNudge(); }catch(e){} }
+        if(s && s.isActive){ try{ consumePendingNudge(); }catch(e){} try{ armPhoneCloudNudgeSync(); }catch(e){} }
       });
     }
+  }catch(e){}
+}
+
+function firebaseRefreshToken(user){
+  try{
+    if(!user) return '';
+    if(user.refreshToken) return String(user.refreshToken);
+    if(user.stsTokenManager && user.stsTokenManager.refreshToken) return String(user.stsTokenManager.refreshToken);
+  }catch(e){}
+  return '';
+}
+function armPhoneCloudNudgeSync(){
+  try{
+    if(typeof isNativeApp!=='function' || !isNativeApp()) return;
+    const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+    if(!plug || typeof plug.armCloudSync!=='function') return;
+    try{ initFirebase(); }catch(e){}
+    const user = _auth && _auth.currentUser;
+    if(!user || !user.uid) return;
+    const cfg = (typeof getFirebaseConfig==='function') ? getFirebaseConfig() : null;
+    if(!cfg || !cfg.apiKey || !cfg.projectId) return;
+    const refresh = firebaseRefreshToken(user);
+    if(!refresh) return;
+    const send = function(idToken){
+      try{
+        plug.armCloudSync({
+          uid: String(user.uid),
+          refreshToken: String(refresh),
+          idToken: idToken ? String(idToken) : '',
+          apiKey: String(cfg.apiKey),
+          projectId: String(cfg.projectId)
+        }).catch(function(){});
+      }catch(e){}
+    };
+    if(typeof user.getIdToken==='function'){
+      user.getIdToken().then(function(tok){ send(tok); }).catch(function(){ send(''); });
+    } else send('');
   }catch(e){}
 }
 
@@ -4534,7 +4572,7 @@ function installBannerHtml(){
   if(installBannerDismissed || isAppInstalled()) return '';
   if(deferredInstallPrompt){
     return `<div class="card" style="border-left:4px solid var(--pine);background:var(--pine-soft);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <div style="flex:1;min-width:180px"><b>Install SnapBack</b><div style="font-size:.82rem;color:var(--muted)">Puts an icon on this device. It still opens with no internet, using the last copy saved here. The laptop and the phone stay matched when both are online and signed in with the same Google account.</div></div>
+      <div style="flex:1;min-width:180px"><b>Install SnapBack</b><div style="font-size:.82rem;color:var(--muted)">Puts an icon on this device. It still opens with no internet, using the last copy saved here. Sign in with the same Google account on the laptop and the phone. A nudge saved on one is kept on the other. The phone rings even if the laptop is shut.</div></div>
       <button class="btn sm" id="installBtn">Install</button>
       <button class="btn ghost sm" id="dismissInstallBtn">Not now</button>
     </div>`;
@@ -5787,7 +5825,15 @@ function applyCloudPayload(payload){
   keys.forEach(k=>{ if(payload[k]!==undefined) state[k]=payload[k]; });
   saveState();
   _syncApplying = false;
+  try{ nextWakeDate(); }catch(e){}
   render();
+  try{ scheduleWakeAlarms(); }catch(e){}
+  try{
+    if(typeof isNativeApp==='function' && isNativeApp()){
+      scheduleNativeWakeAlarms();
+      armPhoneCloudNudgeSync();
+    }
+  }catch(e){}
 }
 function stopCloudSync(){
   if(_unsubSync){ try{ _unsubSync(); }catch(e){} _unsubSync=null; }
@@ -5838,6 +5884,7 @@ function startAuthListener(){
       saveState();
       startCloudSync();
       pushCloudSync();
+      try{ armPhoneCloudNudgeSync(); }catch(e){}
     } else {
       _currentUser = null;
       stopCloudSync();
@@ -6876,7 +6923,7 @@ if(typeof window!=='undefined'){
   
   try{ document.title='SnapBack'; }catch(e){}
   window.addEventListener('popstate', (ev)=>{ if(ev.state&&ev.state.view){ state.view=ev.state.view; persistRender(); } });
-  setTimeout(()=>{ try{ ensureNotifyPermission(); syncNativeClassReminders(); scheduleWakeAlarms(); startCloudSync(); }catch(e){} }, 2000); }
+  setTimeout(()=>{ try{ ensureNotifyPermission(); syncNativeClassReminders(); scheduleWakeAlarms(); startCloudSync(); armPhoneCloudNudgeSync(); }catch(e){} }, 2000); }
 if(typeof window!=='undefined' && !window._snapbackNotifyTimer){
   window._snapbackNotifyTimer = setInterval(()=>{ try{ checkNotifications(); }catch(e){} }, 30000);
   window._tomTimer = setInterval(()=>{
@@ -13252,7 +13299,8 @@ const FAQ_ITEMS=[
   {q:'What is a Frog?', a:'The one task to do first. “Eat the frog” means start with the hardest or most important item so the rest feels easier. Only one task should be the Frog. A task can be both Must-do and the Frog: it belongs today, and you start with it. To set one: open the task, tap More, then Mark as Frog. Or open Challenges → Must-do & Frog, choose the task, and tap Mark as Frog or Must-do + Frog.'},
   {q:'What is a Non-negotiable?', a:'The one thing on Focus Plate that you will not drop today, even if the rest of the plate slips. It is not the same as Frog. Frog is which task you start with. Non-negotiable is the one you refuse to skip.'},
   {q:'What is Backburner?', a:'A place to park a task you are not doing today. It is not deleted. From Challenges → Everything feels like too much → Backburner, choose an existing task and tap Move to Backburner.'},
-  {q:'Will I lose my work?', a:'Sign in with Google and your work is kept. You can also download a backup file from Settings → Backup.'}
+  {q:'Will I lose my work?', a:'Sign in with Google and your work is kept. You can also download a backup file from Settings → Backup.'},
+  {q:'Break a big assignment into steps', a:'Open Bite Size from Challenges or Techniques. Choose the task. The text fills in. Add small steps, or use Ask AI. Keep a step under about 15 minutes.'}
 ];
 
 /* ============================================================
@@ -13471,7 +13519,6 @@ function viewHelp(){
       <p>Outlook: <a href="https://support.microsoft.com/en-us/outlook/export-an-outlook-calendar-to-google-calendar" target="_blank" rel="noopener">Microsoft’s export steps</a></p>
       <p>Google Calendar: <a href="https://support.google.com/calendar/answer/37111" target="_blank" rel="noopener">Google’s export steps</a>. On a computer, Settings → Import & export → Export. If a .zip downloads, open it and upload the .ics file inside.</p>
       <p>Apple Calendar: <a href="https://support.apple.com/guide/calendar/import-or-export-calendars-icl1023/mac" target="_blank" rel="noopener">Apple’s export steps</a>. On a Mac: File → Export → Export.</p>
-      <p>Notion: Notion does not download a .ics file from a database. If the dates are in Notion Calendar, export the Google, Outlook, or Apple calendar they come from, using the links above. <a href="https://www.notion.com/help/manage-your-calendars-and-events" target="_blank" rel="noopener">Notion Calendar help</a></p>
     </details>
     <details class="faqitem"><summary>What happens to events already in SnapBack?</summary>
       <p>Events you typed in SnapBack stay. Tasks stay. A new file replaces only the appointments brought in from the last calendar file. It does not change Outlook, Google, or Apple.</p>
@@ -13482,9 +13529,6 @@ function viewHelp(){
     </details>
     <details class="faqitem"><summary>Add many classes at once</summary>
       <p>Plan → Schedule → Quick add. Type lines, paste a timetable, or upload a screenshot, then Read screenshot. Edit the text. Tap Check what I read, then Yes — save. Cancel adds nothing.</p>
-    </details>
-    <details class="faqitem"><summary>Break a big assignment into steps</summary>
-      <p>Open Bite Size from Challenges or Techniques. Choose the task. The text fills in. Add small steps, or use Ask AI. Keep a step under about 15 minutes.</p>
     </details>
   `)}
   ${helpBox('parts','About each page', ORG_CARDS.map(c=>`<div class="techcard">
@@ -13770,7 +13814,7 @@ function viewSettings(){
       <div style="margin-top:12px">
         <button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google (recommended)</button>
         <p style="font-size:.8rem;color:var(--muted);margin:8px 0 0;line-height:1.45">
-          Sign in with the same Google account on the laptop and on the phone. While both are online, tasks, schedule, and nudges stay matched. If the internet is off, each device still works from its last copy, then catches up when you are back online. This does not import your calendar, and it is not Outlook or Apple sign-in. A username works on this device only.
+          Sign in with the same Google account on the laptop and on the phone. You do not save a nudge twice. A nudge saved on the laptop is picked up by the phone, and a nudge saved on the phone shows on the laptop. The phone rings even if the laptop is shut. The laptop rings only while its SnapBack tab is open. If the internet is off, each device keeps its last copy, then catches up when you are back online. A username works on this device only.
         </p>
       </div>
       <details style="margin-top:12px;display:none" id="devFirebaseBox" data-admin-only="1"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Advanced: Firebase config (admin only — do not use)</summary><div class="field"><label>Firebase config</label>
