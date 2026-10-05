@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="315">
+<meta name="snapback-build" content="316">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -3152,6 +3152,49 @@ function addScheduleItem(){
   });
   persistRender();
 }
+function wireFollowEnd(startEl, endEl){
+  if(!startEl || !endEl || startEl._followEnd) return;
+  startEl._followEnd=true;
+  function toMin(v){
+    const p=String(v||'').split(':');
+    if(p.length<2 || p[0]==='') return null;
+    const h=Number(p[0]), m=Number(p[1]);
+    if(isNaN(h)||isNaN(m)) return null;
+    return h*60+m;
+  }
+  function fromMin(mins){
+    mins=((mins%(24*60))+(24*60))%(24*60);
+    return String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0');
+  }
+  function remember(){
+    startEl.dataset.prev=startEl.value;
+    endEl.dataset.prev=endEl.value;
+  }
+  remember();
+  startEl.addEventListener('focus', remember);
+  endEl.addEventListener('focus', remember);
+  endEl.addEventListener('change', function(){ endEl.dataset.prev=endEl.value; });
+  startEl.addEventListener('change', function(){
+    const prevS=toMin(startEl.dataset.prev);
+    const prevE=toMin(endEl.dataset.prev);
+    const nowS=toMin(startEl.value);
+    if(nowS==null) return;
+    let dur=60;
+    if(prevS!=null && prevE!=null && prevE>prevS) dur=prevE-prevS;
+    endEl.value=fromMin(nowS+dur);
+    startEl.dataset.prev=startEl.value;
+    endEl.dataset.prev=endEl.value;
+  });
+}
+function wireAllFollowEnds(){
+  [['schedStart','schedEnd'],['calDraftStart','calDraftEnd'],['exStart','exEnd'],['tbStart','tbEnd'],['conflictNewStart','conflictNewEnd']].forEach(function(p){
+    wireFollowEnd(document.getElementById(p[0]), document.getElementById(p[1]));
+  });
+  document.querySelectorAll('.tt-edit-start').forEach(function(s){
+    const i=s.getAttribute('data-i');
+    wireFollowEnd(s, document.querySelector('.tt-edit-end[data-i="'+i+'"]'));
+  });
+}
 function wireSchedForm(){
   const typeEl=document.getElementById('schedType');
   const repEl=document.getElementById('schedRepeat');
@@ -3169,23 +3212,10 @@ function wireSchedForm(){
   };
   if(typeEl) typeEl.addEventListener('change', sync);
   if(repEl) repEl.addEventListener('change', sync);
-  // When start changes, set end = start + 1 hour (if end is empty or still at/before start)
+  // When the start time changes, keep the same length and move the end time. The end box stays editable.
   const startEl=document.getElementById('schedStart');
   const endEl=document.getElementById('schedEnd');
-  function bumpEndFromStart(){
-    if(!startEl || !endEl || !startEl.value) return;
-    const [h,m]=startEl.value.split(':').map(Number);
-    let eh=h+1, em=m;
-    if(eh>=24) eh=eh%24;
-    const pad=n=>String(n).padStart(2,'0');
-    const next=pad(eh)+':'+pad(em);
-    // Always update end when start changes so 10:30 → 11:30
-    endEl.value=next;
-  }
-  if(startEl){
-    startEl.addEventListener('change', bumpEndFromStart);
-    startEl.addEventListener('input', bumpEndFromStart);
-  }
+  wireFollowEnd(startEl, endEl);
   sync();
   const btn=document.getElementById('addSchedBtn');
   if(btn) btn.addEventListener('click', addScheduleItem);
@@ -4538,13 +4568,15 @@ function startTopOfMindTimerTick(){
   try{ if(window._tomTick) clearInterval(window._tomTick); }catch(e){}
   window._tomTick = setInterval(function(){
     try{
-      if(!state.topOfMindId) return;
-      if(state.timeTrack && state.timeTrack.startedAt){
-        const bar=document.getElementById('topOfMindBar');
-        if(bar){ try{ persistRender(); }catch(e){} }
-      }
+      if(!state.topOfMindId || !state.timeTrack || !state.timeTrack.startedAt) return;
+      const bar=document.getElementById('topOfMindBar');
+      if(!bar) return;
+      const sec=Math.floor((Date.now()-state.timeTrack.startedAt)/1000);
+      const m=Math.floor(sec/60), s=sec%60;
+      const slot=bar.querySelector('[data-tom-clock]');
+      if(slot) slot.textContent=m+':'+String(s).padStart(2,'0');
     }catch(e){}
-  }, 15000);
+  }, 1000);
 }
 function topOfMindBanner(){
   if(!state.topOfMindId) return '';
@@ -4564,9 +4596,41 @@ function topOfMindBanner(){
     <button class="btn ghost sm" data-action="clear-tom">Clear</button>
   </div>`;
 }
+function restoreMainFields(snap){
+  if(!snap || snap.view!==state.view) return;
+  (snap.fields||[]).forEach(function(f){
+    const n=document.getElementById(f.id);
+    if(!n) return;
+    if(n.value!==f.value) n.value=f.value;
+  });
+  const blocked=!!(state.appMsg||state.focusFinish||state.dayPop||state.wakeMathOpen||state.nudgePreview||state.pickTom||state.pickTimer||state.focusPodAsk||state.workSession||state.seriesAsk||state.appPrompt||state.quoteModalOpen||(state.tour&&state.tour.open));
+  if(blocked || !snap.focusId) return;
+  const n=document.getElementById(snap.focusId);
+  if(!n || n.disabled) return;
+  try{ n.focus(); }catch(e){}
+  const f=(snap.fields||[]).find(function(x){ return x.id===snap.focusId; });
+  if(f && typeof n.setSelectionRange==='function'){
+    try{ n.setSelectionRange(f.a, f.b); }catch(e){}
+  }
+}
 function renderMain(){
   const el=document.getElementById('main');
   if(!el) return;
+  let _fieldSnap=null;
+  try{
+    if(!window._skipRestore){
+      const fields=[];
+      el.querySelectorAll('input,textarea').forEach(function(n){
+        if(!n.id) return;
+        const ty=String(n.type||'').toLowerCase();
+        if(ty==='checkbox'||ty==='radio'||ty==='file'||ty==='range'||ty==='button'||ty==='submit'||n.readOnly) return;
+        fields.push({id:n.id, value:n.value, a:n.selectionStart, b:n.selectionEnd});
+      });
+      const ae=document.activeElement;
+      _fieldSnap={view:state.view, focusId:ae&&ae.id, fields:fields};
+    }
+  }catch(e){}
+  window._skipRestore=false;
   try{
     const fb = (typeof parseFreeBusyFromHash==='function') ? parseFreeBusyFromHash() : null;
     if(fb){ state.freeBusyPublic = fb; state.view = 'freebusy'; }
@@ -4597,6 +4661,7 @@ function renderMain(){
     try{ html = topOfMindBanner() + html; }catch(e2){ console.warn('topOfMindBanner', e2); }
     el.innerHTML=html;
     try{ wireView(); }catch(e3){ console.error('wireView', e3); }
+    try{ restoreMainFields(_fieldSnap); }catch(e4){}
   }catch(e){
     console.error('Rendering failed for view "'+state.view+'":', e);
     const msg = (e && e.message) ? String(e.message) : String(e);
@@ -4860,6 +4925,41 @@ function renderModal(){
   }
 
   // Generic in-app message (replaces alert)
+  if(state.focusFinish){
+    const ft=findTask(state.focusFinish.taskId);
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:400px;text-align:left">
+      <div class="qeyebrow">Focus Pod</div>
+      <div style="font-weight:800;font-size:1.15rem;margin-bottom:8px">Time is up</div>
+      <p style="margin:0 0 14px">${ft?('“'+escapeHtml(ft.title)+'”'):'Your focus block'} finished.</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn" id="ffDone" type="button">Completed task</button>
+        <button class="btn ghost" id="ffExtend" type="button">Extend time on focus</button>
+      </div>
+    </div></div>`;
+    document.getElementById('ffDone').onclick=function(){
+      const id=state.focusFinish&&state.focusFinish.taskId;
+      state.focusFinish=null;
+      if(state.timer){
+        state.timer.running=false;
+        state.timer.mode='work';
+        state.timer.remaining=modeLength('work');
+        state.timer.total=state.timer.remaining;
+      }
+      if(id && findTask(id)) toggleDone(id);
+      else persistRender();
+    };
+    document.getElementById('ffExtend').onclick=function(){
+      state.focusFinish=null;
+      if(state.timer){
+        state.timer.running=false;
+        state.timer.mode='work';
+        state.timer.remaining=modeLength('work');
+        state.timer.total=state.timer.remaining;
+      }
+      navigateTo('timer');
+    };
+    return;
+  }
   if(state.appMsg){
     const m = state.appMsg;
     root.innerHTML=`<div class="overlay">
@@ -6680,6 +6780,7 @@ function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal()
   document.querySelectorAll('#main [data-nav]').forEach(b=>{
     b.addEventListener('click', ()=> setView(b.dataset.nav));
   });
+  try{ wireAllFollowEnds(); }catch(e){}
   const main=document.getElementById('main');
   if(main && state.undoBanner){
     const bar=document.createElement('div');
@@ -6706,10 +6807,12 @@ if(typeof window!=='undefined' && !window._snapbackNotifyTimer){
   window._snapbackNotifyTimer = setInterval(()=>{ try{ checkNotifications(); }catch(e){} }, 30000);
   window._tomTimer = setInterval(()=>{
     try{
-      if(state.timeTrack && state.timeTrack.startedAt && state.topOfMindId){
-        const bar=document.querySelector('#main .card');
-        if(state.view) renderMain();
-      }
+      const bar=document.getElementById('topOfMindBar');
+      if(!bar || !state.timeTrack || !state.timeTrack.startedAt || !state.topOfMindId) return;
+      const sec=Math.floor((Date.now()-state.timeTrack.startedAt)/1000);
+      const m=Math.floor(sec/60), s=sec%60;
+      const slot=bar.querySelector('[data-tom-clock]');
+      if(slot) slot.textContent=m+':'+String(s).padStart(2,'0');
     }catch(e){}
   }, 1000);
 }
@@ -6755,7 +6858,7 @@ function hubPage(title, sub, cards){
     <h1>${escapeHtml(title)}</h1>
   </div>
   <div style="display:grid;gap:10px">
-    ${cards.map(c=>`<button class="card" data-nav="${c.id}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line);background:var(--card)">
+    ${cards.map(c=>`<button type="button" class="card" data-action="open-nav" data-view="${c.id}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line);background:var(--card)">
       <div style="font-size:1.4rem">${c.ico}</div>
       <div style="font-weight:700;margin-top:4px">${escapeHtml(c.label)}</div>
       <div style="font-size:.85rem;color:var(--muted)">${escapeHtml(c.desc)}</div>
@@ -6981,10 +7084,8 @@ function viewEnergyFocus(){
   </div>
   <div class="card">
     <label>Add something flexible</label>
-    <div class="row" style="gap:8px">
-      <input id="efNewItem" placeholder="e.g. skim one page of notes" style="flex:1">
-      <button class="btn sm" data-action="ef-add" type="button">Add</button>
-    </div>
+    <input id="efNewItem" type="text" autocomplete="off" enterkeyhint="done" placeholder="e.g. skim one page of notes" style="width:100%;margin:6px 0 8px">
+    <button class="btn" id="efAddBtn" data-action="ef-add" type="button">Add</button>
   </div>
   <div class="card">
     <div style="font-weight:700;margin-bottom:8px">Your flexible list</div>
@@ -7057,20 +7158,22 @@ function viewIfThen(){
     <h1>If–Then plan</h1>
     <p>Write the cue, the tiny action, and the reward. Save it. Then start it. The reward gets its own timer so ten minutes does not become two hours.</p>
   </div>
-  <div class="card" style="${it.phase==='active'?'opacity:.45':''}">
+  <div class="card">
     <label>IF (the cue)</label>
-    <input id="ifThenCue" placeholder="e.g. I finish dinner" value="${escapeHtml(it.cue||'')}">
+    <input id="ifThenCue" type="text" autocomplete="off" placeholder="e.g. I finish dinner" value="${escapeHtml(it.cue||'')}">
     <label style="margin-top:12px">THEN (the tiny action)</label>
-    <input id="ifThenAction" placeholder="e.g. open notes for 10 minutes" value="${escapeHtml(it.action||'')}">
+    <input id="ifThenAction" type="text" autocomplete="off" placeholder="e.g. open notes for 10 minutes" value="${escapeHtml(it.action||'')}">
     <label style="margin-top:12px">If it feels too hard, instead</label>
-    <input id="ifThenFallback" placeholder="e.g. read 1 page" value="${escapeHtml(it.fallback||'')}">
+    <input id="ifThenFallback" type="text" autocomplete="off" placeholder="e.g. read 1 page" value="${escapeHtml(it.fallback||'')}">
     <label style="margin-top:12px">Reward after it is done</label>
-    <input id="ifThenReward" placeholder="e.g. check shorts for 10 minutes" value="${escapeHtml(it.reward||'')}">
+    <input id="ifThenReward" type="text" autocomplete="off" placeholder="e.g. check shorts for 10 minutes" value="${escapeHtml(it.reward||'')}">
     <button class="btn" data-action="ifthen-save" type="button" style="margin-top:14px;width:100%">Save If–Then</button>
+    <p style="font-size:.85rem;color:var(--muted);margin:10px 0 0">Saved plans stay on this page only. They are not added to the calendar. Change the boxes and tap Save to edit.</p>
   </div>
   ${(it.cue&&it.action)?`<div class="card" style="background:${it.phase==='active'?'#FFF3B0':it.phase==='done'||it.phase==='gate'?'#E7F6EE':'var(--pine-soft)'};${it.phase==='active'?'box-shadow:0 0 0 4px #E6B800':''}">
-    <div style="font-size:.75rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)">Your plan</div>
+    <div style="font-size:.75rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)">Your plan — stays on this page</div>
     <p style="margin:8px 0">If <b>${escapeHtml(it.cue)}</b>, then <b>${escapeHtml(shown)}</b>.</p>
+    ${it.fallback?`<p style="margin:0 0 8px">If that feels too hard: <b>${escapeHtml(it.fallback)}</b></p>`:''}
     ${it.reward?`<p style="margin:0 0 8px">Reward: <b>${escapeHtml(it.reward)}</b></p>`:''}
     ${(it.phase==='active'||it.phase==='reward')?`<div id="ifThenClock" style="font-size:2.2rem;font-weight:800;margin:8px 0">${clock()}</div>`:''}
     ${it.phase==='reward'?`<p>Reward time is running. When it ends, SnapBack will tell you the break is up.</p>`:''}
@@ -7080,6 +7183,8 @@ function viewIfThen(){
       ${it.phase==='active'?`<button class="btn ghost" data-action="ifthen-hard" type="button">Too hard?</button>`:''}
       ${it.phase==='active'||it.phase==='gate'?`<button class="btn" data-action="ifthen-done" type="button">Mark done</button>`:''}
       ${(it.phase==='gate'||it.phase==='done')&&it.reward?`<button class="btn" data-action="ifthen-reward" type="button">Claim reward: start ${ifThenMinutes(it.reward)} min timer</button>`:''}
+      <button class="btn ghost" data-action="ifthen-edit" type="button">Edit</button>
+      <button class="btn ghost" data-action="ifthen-delete" type="button">Delete this plan</button>
     </div>
   </div>`:''}`;
 }
@@ -7973,7 +8078,19 @@ function dayCommitments(dateStr, opts){
     });
   }
   rows.sort((a,b)=>String(a.time||'').localeCompare(String(b.time||'')));
-  return rows;
+  const collapsed=[];
+  const seenTitle={};
+  rows.forEach(function(r){
+    const k=String(r.title||'').toLowerCase().replace(/\s+/g,' ').trim();
+    if(!k){ collapsed.push(r); return; }
+    if(seenTitle[k]==null){ seenTitle[k]=collapsed.length; collapsed.push(r); return; }
+    const prev=collapsed[seenTitle[k]];
+    const workout=prev.kind==='exercise'||r.kind==='exercise';
+    if(!workout){ collapsed.push(r); return; }
+    if(String(r.time||'')>=String(prev.time||'')) collapsed[seenTitle[k]]=r;
+  });
+  collapsed.sort((a,b)=>String(a.time||'').localeCompare(String(b.time||'')));
+  return collapsed;
 }
 function commitmentRowsHtml(rows, emptyText){
   if(!rows.length) return `<div class="empty">${emptyText}</div>`;
@@ -8938,6 +9055,7 @@ function exportWeekGrid(){
   if(w){ w.document.write(html); w.document.close(); }
 }
 function itemsForDate(dateStr){
+  try{ collapseWorkoutCopies(); }catch(e){}
   const d=new Date(dateStr+'T00:00:00');
   const dow=mondayIndex(d);
   const items=[];
@@ -8964,14 +9082,28 @@ function itemsForDate(dateStr){
     if(ka===kb) return String(a.label||'').length-String(b.label||'').length;
     return String(a.time||'').localeCompare(String(b.time||''));
   });
-  return ranked.filter(it=>{
+  const deduped=ranked.filter(it=>{
     const mk=meetingKey(it.label||'')||cleanCalTitle(it.label||'').toLowerCase();
     const k=String(it.time||'').slice(0,5)+'|'+mk;
     if(!mk) return true;
     if(seen[k]) return false;
     seen[k]=1;
     return true;
-  }).sort((a,b)=>(a.time||'').localeCompare(b.time||''));
+  });
+  const planTitles={};
+  (state.exercisePlan||[]).forEach(function(r){
+    if(Number(r.day)!==Number(dow)) return;
+    planTitles[normExTitle(exerciseTaskTitle(r))]=1;
+  });
+  const best={};
+  const out=[];
+  deduped.forEach(function(it){
+    const k=normExTitle(it.label||'');
+    if(!k || !planTitles[k]){ out.push(it); return; }
+    if(best[k]==null){ best[k]=out.length; out.push(it); return; }
+    if(String(it.time||'')>=String(out[best[k]].time||'')) out[best[k]]=it;
+  });
+  return out.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
 }
 
 function cleanCalTitle(s){
@@ -10764,6 +10896,11 @@ function viewTimer(){
         ${t.running ? `<button class="btn warm" id="pauseBtn">Pause</button>` : `<button class="btn" id="startBtn">Start</button>`}
         <button class="btn ghost" id="resetBtn">Reset</button>
       </div>
+      <div class="field" style="max-width:200px;margin:12px auto 0">
+        <label>Minutes</label>
+        <input type="number" id="podMinutes" min="1" max="180" value="${s.workMin||25}">
+      </div>
+      <p style="font-size:.82rem;color:var(--muted);margin:6px 0 0">Set the minutes, then press Start.</p>
       <div class="sessiondots">${dots}</div>
       <div style="color:var(--muted);font-size:.8rem;margin-top:8px">
         ${activeTask ? `${activeTask.pomodoros||0} focus session(s) logged on “${escapeHtml(activeTask.title)}”` : 'Pick a task above to track sessions against it'}
@@ -12634,7 +12771,58 @@ function exerciseTaskTitle(r){
   if(r.km) bits.push(String(r.km)+' km');
   return bits.join(' · ');
 }
+function normExTitle(s){
+  return String(s||'').toLowerCase().replace(/^workout:\s*/,'').replace(/\s+/g,' ').trim();
+}
+function collapseWorkoutCopies(){
+  if(!Array.isArray(state.exercisePlan)) state.exercisePlan=[];
+  if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
+  state.exercisePlan.forEach(function(r){ if(!r.id) r.id=uid(); });
+  let dirty=false;
+  const groups={};
+  state.exercisePlan.forEach(function(r){
+    const key=String(r.day)+'|'+normExTitle(exerciseTaskTitle(r));
+    if(!groups[key]) groups[key]=[];
+    groups[key].push({kind:'plan', row:r, start:String(r.start||'')});
+  });
+  state.studyBlocks.forEach(function(b){
+    let dow=null;
+    try{ dow=mondayIndex(new Date((b.date||'')+'T12:00:00')); }catch(e){}
+    if(dow==null || !b.date) return;
+    const key=String(dow)+'|'+normExTitle(b.label);
+    if(!groups[key]) return;
+    groups[key].push({kind:'block', row:b, start:String(b.start||'')});
+  });
+  Object.keys(groups).forEach(function(key){
+    const arr=groups[key];
+    if(arr.length<2) return;
+    dirty=true;
+    arr.sort(function(a,b){ return a.start.localeCompare(b.start); });
+    const keep=arr[arr.length-1];
+    const plansIn=arr.filter(function(x){ return x.kind==='plan'; });
+    if(plansIn.length){
+      const survivor=plansIn[plansIn.length-1].row;
+      if(String(keep.start)>String(survivor.start||'')){
+        survivor.start=keep.kind==='plan'?keep.row.start:keep.row.start;
+        survivor.end=keep.kind==='plan'?keep.row.end:(keep.row.end||survivor.end);
+      }
+      const sid=String(survivor.id);
+      state.exercisePlan=state.exercisePlan.filter(function(r){
+        const k=String(r.day)+'|'+normExTitle(exerciseTaskTitle(r));
+        if(k!==key) return true;
+        return String(r.id)===sid;
+      });
+    }
+    const drop={};
+    arr.forEach(function(x){ if(x.kind==='block') drop[String(x.row.id)]=1; });
+    if(Object.keys(drop).length){
+      state.studyBlocks=state.studyBlocks.filter(function(b){ return !drop[String(b.id)]; });
+    }
+  });
+  if(dirty){ try{ saveState(); }catch(e){} }
+}
 function syncExerciseLinks(){
+  collapseWorkoutCopies();
   ensureHabitPlans();
   const ids={};
   (state.exercisePlan||[]).forEach(function(r){
@@ -12685,14 +12873,14 @@ function saveExercisePlan(){
   const end=(document.getElementById('exEnd')&&document.getElementById('exEnd').value)||'08:15';
   const km=(document.getElementById('exKm')&&document.getElementById('exKm').value||'').trim();
   const day=dayEl?dayEl.value:'';
-  state.exForm={day:day, focus:focus, other:other, details:details, start:start, end:end, km:km};
+  const editId=(state.exForm&&state.exForm.editId)||'';
+  state.exForm={day:day, focus:focus, other:other, details:details, start:start, end:end, km:km, editId:editId};
   if(day===''){
     showAppMessage('Choose a day','Pick the day, then tap Save session. What you typed is still here.');
     return;
   }
   const label = focus==='Other' ? (other||'Workout') : focus;
   const n=Number(day);
-  const editId=state.exForm&&state.exForm.editId;
   let row=editId?(state.exercisePlan||[]).find(function(r){ return String(r.id)===String(editId); }):null;
   if(!row){
     state.exercisePlan=state.exercisePlan.filter(function(r){ return !(r.day===n && r.start===start && r.focus===label); });
@@ -13875,6 +14063,16 @@ function wireView(){
       try{ shareWeekFreeBusy(); }catch(err){ console.warn(err); }
     });
   }
+  if(!window._openNavDelegated){
+    window._openNavDelegated = true;
+    document.addEventListener('click', function(ev){
+      const t = ev.target && ev.target.closest && ev.target.closest('[data-action="open-nav"]');
+      if(!t) return;
+      ev.preventDefault();
+      const v = t.getAttribute('data-view');
+      if(v) setView(v);
+    });
+  }
   const main=document.getElementById('main');
 
   // Share Calendar privacy + copy (must run on freebusyPreview, not only semester)
@@ -13947,6 +14145,8 @@ function wireView(){
     };
 
   if(!main) return;
+  const efNew=document.getElementById('efNewItem');
+  if(efNew) efNew.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); const b=document.getElementById('efAddBtn'); if(b) b.click(); } };
   main.querySelectorAll('[data-action]').forEach(el=>{
     const action=el.dataset.action;
     let id = el.dataset.id;
@@ -14620,12 +14820,14 @@ function wireView(){
     else if(action==='ef-add') el.addEventListener('click', ()=>{
       if(!state.energyFocus) state.energyFocus={items:[]};
       if(!Array.isArray(state.energyFocus.items)) state.energyFocus.items=[];
-      const v=(document.getElementById('efNewItem')?.value||'').trim();
+      const inp=document.getElementById('efNewItem');
+      const v=(inp?.value||'').trim();
       if(!v){ showAppMessage('Type something first', 'Then tap Add. It will show in Your flexible list.'); return; }
       state.energyFocus.items.push(v);
+      if(inp) inp.value='';
+      window._skipRestore=true;
       try{ saveState(); }catch(e){}
       showAppMessage('Added', '“'+v+'” is in Your flexible list. Tap Start timer on that line.');
-      persistRender();
     });
     else if(action==='ef-stop') el.addEventListener('click', ()=>{
       if(!state.energyFocus) return;
@@ -14712,6 +14914,17 @@ function wireView(){
       try{ startIfThenTick(); }catch(e){}
       showAppMessage('Reward timer', mins+' minutes. SnapBack will tell you when the break is up.');
       persistRender();
+    });
+    else if(action==='ifthen-edit') el.addEventListener('click', ()=>{
+      if(state.ifThen) state.ifThen.phase='edit';
+      persistRender();
+      setTimeout(function(){ const n=document.getElementById('ifThenCue'); if(n){ n.focus(); } }, 40);
+    });
+    else if(action==='ifthen-delete') el.addEventListener('click', ()=>{
+      window._skipRestore=true;
+      state.ifThen={cue:'', action:'', fallback:'', reward:'', phase:'edit', shrunk:false};
+      try{ saveState(); }catch(e){}
+      showAppMessage('Deleted', 'That plan is gone. This page stays empty until you write a new one.');
     });
     else if(action==='ritual-check') el.addEventListener('change', ()=>{
       if(!state.rituals) state.rituals={};
@@ -15680,6 +15893,7 @@ function wireView(){
     const exFocus=document.getElementById('exFocus');
     if(exFocus) exFocus.addEventListener('change', function(){
       state.exForm={
+        editId:(state.exForm&&state.exForm.editId)||'',
         day:(document.getElementById('exDay')&&document.getElementById('exDay').value)||'',
         focus:exFocus.value,
         other:(document.getElementById('exOther')&&document.getElementById('exOther').value)||'',
@@ -15732,6 +15946,20 @@ function wireView(){
     const startBtn=document.getElementById('startBtn'); if(startBtn) startBtn.addEventListener('click', startTimer);
     const pauseBtn=document.getElementById('pauseBtn'); if(pauseBtn) pauseBtn.addEventListener('click', pauseTimer);
     const resetBtn=document.getElementById('resetBtn'); if(resetBtn) resetBtn.addEventListener('click', resetTimer);
+    const podMin=document.getElementById('podMinutes');
+    if(podMin) podMin.addEventListener('change', function(){
+      let n=Math.round(Number(podMin.value)||25);
+      if(n<1) n=1; if(n>180) n=180;
+      if(!state.settings) state.settings={};
+      state.settings.workMin=n;
+      if(state.timer && !state.timer.running && state.timer.mode==='work'){
+        state.timer.remaining=n*60;
+        state.timer.total=n*60;
+        const lab=document.getElementById('timeLabel');
+        if(lab) lab.textContent=fmtTime(state.timer.remaining);
+      }
+      try{ saveState(); }catch(e){}
+    });
     main.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>switchTimerMode(b.dataset.mode)));
     const fpPlay=document.getElementById('fpPlaySound');
     if(fpPlay) fpPlay.addEventListener('click', ()=>{
@@ -16618,6 +16846,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     if(state.appPrompt===undefined) state.appPrompt=null;
     if(state.pickTom===undefined) state.pickTom=false;
     if(state.pickTimer===undefined) state.pickTimer=false;
+    if(state.focusFinish===undefined) state.focusFinish=null;
     if(state.workSession===undefined) state.workSession=null;
     if(!state.contextFilter) state.contextFilter='all';
     if(state.askDateOpen===undefined) state.askDateOpen=false;
