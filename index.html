@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="314">
+<meta name="snapback-build" content="315">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4524,7 +4524,11 @@ function startEnergyFocusTick(){
       }
       if(left<=0){
         ef.timerOn=false;
-        showAppMessage('Time is up', 'You may stop. That was the deal.');
+        if(!ef._rang){
+          ef._rang=true;
+          try{ playReminderChime(); }catch(e){}
+          showAppMessage('Time is up', 'You may stop. That was the deal.');
+        }
         try{ clearInterval(window._efTick); }catch(e){}
       }
     }catch(e){}
@@ -4544,7 +4548,7 @@ function startTopOfMindTimerTick(){
 }
 function topOfMindBanner(){
   if(!state.topOfMindId) return '';
-  const t=(state.tasks||[]).find(x=>x.id===state.topOfMindId);
+  const t=(state.tasks||[]).find(x=>String(x.id)===String(state.topOfMindId));
   if(!t || t.done){ state.topOfMindId=null; return ''; }
   let timerHtml='';
   if(state.timeTrack && state.timeTrack.taskId===t.id && state.timeTrack.startedAt){
@@ -4793,19 +4797,34 @@ function renderModal(){
           state.topOfMindId=id;
           state.pickTom=false;
           showAppMessage('Pinned', 'That task stays at the top until you clear it or mark it done.');
+          persistRender();
         } else {
-          state.timeTrack={taskId:id, startedAt:Date.now(), accumulated:(state.timeTrack&&state.timeTrack.accumulated)||{}};
-          state.topOfMindId=id;
           state.pickTimer=false;
-          state.listMode='one';
-          const t=findTask(id);
-          showAppMessage('Timing started', 'Timing “'+(t?t.title:'task')+'”. Watch the yellow Top of Mind bar for minutes. Open Focus Pod if you want a structured block.');
-          navigateTo('tasks');
+          state.focusPodAsk=id;
+          persistRender();
         }
-        persistRender();
       };
     });
     document.getElementById('pickCancel').onclick=()=>{ state.pickTom=false; state.pickTimer=false; persistRender(); };
+    return;
+  }
+  if(state.focusPodAsk){
+    const t=findTask(state.focusPodAsk);
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:400px;text-align:left">
+      <div style="font-weight:800;font-size:1.1rem;margin-bottom:8px">${escapeHtml(t?t.title:'This task')}</div>
+      <p style="margin:0 0 14px">Go to Focus Pod</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn" id="fpYes" type="button">Yes</button>
+        <button class="btn ghost" id="fpNo" type="button">No</button>
+      </div>
+    </div></div>`;
+    document.getElementById('fpYes').onclick=function(){
+      if(t && state.timer) state.timer.activeTaskId=t.id;
+      state.focusPodAsk=null;
+      navigateTo('timer');
+      showAppMessage('Focus Pod', 'Click the start button. Let\'s go!');
+    };
+    document.getElementById('fpNo').onclick=function(){ state.focusPodAsk=null; persistRender(); };
     return;
   }
   // After Grab Bag / Spin — work session, not just "done"
@@ -5437,8 +5456,12 @@ function navigateTo(view){
     if(state.navHistory.length > 30) state.navHistory.shift();
   }
   // Leaving a nested challenge detail → clear so list shows next time
-  if(view==='challenges'){ state.challengeId=null; }
-  else if(state.view==='challenges' && view!=='challenges'){ /* keep or clear: clear for less confusion */ state.challengeId=null; }
+  if(view==='challenges'){
+    state.challengeId=null;
+    state.returnChallengeId=null;
+  } else if(state.view==='challenges' && state.challengeId){
+    state.returnChallengeId=state.challengeId;
+  }
   const loader=document.getElementById('viewLoader');
   if(loader){ loader.classList.add('on'); }
   state.view = view;
@@ -5451,18 +5474,11 @@ function navigateTo(view){
   setTimeout(()=>{ const l=document.getElementById('viewLoader'); if(l) l.classList.remove('on'); }, 280);
 }
 function goBack(){
-  // Grab Bag / One-at-a-time / Tile wall live under Tasks — back should return to Tasks list
-  if(state.view==='tasks' && state.listMode && state.listMode!=='all'){
-    state.listMode = 'all';
-    if(state.navHistory && state.navHistory.length) state.view = state.navHistory.pop();
-    persistRender();
-    return;
-  }
-  if(state.navHistory && state.navHistory.length){
-    state.view = state.navHistory.pop();
-  } else {
-    state.view = 'today';
-  }
+  if(state.view==='tasks' && state.listMode && state.listMode!=='all') state.listMode='all';
+  let prev='today';
+  if(state.navHistory && state.navHistory.length) prev=state.navHistory.pop();
+  if(prev==='challenges' && state.returnChallengeId) state.challengeId=state.returnChallengeId;
+  state.view=prev;
   persistRender();
 }
 
@@ -6809,10 +6825,10 @@ const CHALLENGES = [
 const CHALLENGE_PATHS = {
   cant_start: ['startWizard','biteSize','bugMe','focusPlate','oneAtATime','grabBag'],
   too_much: ['brainDump','backburner','planAhead','spotlight','oneAtATime','focusPlate','eisenhower'],
-  list_freeze: ['popPool','spinPick','tileWall','grabBag','oneAtATime','schedule'],
+  list_freeze: ['popPool','spinPick','tileWall','grabBag','oneAtATime'],
   bounce: ['topOfMind','timeOnTask','oneAtATime','focusPod','bodyDouble','today'],
-  what_next: ['spinPick','grabBag','eisenhower','mustFrog','today','spotlight','startWizard'],
-  miss_due: ['bugMe','tasks','schedule','calendar','today'],
+  what_next: ['startWizard','eisenhower','spinPick','today','spotlight','mustFrog','grabBag'],
+  miss_due: ['bugMe','tasks','schedule'],
   schedule_tight: ['energyFocus','bodyDouble','ifThen','biteSize','focusPod','oneAtATime'],
   life_blur: ['backpackReset','costumeChange','oneLocation','contextSplit','bodyDouble'],
   adhd_brain: ['today','bugMe','biteSize','oneAtATime','focusPod','challenges_home']
@@ -6944,63 +6960,128 @@ function viewPlanAhead(){
 }
 
 
+function efClockText(ef){
+  const mins=ef.presetMin||10;
+  if(!ef.timerOn||!ef.timerEnds) return mins+':00';
+  const left=Math.max(0, Math.floor((ef.timerEnds-Date.now())/1000));
+  const m=Math.floor(left/60), s=left%60;
+  return m+':'+String(s).padStart(2,'0');
+}
 function viewEnergyFocus(){
   if(!state.energyFocus) state.energyFocus={items:[], timerSec:0, timerOn:false, timerEnds:0, activeIdx:-1};
   const ef=state.energyFocus;
   const items=ef.items||[];
+  if(ef.timerOn){ try{ startEnergyFocusTick(); }catch(e){} }
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Schedules feel tight? Skip the rigid clock</div>
     <h1>Energy, not the clock</h1>
-    <p>Write what you might do. Start a short countdown on <b>one</b> item. When the timer ends, you may stop. No calendar required.</p>
+    <p>Type one thing you could do, then tap <b>Add</b>. It appears in <b>Your flexible list</b> below. Tap <b>Start timer</b> on that line, or tap 5, 10, or 15 minutes to start the countdown now. It beeps when the time is up.</p>
   </div>
   <div class="card">
     <label>Add something flexible</label>
     <div class="row" style="gap:8px">
       <input id="efNewItem" placeholder="e.g. skim one page of notes" style="flex:1">
-      <button class="btn sm" id="efAddBtn">Add</button>
+      <button class="btn sm" data-action="ef-add" type="button">Add</button>
     </div>
   </div>
   <div class="card">
     <div style="font-weight:700;margin-bottom:8px">Your flexible list</div>
+    <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">This list is only what you add here. It is not your calendar.</p>
     ${items.length? items.map((it,i)=>`
       <div style="display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)">
         <span style="flex:1">${escapeHtml(it)}</span>
         <button class="btn sm" data-action="ef-start" data-idx="${i}">Start timer</button>
         <button class="btn ghost sm" data-action="ef-remove" data-idx="${i}">✕</button>
-      </div>`).join('') : '<div class="empty">Add 1–5 small optional items. Order does not matter.</div>'}
+      </div>`).join('') : '<div class="empty">Nothing added yet.</div>'}
   </div>
-  <div class="card" style="text-align:center;background:var(--pine-soft)">
-    <div style="font-size:.8rem;color:var(--muted)">Countdown</div>
-    <div id="efTimerDisplay" style="font-size:2.4rem;font-weight:800;margin:8px 0">${ef.timerOn ? '…' : '10:00'}</div>
+  <div class="card" style="text-align:center;background:${ef.timerOn?'#FFF3B0':'var(--pine-soft)'}">
+    <div style="font-size:.8rem;color:var(--muted)">Countdown${ef.activeIdx>=0 && items[ef.activeIdx]?(' · '+escapeHtml(items[ef.activeIdx])):''}</div>
+    <div id="efTimerDisplay" style="font-size:2.4rem;font-weight:800;margin:8px 0">${efClockText(ef)}</div>
     <div class="row" style="justify-content:center;gap:8px">
       <button class="btn ghost sm" data-action="ef-preset" data-min="5">5 min</button>
       <button class="btn ghost sm" data-action="ef-preset" data-min="10">10 min</button>
       <button class="btn ghost sm" data-action="ef-preset" data-min="15">15 min</button>
     </div>
-    <p style="font-size:.85rem;color:var(--muted);margin:10px 0 0">When time is up, stop is allowed. That is the point.</p>
+    ${ef.timerOn?'<button class="btn ghost sm" data-action="ef-stop" style="margin-top:10px">Stop timer</button>':''}
   </div>`;
 }
+function ifThenMinutes(text){
+  const m=String(text||'').match(/(\d+)\s*(min|mins|minute|minutes)\b/i);
+  return m ? Math.max(1, Math.min(120, Number(m[1]))) : 10;
+}
+function startIfThenTick(){
+  try{ if(window._ifTick) clearInterval(window._ifTick); }catch(e){}
+  window._ifTick=setInterval(function(){
+    try{
+      const it=state.ifThen;
+      if(!it || (it.phase!=='active' && it.phase!=='reward') || !it.endsAt) return;
+      const left=Math.max(0, Math.floor((it.endsAt-Date.now())/1000));
+      const el=document.getElementById('ifThenClock');
+      if(el){
+        const m=Math.floor(left/60), s=left%60;
+        el.textContent=m+':'+String(s).padStart(2,'0');
+      }
+      if(left<=0){
+        if(it.phase==='reward' && !it._rang){
+          it._rang=true;
+          it.phase='edit';
+          try{ playReminderChime(); }catch(e){}
+          showAppMessage('Break\'s up', 'Ready for another micro-pact, or done for the day?');
+        } else if(it.phase==='active'){
+          it.phase='gate';
+        }
+        try{ clearInterval(window._ifTick); }catch(e){}
+        persistRender();
+      }
+    }catch(e){}
+  }, 500);
+}
 function viewIfThen(){
-  if(!state.ifThen) state.ifThen={cue:'', action:''};
+  if(!state.ifThen || typeof state.ifThen!=='object') state.ifThen={cue:'', action:'', reward:'', phase:'edit'};
   const it=state.ifThen;
+  if(!it.phase) it.phase='edit';
+  if(it.phase==='active' || it.phase==='reward'){ try{ startIfThenTick(); }catch(e){} }
+  const clock=function(){
+    if(!it.endsAt) return '';
+    const left=Math.max(0, Math.floor((it.endsAt-Date.now())/1000));
+    const m=Math.floor(left/60), s=left%60;
+    return m+':'+String(s).padStart(2,'0');
+  };
+  const shown=it.shrunk ? ('Just the first small piece: '+(it.fallback||it.action||'')) : (it.action||'');
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">One cue → one action</div>
+    <div class="eyebrow">One cue, one action, then a timed reward</div>
     <h1>If–Then plan</h1>
-    <p>Instead of a full schedule: decide one trigger and one tiny action. Implementation intentions reduce “when do I start?” friction.</p>
+    <p>Write the cue, the tiny action, and the reward. Save it. Then start it. The reward gets its own timer so ten minutes does not become two hours.</p>
   </div>
-  <div class="card">
-    <label>IF (cue)</label>
-    <input id="ifThenCue" placeholder="e.g. I finish dinner / I sit at my desk" value="${escapeHtml(it.cue||'')}">
-    <label style="margin-top:12px">THEN (tiny action)</label>
+  <div class="card" style="${it.phase==='active'?'opacity:.45':''}">
+    <label>IF (the cue)</label>
+    <input id="ifThenCue" placeholder="e.g. I finish dinner" value="${escapeHtml(it.cue||'')}">
+    <label style="margin-top:12px">THEN (the tiny action)</label>
     <input id="ifThenAction" placeholder="e.g. open notes for 10 minutes" value="${escapeHtml(it.action||'')}">
-    <button class="btn" id="ifThenSave" style="margin-top:14px;width:100%">Save If–Then</button>
+    <label style="margin-top:12px">If it feels too hard, instead</label>
+    <input id="ifThenFallback" placeholder="e.g. read 1 page" value="${escapeHtml(it.fallback||'')}">
+    <label style="margin-top:12px">Reward after it is done</label>
+    <input id="ifThenReward" placeholder="e.g. check shorts for 10 minutes" value="${escapeHtml(it.reward||'')}">
+    <button class="btn" data-action="ifthen-save" type="button" style="margin-top:14px;width:100%">Save If–Then</button>
   </div>
-  ${(it.cue&&it.action)?`<div class="card" style="background:var(--pine-soft)"><b>Your plan</b><p style="margin:8px 0 0">If <b>${escapeHtml(it.cue)}</b>, then <b>${escapeHtml(it.action)}</b>.</p>
-    <button class="btn" style="margin-top:10px;width:100%" data-action="go-timer">Start a Focus Pod for the “then”</button></div>`:''}`;
+  ${(it.cue&&it.action)?`<div class="card" style="background:${it.phase==='active'?'#FFF3B0':it.phase==='done'||it.phase==='gate'?'#E7F6EE':'var(--pine-soft)'};${it.phase==='active'?'box-shadow:0 0 0 4px #E6B800':''}">
+    <div style="font-size:.75rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)">Your plan</div>
+    <p style="margin:8px 0">If <b>${escapeHtml(it.cue)}</b>, then <b>${escapeHtml(shown)}</b>.</p>
+    ${it.reward?`<p style="margin:0 0 8px">Reward: <b>${escapeHtml(it.reward)}</b></p>`:''}
+    ${(it.phase==='active'||it.phase==='reward')?`<div id="ifThenClock" style="font-size:2.2rem;font-weight:800;margin:8px 0">${clock()}</div>`:''}
+    ${it.phase==='reward'?`<p>Reward time is running. When it ends, SnapBack will tell you the break is up.</p>`:''}
+    ${it.phase==='gate'||it.phase==='done'?`<p style="font-weight:800">Done. That counts.</p>`:''}
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+      ${it.phase!=='active'&&it.phase!=='reward'?`<button class="btn" data-action="ifthen-start" type="button">Start</button>`:''}
+      ${it.phase==='active'?`<button class="btn ghost" data-action="ifthen-hard" type="button">Too hard?</button>`:''}
+      ${it.phase==='active'||it.phase==='gate'?`<button class="btn" data-action="ifthen-done" type="button">Mark done</button>`:''}
+      ${(it.phase==='gate'||it.phase==='done')&&it.reward?`<button class="btn" data-action="ifthen-reward" type="button">Claim reward: start ${ifThenMinutes(it.reward)} min timer</button>`:''}
+    </div>
+  </div>`:''}`;
 }
 function ritualPage(title, eyebrow, blurb, steps, key){
   const done = (state.rituals && state.rituals[key]) || {};
@@ -7872,12 +7953,15 @@ function dayCommitments(dateStr, opts){
   (state.studyBlocks||[]).filter(b=>b.date===dateStr).forEach(b=>{
     rows.push({time:b.start||'', end:b.end||'', title:b.label||'', room:b.room||'', kind:'block'});
   });
-  (state.exercisePlan||[]).filter(r=>r.day===dow).forEach(r=>{
-    if((state.tasks||[]).some(function(t){ return String(t.exerciseId)===String(r.id) && !t.done; })) return;
+  (state.exercisePlan||[]).filter(function(r){ return Number(r.day)===Number(dow); }).forEach(r=>{
     const bits=[r.focus||'Exercise'];
     if(r.details) bits.push(r.details);
     if(r.km) bits.push(r.km+' km');
     rows.push({time:r.start||'', end:r.end||'', title:bits.join(' · '), room:'', kind:'exercise', id:r.id, date:dateStr});
+  });
+  (state.tasks||[]).filter(function(t){ return !t.done && t.exerciseId && t.date===dateStr; }).forEach(function(t){
+    if(rows.some(function(r){ return r.kind==='exercise' && String(r.id)===String(t.exerciseId); })) return;
+    rows.push({time:t.time||'', end:'', title:t.title, room:'', kind:'exercise', id:t.exerciseId, date:dateStr});
   });
   (state.externalBusy||[]).filter(ev=>ev.date===dateStr).forEach(ev=>{
     if(!ev.id) ev.id='ext_'+dateStr+'_'+(ev.start||'')+'_'+(ev.title||'');
@@ -8027,7 +8111,7 @@ function viewToday(){
       <div style="padding:0 16px 16px">
         <div style="font-size:.8rem;font-weight:700;color:var(--muted);margin-bottom:6px">Tasks</div>
         ${tomTasks.length?tomTasks.map(t=>`<button type="button" class="deadline-row" data-action="open-task-menu" data-id="${t.id}" style="width:100%;text-align:left;background:transparent;border:none;cursor:pointer"><span class="badge dueToday">${t.time||'all day'}</span><span style="flex:1">${escapeHtml(t.title)}</span></button>`).join(''):'<div class="empty">No tasks dated tomorrow.</div>'}
-        <div style="font-size:.8rem;font-weight:700;color:var(--muted);margin:12px 0 6px">Also on that day</div>
+        <div style="font-size:.8rem;font-weight:700;color:var(--muted);margin:12px 0 6px">Commitments and workouts</div>
         ${commitmentRowsHtml(dayCommitments(tom,{skipTasks:true}), 'No classes, workouts, or appointments yet.')}
       </div>
     `:''}
@@ -8875,12 +8959,15 @@ function itemsForDate(dateStr){
   if(state.nonNegotiable[dateStr]) items.push({type:'nn',color:'var(--gold)',time:'',label:'★ '+state.nonNegotiable[dateStr].text});
   const seen={};
   const ranked=items.slice().sort(function(a,b){
-    const score=function(it){ return (it.kind==='class'||it.kind==='block'||it.kind==='external')?0:1; };
-    return score(a)-score(b);
+    const ka=(meetingKey(a.label||'')||'')+'|'+String(a.time||'').slice(0,5);
+    const kb=(meetingKey(b.label||'')||'')+'|'+String(b.time||'').slice(0,5);
+    if(ka===kb) return String(a.label||'').length-String(b.label||'').length;
+    return String(a.time||'').localeCompare(String(b.time||''));
   });
   return ranked.filter(it=>{
-    const lab=cleanCalTitle(it.label||'').toLowerCase();
-    const k=(it.time||'')+'|'+lab;
+    const mk=meetingKey(it.label||'')||cleanCalTitle(it.label||'').toLowerCase();
+    const k=String(it.time||'').slice(0,5)+'|'+mk;
+    if(!mk) return true;
     if(seen[k]) return false;
     seen[k]=1;
     return true;
@@ -10117,6 +10204,20 @@ function deleteCalOne(){
       if(c.exdates.indexOf(date)<0) c.exdates.push(date);
     }
   }
+  const mk=meetingKey(d.title);
+  (state.classes||[]).forEach(function(c){
+    if(String(c.id)===String(d.id)) return;
+    if(!mk || meetingKey(c.title)!==mk || !sameCalTime(c.start, d.start)) return;
+    if(!classCoversDate(c, date)) return;
+    if(!Array.isArray(c.exdates)) c.exdates=[];
+    if(c.exdates.indexOf(date)<0) c.exdates.push(date);
+  });
+  state.studyBlocks=(state.studyBlocks||[]).filter(function(b){
+    if(b.date!==date) return true;
+    if(d.kind==='block' && String(b.id)===String(d.id)) return false;
+    if(mk && meetingKey(b.label)===mk && sameCalTime(b.start, d.start)) return false;
+    return true;
+  });
   dropCopiesOnDate(date, d.title, d.start);
   state.calDraft=null;
   if(state.dayPop){
@@ -14516,6 +14617,22 @@ function wireView(){
       try{ scheduleWakeAlarms(); }catch(e){}
       try{ if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms(); }catch(e){}
     });
+    else if(action==='ef-add') el.addEventListener('click', ()=>{
+      if(!state.energyFocus) state.energyFocus={items:[]};
+      if(!Array.isArray(state.energyFocus.items)) state.energyFocus.items=[];
+      const v=(document.getElementById('efNewItem')?.value||'').trim();
+      if(!v){ showAppMessage('Type something first', 'Then tap Add. It will show in Your flexible list.'); return; }
+      state.energyFocus.items.push(v);
+      try{ saveState(); }catch(e){}
+      showAppMessage('Added', '“'+v+'” is in Your flexible list. Tap Start timer on that line.');
+      persistRender();
+    });
+    else if(action==='ef-stop') el.addEventListener('click', ()=>{
+      if(!state.energyFocus) return;
+      state.energyFocus.timerOn=false;
+      state.energyFocus.timerEnds=0;
+      persistRender();
+    });
     else if(action==='ef-start') el.addEventListener('click', ()=>{
       if(!state.energyFocus) state.energyFocus={items:[], timerSec:600};
       const idx=Number(el.dataset.idx);
@@ -14523,7 +14640,8 @@ function wireView(){
       state.energyFocus.activeIdx=idx;
       state.energyFocus.timerOn=true;
       state.energyFocus.timerEnds=Date.now()+mins*60*1000;
-      showAppMessage('Timer on', (state.energyFocus.items[idx]||'Item')+' — '+mins+' min. Stop is allowed when it ends.');
+      state.energyFocus._rang=false;
+      showAppMessage('Timer on', (state.energyFocus.items[idx]||'Item')+' — '+mins+' minutes. It will beep when time is up.');
       try{ startEnergyFocusTick(); }catch(e){}
       persistRender();
     });
@@ -14535,8 +14653,65 @@ function wireView(){
     });
     else if(action==='ef-preset') el.addEventListener('click', ()=>{
       if(!state.energyFocus) state.energyFocus={items:[]};
-      state.energyFocus.presetMin=Number(el.dataset.min)||10;
-      showAppMessage('Timer length', state.energyFocus.presetMin+' minutes for the next Start.');
+      const mins=Number(el.dataset.min)||10;
+      state.energyFocus.presetMin=mins;
+      state.energyFocus.timerOn=true;
+      state.energyFocus.timerEnds=Date.now()+mins*60*1000;
+      state.energyFocus._rang=false;
+      try{ startEnergyFocusTick(); }catch(e){}
+      showAppMessage('Countdown started', mins+' minutes. It will beep when time is up.');
+      persistRender();
+    });
+    else if(action==='ifthen-save') el.addEventListener('click', ()=>{
+      const cue=(document.getElementById('ifThenCue')?.value||'').trim();
+      const actionText=(document.getElementById('ifThenAction')?.value||'').trim();
+      const fallback=(document.getElementById('ifThenFallback')?.value||'').trim();
+      const reward=(document.getElementById('ifThenReward')?.value||'').trim();
+      if(!cue||!actionText){ showAppMessage('Both lines needed', 'Write the If and the Then, then save.'); return; }
+      state.ifThen={cue:cue, action:actionText, fallback:fallback, reward:reward, phase:'ready', shrunk:false};
+      try{ saveState(); }catch(e){}
+      showAppMessage('Saved', 'Your If–Then is below. Tap Start when the cue happens.');
+      persistRender();
+    });
+    else if(action==='ifthen-start') el.addEventListener('click', ()=>{
+      const it=state.ifThen||{};
+      const mins=ifThenMinutes(it.shrunk?(it.fallback||it.action):it.action);
+      it.phase='active';
+      it.endsAt=Date.now()+mins*60*1000;
+      it._rang=false;
+      state.ifThen=it;
+      try{ saveState(); }catch(e){}
+      try{ startIfThenTick(); }catch(e){}
+      persistRender();
+    });
+    else if(action==='ifthen-hard') el.addEventListener('click', ()=>{
+      if(!state.ifThen) return;
+      state.ifThen.shrunk=true;
+      const mins=ifThenMinutes(state.ifThen.fallback||'2 minutes');
+      state.ifThen.endsAt=Date.now()+mins*60*1000;
+      try{ saveState(); }catch(e){}
+      showAppMessage('Smaller step', state.ifThen.fallback||'Just the first small piece.');
+      persistRender();
+    });
+    else if(action==='ifthen-done') el.addEventListener('click', ()=>{
+      if(!state.ifThen) return;
+      state.ifThen.phase='done';
+      state.ifThen.endsAt=0;
+      try{ saveState(); }catch(e){}
+      showAppMessage('Done', 'That counts.');
+      persistRender();
+    });
+    else if(action==='ifthen-reward') el.addEventListener('click', ()=>{
+      const it=state.ifThen||{};
+      const mins=ifThenMinutes(it.reward);
+      it.phase='reward';
+      it.endsAt=Date.now()+mins*60*1000;
+      it._rang=false;
+      state.ifThen=it;
+      try{ saveState(); }catch(e){}
+      try{ startIfThenTick(); }catch(e){}
+      showAppMessage('Reward timer', mins+' minutes. SnapBack will tell you when the break is up.');
+      persistRender();
     });
     else if(action==='ritual-check') el.addEventListener('change', ()=>{
       if(!state.rituals) state.rituals={};
