@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="325">
+<meta name="snapback-build" content="326">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -400,11 +400,11 @@ details.setgroup .setgroup-body{margin-top:12px}
   .taskactions{width:100%;justify-content:flex-start;margin-top:8px;gap:8px}
   .check{width:22px;height:22px}
   .btn,.btn.sm{padding:11px 14px;font-size:.88rem;min-height:44px}
-  .navbtn{padding:10px 12px;font-size:.9rem}
+  .navbtn{padding:12px 12px;font-size:.95rem;min-height:48px}
   .navbtn .ico{width:28px;min-width:28px;font-size:1.2rem}
   .ringwrap{width:200px;height:200px}
   .monthgrid{gap:3px}
-  .daycell{min-height:56px;padding:3px 4px}
+  .daycell{min-height:72px;padding:4px 4px}
   .daynum{font-size:.7rem}
   .weekgrid{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:130px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:6px}
   table{font-size:.74rem}
@@ -3675,8 +3675,27 @@ function updateSetting(key,value){
 }
 function resetAllDataConfirmed(){
   clearInterval(timerHandle); clearInterval(bdHandle); stopSoundscape();
+  const ref = (typeof cloudDocRef==='function') ? cloudDocRef() : null;
+  if(ref){ try{ ref.delete(); }catch(e){} }
   state=emptyState();
   persistRender();
+}
+async function deleteMySnapBackData(){
+  const ok = window.confirm ? window.confirm('Delete the SnapBack copy saved with this Google account? Tasks, schedule, and nudges in the cloud will be removed from this device too. This does not delete your Gmail.') : true;
+  if(!ok) return;
+  try{
+    const ref = cloudDocRef();
+    if(ref) await ref.delete();
+  }catch(e){}
+  try{ if(_auth) await _auth.signOut(); }catch(e){}
+  _currentUser=null;
+  _cloudReady=false;
+  try{ stopCloudSync(); }catch(e){}
+  try{ localStorage.removeItem('snapback_last_synced'); }catch(e){}
+  state=emptyState();
+  try{ saveState(); }catch(e){}
+  showAppMessage('Deleted', 'The SnapBack copy for this Google account was removed. Your Gmail account was not deleted.');
+  try{ render(); }catch(e){}
 }
 function addCustomQuote(){
   const input=document.getElementById('customQuoteInput');
@@ -4504,7 +4523,7 @@ const NAV=[
     {id:'journal', label:'Journal', ico:'&#128221;'},
     {id:'plan', label:'Plan', ico:'&#128197;'},
     {id:'techniques', label:'Techniques', ico:'&#128295;'},
-    {id:'studytools', label:'Study Tools', ico:'&#128218;'} /* label overridden below */,
+    {id:'studytools', label:'Study Tools', ico:'&#128218;'} /* relabelled for non-students */,
     {id:'nudge', label:'Nudge', ico:'&#9200;'},
     {id:'settings', label:'Settings', ico:'&#9881;'}
   ]}
@@ -4647,7 +4666,7 @@ function renderSidebar(){
     el.className='sidebar';
     el.innerHTML=`<div class="brand" id="brandHomeBtn" style="cursor:pointer"><div class="brand-row"><img src="icon-192.png" alt=""><span class="brand-name">SnapBack</span></div><div class="sub">a calmer way through the list</div></div>` +
       NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
-        `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
+        `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.id==='studytools'?L('studyTools'):n.label}</button>`
       ).join('')).join('') +
       `<div class="navfoot">Saved automatically</div>`;
     el.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>setView(b.dataset.nav)));
@@ -4665,7 +4684,7 @@ function renderMobileDrawer(){
     <div class="drawer-panel">
       <div class="brand" id="brandHomeBtnDrawer" style="cursor:pointer"><div class="brand-row"><img src="icon-192.png" alt=""><span class="brand-name">SnapBack</span></div><div class="sub">a calmer way through the list</div></div>
       ${NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
-        `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.label}</button>`
+        `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.id==='studytools'?L('studyTools'):n.label}</button>`
       ).join('')).join('')}
       <div class="navfoot">Saved automatically</div>
     </div>`;
@@ -5854,6 +5873,7 @@ let _unsubAuth = null;
 let _syncApplying = false;
 let _cloudReady = false;
 let _cloudRev = 0;
+let _lastSyncedAt = 0;
 let _localRev = 0;
 let _lastSyncJson = '';
 const SYNC_EPOCH = 320;
@@ -5954,6 +5974,14 @@ function legacySyncDocRef(){
   if(!_db || !code) return null;
   return _db.collection('snapback').doc(code);
 }
+function lastSyncedLine(){
+  let t=_lastSyncedAt;
+  try{ if(!t) t=Number(localStorage.getItem('snapback_last_synced')||0); }catch(e){}
+  if(!t) return 'Not synced yet';
+  try{
+    return 'Last synced '+new Date(t).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+  }catch(e){ return 'Last synced'; }
+}
 function cloudDocRef(){
   return userDocRef() || legacySyncDocRef();
 }
@@ -6020,6 +6048,8 @@ function applyCloudPayload(payload){
   _cloudReady = true;
   _cloudRev = remoteAt || Date.now();
   _localRev = _cloudRev;
+  _lastSyncedAt = _cloudRev;
+  try{ localStorage.setItem('snapback_last_synced', String(_lastSyncedAt)); }catch(e){}
   _lastSyncJson = syncBodyJson();
   if(pruned){
     _lastSyncJson = '';
@@ -6046,6 +6076,7 @@ function startCloudSync(){
   const ref = cloudDocRef();
   if(!ref) return;
   _unsubSync = ref.onSnapshot(snap=>{
+    if(snap.metadata && snap.metadata.fromCache) return;
     if(!snap.exists){
       if(typeof isNativeApp==='function' && isNativeApp()) return;
       _cloudReady = true;
@@ -6350,10 +6381,7 @@ async function signInWithGoogle(){
         window.Capacitor.Plugins.FirebaseAuth
       );
       if(!plugin || typeof plugin.signInWithGoogle!=='function'){
-        const provider = new firebase.auth.GoogleAuthProvider();
-        provider.setCustomParameters({ prompt: 'select_account' });
-        try{ await _auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); }catch(e){}
-        await _auth.signInWithRedirect(provider);
+        showAppMessage('Google sign-in is not on this phone yet', 'The phone must use Google’s own sign-in, not a web page. Finish the one-time Firebase steps, then build the app again. The website can still sign in.');
         return;
       }
       const res = await plugin.signInWithGoogle();
@@ -6482,7 +6510,7 @@ async function signOutUser(){
     _currentUser = null;
     _cloudReady = false;
     stopCloudSync();
-    showAppMessage('Signed out', 'Your data on this device stays until you Reset. Cloud data stays with your Google account.');
+    showAppMessage('Signed out', 'You are signed out. The copy on this device is still here until you tap Delete my SnapBack data.');
     persistRender();
   }catch(e){
     showAppMessage('Sign out failed', e.message||'Try again');
@@ -6513,11 +6541,12 @@ function authStatusHtml(){
         + (email ? '<div style="font-size:.9rem;margin-top:6px">Gmail: <b>' + email + '</b></div>' : '<div style="font-size:.85rem;margin-top:6px">Google account connected</div>')
         + '<p style="font-size:.8rem;color:var(--muted);margin:8px 0 0">Live sync is on. Use this same Gmail on the laptop and the phone. While both are online, a change on one shows on the other. With no internet, each device keeps the last copy, then catches up.</p>'
         + '<button type="button" class="btn ghost sm" id="googleSignOutBtn" style="margin-top:10px;width:100%">Sign out of Google</button>'
+        + '<button type="button" class="btn danger sm" id="deleteAccountBtn" style="margin-top:8px;width:100%">Delete my SnapBack data</button>'
         + '</div>';
     }
     return '<div style="padding:12px;border-radius:12px;border:1px solid var(--line);margin-bottom:12px">'
       + '<div style="font-weight:700;margin-bottom:6px">Not signed in with Google</div>'
-      + '<p style="font-size:.85rem;color:var(--muted);margin:0;line-height:1.45">Sign in with Google for automatic backup on Android, iPhone, and computer. Apple ID / Outlook are not available yet.</p>'
+      + '<p style="font-size:.85rem;color:var(--muted);margin:0;line-height:1.45">Sign in with Google so the laptop and the Android phone keep the same day. Apple ID and Outlook are not available.</p>'
       + '</div>';
   } catch(e){
     return '<div class="card"><p>Account section unavailable.</p></div>';
@@ -6571,13 +6600,9 @@ function setSessionLoggedIn(on, remember){
 }
 function isLoggedIn(){
   if(_currentUser && _currentUser.uid) return true;
-  if(getSessionLoggedIn()){
-    const la = getLocalAuth();
-    if(la && la.username && la.passHash) return true;
-    // Google session restored via firebase listener may lag — allow if session flag and profile
-    if(_currentUser) return true;
-  }
-  // First install: require login screen
+  try{
+    if(typeof _auth!=='undefined' && _auth && _auth.currentUser && _auth.currentUser.uid) return true;
+  }catch(e){}
   return false;
 }
 function needsLoginScreen(){
@@ -6676,43 +6701,8 @@ function viewLogin(){
       <p style="color:var(--muted);margin:0">Sign in</p>
     </div>
     <div class="card">
-      <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px;line-height:1.45">
-        <b>Recommended:</b> Continue with <b>Google</b> so your tasks are kept and can open on this phone and on a computer.
-        This does <b>not</b> copy your Google or Outlook calendar. Calendar import is separate, under Plan → Your Schedule.
-      </p>
-      <p style="font-size:.8rem;color:var(--muted);margin:0 0 12px;line-height:1.4">
-        Apple ID and Outlook sign-in are not available yet. A username stays on <b>this device only</b>. It does not appear on your other phone or laptop. If you forget the password, the Recovery PIN is the only way back. There is no email reset.
-      </p>
-      <button type="button" class="btn" id="loginGoogleBtn" style="width:100%;margin-bottom:14px">Continue with Google (recommended)</button>
-      <div style="text-align:center;font-size:.8rem;color:var(--muted);margin:10px 0 8px">or use a username on this device only</div>
-      <div class="field"><label>Username</label><input id="loginUser" autocomplete="username" placeholder="Username" value="${hasLocal?escapeHtml(la.username):''}"></div>
-      <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password" placeholder="Password"></div>
-      <div class="field" id="loginPinField"><label>Recovery PIN (required for new accounts)</label><input id="loginRecoveryPin" type="password" inputmode="numeric" placeholder="4+ digits — needed if you forget password"></div>
-      <p style="font-size:.72rem;color:var(--muted);margin:-4px 0 8px">Required before <b>Create account</b>. Write the PIN down. Without it, a forgotten password cannot be recovered, and this username cannot be opened on another device.</p>
-      <label style="display:flex;align-items:center;gap:8px;font-size:.85rem;margin:12px 0"><input type="checkbox" id="loginRemember" checked> Stay signed in</label>
-      <button type="button" class="btn" id="loginLocalBtn" style="width:100%">${hasLocal?'Sign in':'Create account'}</button>
-      ${hasLocal?'<button type="button" class="btn ghost sm" id="loginCreateBtn" style="width:100%;margin-top:8px">Create new account</button>':''}
-      <details style="margin-top:14px"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Forgot password?</summary>
-        <p style="font-size:.78rem;color:var(--muted);margin:8px 0">If you set a <b>Recovery PIN</b> when creating the account, enter it below. Google users reset via Google, not here.</p>
-        <div class="field"><label>Username</label><input id="resetUser" placeholder="Username"></div>
-        <div class="field"><label>Recovery PIN</label><input id="resetPin" type="password" inputmode="numeric"></div>
-        <div class="field"><label>New password</label><input id="resetPass" type="password"></div>
-        <button type="button" class="btn sm" id="resetPassBtn" style="margin-top:6px">Reset password</button>
-        <p style="font-size:.78rem;color:var(--muted);margin:12px 0 6px">No Recovery PIN (older account)? You can erase <b>only the login on this device</b> and create a new account. App data on this device may remain until you clear site data.</p>
-        <button type="button" class="btn ghost sm" id="clearLocalAuthBtn" style="width:100%">Erase local login on this device</button>
-      </details>
-      <div style="margin-top:16px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--input-bg)">
-        <div style="font-weight:700;font-size:.9rem;margin-bottom:6px">Website &amp; sync</div>
-        <p style="font-size:.8rem;color:var(--muted);margin:0 0 8px">Use the same <b>Gmail</b> on phone and website so your tasks sync. Open the web app:</p>
-        <a id="openWebAppLink" href="${escapeHtml(getPublicWebUrl())}" target="_blank" rel="noopener" class="btn sm" style="display:inline-block;text-decoration:none;margin-bottom:8px">Open SnapBack website</a>
-        <p style="font-size:.72rem;color:var(--muted);margin:0;word-break:break-all">${escapeHtml(getPublicWebUrl())}</p>
-      </div>
-      <details style="margin-top:10px"><summary style="font-size:.75rem;color:var(--muted);cursor:pointer">Admin only: Firebase config</summary>
-        <p style="font-size:.72rem;color:var(--muted);margin:6px 0">Students should not need this. Paste full web config from Firebase Console if Google fails on this device.</p>
-        <textarea id="loginFbConfig" rows="4" style="width:100%;font-size:.7rem;margin-top:6px">${escapeHtml(fbText)}</textarea>
-        <button type="button" class="btn ghost sm" id="loginSaveFb" style="margin-top:6px">Save Firebase config</button>
-      </details>
-      <button type="button" class="btn ghost sm" id="loginGuestBtn" style="width:100%;margin-top:12px">Continue on this device</button>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px;line-height:1.45">Sign in with Google. Use the same Gmail on the laptop and on the phone.</p>
+      <button type="button" class="btn" id="loginGoogleBtn" style="width:100%">Continue with Google</button>
     </div>
   </div>`;
 }
@@ -6804,31 +6794,27 @@ function maybeOfferTour(){
 
 function hasLaunchConsent(){
   try{
-    const email=((state.profile&&state.profile.email)||'').trim();
-    const phone=((state.profile&&state.profile.phone)||'').trim();
-    return !!(state.settings && state.settings.termsAccepted && (email||phone));
+    return !!(state.settings && state.settings.termsAccepted && state.settings.privacyAccepted);
   }catch(e){ return false; }
 }
 function launchConsentHtml(){
-  const email=escapeHtml((state.profile&&state.profile.email)||'');
-  const phone=escapeHtml((state.profile&&state.profile.phone)||'');
   return `<div class="overlay" id="launchConsentOverlay" style="background:rgba(20,24,22,.82);z-index:80">
-    <div class="quotecard" style="max-width:440px;text-align:left;max-height:88vh;overflow:auto">
-      <div class="qeyebrow">Before you start</div>
-      <div class="qtext" style="font-size:1.15rem;margin:6px 0 8px">Agree and leave a way to reach you</div>
-      <p style="font-size:.88rem;color:var(--muted);line-height:1.45;margin:0 0 10px">SnapBack is for your personal use. You may not copy or republish the app as another product. Your email or phone is used only to send fixes and updates. It is not used for marketing.</p>
+    <div class="quotecard" style="max-width:480px;text-align:left;max-height:88vh;overflow:auto">
+      <div class="qeyebrow">Before you use SnapBack</div>
+      <div class="qtext" style="font-size:1.15rem;margin:6px 0 8px">Privacy Policy and Terms of Use</div>
+      <div style="font-size:.88rem;line-height:1.45;max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:12px">
+        <p style="margin:0 0 8px"><b>Privacy Policy.</b> SnapBack stores your tasks, schedule, nudges, journal, and habits on this device. If you sign in with Google, that same copy is saved to your Google account so the laptop and the phone stay matched. SnapBack does not sell your information. SnapBack does not require your phone number.</p>
+        <p style="margin:0 0 8px"><b>Terms of Use.</b> SnapBack is for your personal use. You may not copy the app and publish it as another product. Alarms depend on this device allowing notifications and exact alarms. SnapBack is not a medical service.</p>
+        <p style="margin:0">You can delete the SnapBack copy from Settings → Account → Delete my SnapBack data. That does not delete your Google account.</p>
+      </div>
       <label style="display:flex;gap:10px;align-items:flex-start;margin:8px 0 12px;cursor:pointer">
-        <input type="checkbox" id="launchAgree" style="width:20px;height:20px;margin-top:2px">
-        <span>I agree to the Terms & Conditions</span>
+        <input type="checkbox" id="launchAgree" style="width:22px;height:22px;margin-top:2px">
+        <span>I agree to the Terms of Use and the Privacy Policy.</span>
       </label>
-      <div class="field"><label>Email</label><input id="launchEmail" type="email" placeholder="you@email.com" value="${email}"></div>
-      <div class="field" style="margin-top:8px"><label>Phone</label><input id="launchPhone" type="tel" placeholder="Or a phone number" value="${phone}"></div>
-      <p style="font-size:.78rem;color:var(--muted);margin:8px 0">Enter <b>at least one</b> — email or phone.</p>
-      <button type="button" class="btn" id="launchConsentBtn" style="width:100%;margin-top:8px">OK — continue</button>
+      <button type="button" class="btn" id="launchConsentBtn" style="width:100%">Continue</button>
     </div>
   </div>`;
 }
-
 function hasAgreedTerms(){
   try{
     if(state.settings && state.settings.termsAccepted) return true;
@@ -6853,6 +6839,7 @@ function acceptTermsAndContinue(){
   try{
     if(!state.settings || typeof state.settings!=='object') state.settings={};
     state.settings.termsAccepted = true;
+    state.settings.privacyAccepted = true;
     state.settings.termsAcceptedAt = Date.now();
     saveState();
   }catch(e){}
@@ -7089,20 +7076,12 @@ function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal()
     if(launchBtn){
       launchBtn.addEventListener('click', ()=>{
         const agreed=!!(document.getElementById('launchAgree')&&document.getElementById('launchAgree').checked);
-        const email=(document.getElementById('launchEmail')?.value||'').trim();
-        const phone=(document.getElementById('launchPhone')?.value||'').trim();
-        if(!agreed){ showAppMessage('Please agree', 'Tick “I agree to the Terms & Conditions”.'); return; }
-        if(!email && !phone){ showAppMessage('Contact needed', 'Enter an email or a phone number so updates can reach you.'); return; }
-        if(email && email.indexOf('@')<1){ showAppMessage('Email', 'That email does not look complete.'); return; }
-        if(!state.profile||typeof state.profile!=='object') state.profile={};
+        if(!agreed){ showAppMessage('Agreement needed', 'Tick “I agree to the Terms of Use and the Privacy Policy.”'); return; }
         if(!state.settings||typeof state.settings!=='object') state.settings={};
-        state.profile.email=email;
-        state.profile.phone=phone;
-        state.profile.shareConsent=true;
         state.settings.termsAccepted=true;
+        state.settings.privacyAccepted=true;
         state.settings.termsAcceptedAt=Date.now();
         try{ saveState(); }catch(e){}
-        try{ if(typeof upsertAdminUserRecord==='function') upsertAdminUserRecord({email:email, phone:phone, source:'launch-consent'}); }catch(e){}
         try{ persistRender(); }catch(e){ render(); }
       });
     }
@@ -7174,7 +7153,7 @@ function renderTimerOnly(){
 function viewPlan(){
   const cards=[
     {id:'calendar', label:'Schedule', desc:'Day, week, or month. Tap a time to add. Tap an event to edit.', ico:'📅'},
-    {id:'projects', label:'Projects', desc:'Classes as projects + tasks', ico:'📚'},
+    {id:'projects', label:'Projects', desc: isStudentMode()?'Classes as projects + tasks':'Projects and tasks', ico:'📚'},
     {id:'money', label:'Money', desc:'Simple money tracking', ico:'💰'},
     {id:'habits', label:'Healthy Habits', desc:'Sleep, food, movement check-ins', ico:'🌿'},
     {id:'stats', label:'Stats', desc:'Streaks and progress', ico:'📊'}
@@ -7680,8 +7659,8 @@ function openAIWithPrompt(prompt, ai){
     perplexity: 'https://www.perplexity.ai/search?q='+encodeURIComponent(q)
   };
   showAppMessage(
-    'Prompt ready',
-    'The breakdown request was copied. If the AI chat opens empty, paste once (long-press → Paste). Opening '+which+'…'
+    'Prompt opened',
+    'SnapBack does not answer this. It copied a prompt and opened it in '+which+'. If the page is empty, paste once. Then come back and use what you want.'
   );
   try{ window.open(urls[which]||urls.grok, '_blank', 'noopener'); }catch(e){
     showAppMessage('Open AI', 'Could not open browser. Prompt is copied — paste into your AI app.');
@@ -8391,53 +8370,21 @@ function homeSectionToggle(key){
 
 function dayCommitments(dateStr, opts){
   opts = opts || {};
-  const dow = mondayIndex(new Date(dateStr+'T12:00:00'));
-  const rows = [];
-  (state.classes||[]).forEach(c=>{
-    if(!classCoversDate(c, dateStr)) return;
-    rows.push({time:c.start||'', end:c.end||'', title:c.title||'', room:c.room||'', kind:'class', meetingUrl:c.meetingUrl||''});
+  let items=[];
+  try{ items = itemsForDate(dateStr)||[]; }catch(e){ items=[]; }
+  return items.filter(function(it){
+    if(opts.skipTasks && (it.kind==='task' || it.type==='task' || it.type==='taskstart')) return false;
+    return true;
+  }).map(function(it){
+    return {
+      time: it.time||'',
+      end: it.end||'',
+      title: String(it.label||'').replace(/^★\s*/,''),
+      room: '',
+      kind: it.kind||it.type||'',
+      id: it.id
+    };
   });
-  (state.studyBlocks||[]).filter(b=>b.date===dateStr).forEach(b=>{
-    rows.push({time:b.start||'', end:b.end||'', title:b.label||'', room:b.room||'', kind:'block'});
-  });
-  (state.exercisePlan||[]).filter(function(r){ return Number(r.day)===Number(dow); }).forEach(r=>{
-    const bits=[r.focus||'Exercise'];
-    if(r.details) bits.push(r.details);
-    if(r.km) bits.push(r.km+' km');
-    rows.push({time:r.start||'', end:r.end||'', title:bits.join(' · '), room:'', kind:'exercise', id:r.id, date:dateStr});
-  });
-  (state.tasks||[]).filter(function(t){ return !t.done && t.exerciseId && t.date===dateStr; }).forEach(function(t){
-    if(rows.some(function(r){ return r.kind==='exercise' && String(r.id)===String(t.exerciseId); })) return;
-    rows.push({time:t.time||'', end:'', title:t.title, room:'', kind:'exercise', id:t.exerciseId, date:dateStr});
-  });
-  (state.externalBusy||[]).filter(ev=>ev.date===dateStr).forEach(ev=>{
-    if(!ev.id) ev.id='ext_'+dateStr+'_'+(ev.start||'')+'_'+(ev.title||'');
-    rows.push({time:ev.allDay?'':(ev.start||''), end:ev.allDay?'':(ev.end||''), title:ev.title||'Busy', room:'', kind:'external', id:ev.id, date:dateStr});
-  });
-  if(!opts.skipTasks){
-    (state.tasks||[]).filter(t=>!t.done && !t.exerciseId && t.date===dateStr && t.time).forEach(t=>{
-      rows.push({time:t.time, end:'', title:t.title, room:'', kind:'task', id:t.id});
-    });
-  }
-  rows.sort((a,b)=>String(a.time||'').localeCompare(String(b.time||'')));
-  function cTime(t){
-    const m=String(t||'').match(/(\d{1,2}):(\d{2})/);
-    return m ? String(m[1]).padStart(2,'0')+':'+m[2] : '';
-  }
-  function cScore(x){
-    return (x.end?4:0) + (x.kind==='class'?2:0) + (x.kind==='block'?1:0);
-  }
-  const collapsed=[];
-  const seen={};
-  rows.forEach(function(r){
-    const mk=(typeof meetingKey==='function' ? meetingKey(r.title||'') : '') || String(r.title||'').toLowerCase().replace(/\s+/g,' ').trim();
-    if(!mk){ collapsed.push(r); return; }
-    const k=cTime(r.time)+'|'+mk;
-    if(seen[k]==null){ seen[k]=collapsed.length; collapsed.push(r); return; }
-    if(cScore(r)>=cScore(collapsed[seen[k]])) collapsed[seen[k]]=r;
-  });
-  collapsed.sort((a,b)=>String(a.time||'').localeCompare(String(b.time||'')));
-  return collapsed;
 }
 function commitmentRowsHtml(rows, emptyText){
   if(!rows.length) return `<div class="empty">${emptyText}</div>`;
@@ -8479,6 +8426,7 @@ function viewToday(){
   <div class="pagehead">
     <div class="eyebrow">${new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</div>
     <h1>${(function(){ const n=(state.profile&&state.profile.name||'').trim(); if(!n||n.toLowerCase()==='student') return 'Today'; return escapeHtml(n)+'\u2019s day'; })()}</h1>
+    <p style="margin:4px 0 0;font-size:.85rem">${escapeHtml(lastSyncedLine())}</p>
     <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px">
       <button class="btn ghost sm" id="todayAiPrioritize">✨ Ask AI what matters today</button>
     </div>
@@ -9502,11 +9450,7 @@ function meetingKey(s){
   return parts.join(' / ');
 }
 function queueTwinChoices(){
-  if(state._twinAskV!==2){
-    state.calTwinSkip={};
-    state.calTwins=[];
-    state._twinAskV=2;
-  }
+  if(state._twinAskV!==2) state._twinAskV=2;
   const bySlot={};
   function add(it){
     const key=meetingKey(it.title);
@@ -10865,7 +10809,8 @@ function viewNudge(){
   try{
     if(native){
       const mail=(_currentUser&&_currentUser.email)||(_auth&&_auth.currentUser&&_auth.currentUser.email)||'';
-      if(!mail) phoneNote='<p style="margin:8px 0 0">Not signed in. Settings, Account, Sign in with Google. Use the same Gmail as the laptop.</p>';
+      if(!mail) phoneNote='<p style="margin:8px 0 0">Not signed in. Settings → Account → Continue with Google. Same Gmail as the laptop.</p>';
+      else phoneNote='<p style="margin:8px 0 0">Do Not Disturb: SnapBack asks to ring anyway. If the phone stays silent, allow SnapBack under the phone’s Do Not Disturb app list, and under Alarms & reminders.</p>';
     }
   }catch(e){}
   return `
@@ -11114,7 +11059,7 @@ function viewReminders(){
     return `<div class="deadline-row">
       <input type="checkbox" class="check" ${r.done?'checked':''} data-action="toggle-reminder" data-id="${r.id}">
       <span style="flex:1;${r.done?'text-decoration:line-through;opacity:.6':''}">${escapeHtml(r.title)}<div style="font-size:.72rem;color:${overdue?'var(--brick)':'var(--muted)'}">${when.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}${overdue?' · passed':''}</div></span>
-      ${deleteControl('reminder', r.id, '✕')}
+      ${deleteControl('reminder', r.id, 'Delete')}
     </div>`;
   };
   return `
@@ -11214,7 +11159,7 @@ function viewMoney(){
     <button class="btn" id="addMoneyBtn">Add</button>
   </div>
   <ul class="moneylist">
-    ${monthEntries.length ? monthEntries.map(m=>`<li class="moneyrow"><span class="moneyamt ${m.type}">${m.type==='expense'?'-':'+'}₹${m.amount}</span><span style="flex:1">${escapeHtml(m.title)} <span style="color:var(--muted)">· ${escapeHtml(m.category)} · ${m.date}</span></span>${deleteControl('money', m.id, '✕')}</li>`).join('') : '<li class="empty">No entries this month.</li>'}
+    ${monthEntries.length ? monthEntries.map(m=>`<li class="moneyrow"><span class="moneyamt ${m.type}">${m.type==='expense'?'-':'+'}₹${m.amount}</span><span style="flex:1">${escapeHtml(m.title)} <span style="color:var(--muted)">· ${escapeHtml(m.category)} · ${m.date}</span></span>${deleteControl('money', m.id, 'Delete')}</li>`).join('') : '<li class="empty">No entries this month.</li>'}
   </ul>
   `;
 }
@@ -11540,7 +11485,7 @@ function viewTimeBlocking(){
   <div class="card">
     <h3>${date} plan</h3>
     <ul class="tblock-list">
-      ${blocks.length?blocks.map(b=>`<li class="tblock"><b>${b.start}–${b.end}</b>&nbsp;${escapeHtml(b.label)}${b.meetingUrl?`<a href="${escapeHtml(b.meetingUrl)}" target="_blank" rel="noopener" style="margin-left:8px"><button class="btn ghost sm">Join &#8599;</button></a>`:''}<span style="margin-left:auto">${deleteControl('block', b.id, '✕')}</span></li>`).join(''):'<li class="empty">No blocks yet for this day.</li>'}
+      ${blocks.length?blocks.map(b=>`<li class="tblock"><b>${b.start}–${b.end}</b>&nbsp;${escapeHtml(b.label)}${b.meetingUrl?`<a href="${escapeHtml(b.meetingUrl)}" target="_blank" rel="noopener" style="margin-left:8px"><button class="btn ghost sm">Join &#8599;</button></a>`:''}<span style="margin-left:auto">${deleteControl('block', b.id, 'Delete')}</span></li>`).join(''):'<li class="empty">No blocks yet for this day.</li>'}
     </ul>
   </div>`;
 }
@@ -13435,7 +13380,7 @@ function viewMindmaps(){
       ${state.mindmaps.length ? state.mindmaps.map(m=>`<div class="deadline-row">
         <span style="flex:1;cursor:pointer" data-action="mm-open" data-id="${m.id}">${escapeHtml(m.title)} <span style="color:var(--muted);font-size:.78rem">· ${m.nodes.length} bubble${m.nodes.length===1?'':'s'}</span></span>
         <button class="btn ghost sm" data-action="mm-open" data-id="${m.id}">Open</button>
-        ${deleteControl('mindmap', m.id, '✕')}
+        ${deleteControl('mindmap', m.id, 'Delete')}
       </div>`).join('') : '<div class="empty">No mind maps yet — create your first one above.</div>'}
     </div>`;
   }
@@ -13752,7 +13697,6 @@ function viewHelp(){
       <p>1. Settings → Apps → SnapBack → Notifications → Allow notifications.</p>
       <p>2. Settings → Apps → Special app access → Alarms & reminders → SnapBack → Allow.</p>
       <p>3. Settings → Apps → SnapBack → Battery → Unrestricted, so the phone does not stop the alarm.</p>
-      <p>Then open SnapBack → Nudge and tap Save Nudge again.</p>
     </details>
     <details class="faqitem"><summary>Bring in Google or Outlook</summary>
       <p>Plan → Schedule → Bring in my calendar. Sign in with Google, or download a calendar file (.ics) and tap Upload calendar file. This copies events into SnapBack. It does not change Google or Outlook.</p>
@@ -13792,9 +13736,10 @@ function viewHelp(){
 
 function viewStudyTools(){
   if(!state.studyToolOpen) state.studyToolOpen = {};
+  const cats = isStudentMode() ? STUDY_TOOLS : STUDY_TOOLS.filter(function(c){ return /Notes|Reading|Posters/.test(c.category); });
   return `
-  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">Free, organized by what you're trying to do</div><h1>Study Tools</h1><p>Tap a category to expand or collapse. Tools open in a new tab.</p></div>
-  ${STUDY_TOOLS.map((cat,ci)=>{
+  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">${isStudentMode()?'For schoolwork':'For work'}</div><h1>${isStudentMode()?'Study Tools':'Work tools'}</h1><p>These open in a new tab. SnapBack does not run them.</p></div>
+  ${cats.map((cat,ci)=>{
     const open = !!state.studyToolOpen[ci];
     return `<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
     <button type="button" class="btn ghost" data-action="study-tool-toggle" data-idx="${ci}" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center;gap:10px">
@@ -13897,7 +13842,7 @@ function viewStats(){
 function viewSoundscape(){
   const s=state.settings;
   return `
-  <div class="pagehead"><div class="eyebrow">Endel-style ambience</div><h1>Soundscape</h1><p>Colored noise plus nature sounds — all generated live in the browser, no audio files to download, works offline. Turn on sync and it starts with each Focus session and pauses on breaks — automatically.</p></div>
+  <div class="pagehead"><div class="eyebrow">Background sound</div><h1>Soundscape</h1><p>SnapBack can play noise and nature sounds itself. It cannot press play in Spotify or YouTube. Those links open the other app, and you press play there.</p></div>
   <div class="card">
     <h3>Ambient sound</h3>
     ${soundPickerHtml()}
@@ -13980,7 +13925,7 @@ function viewSettings(){
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <h1>Settings</h1>
+    <h1 id="settingsTitle">Settings</h1>
     <p style="margin-top:4px;display:flex;flex-wrap:wrap;gap:8px">
       <button class="btn sm" id="startTourBtn" type="button">Take a tour</button>
       <button class="btn ghost sm" id="gotoHelpBtn" type="button">Help &amp; FAQ</button>
@@ -14059,25 +14004,19 @@ function viewSettings(){
           ? '<button type="button" class="btn ghost" id="googleSignInBtn" style="width:100%">Already signed in with Google</button>'
           : '<button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google (recommended)</button><p style="font-size:.8rem;color:var(--muted);margin:8px 0 0;line-height:1.45">Sign in with the same Google account on the laptop and on the phone. You do not save a nudge twice. A nudge saved on the laptop is picked up by the phone, and a nudge saved on the phone shows on the laptop. The phone rings even if the laptop is shut. The laptop rings only while its SnapBack tab is open. If the internet is off, each device keeps its last copy, then catches up when you are back online. A username works on this device only.</p>'}
       </div>
-      <details style="margin-top:12px;display:none" id="devFirebaseBox" data-admin-only="1"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Advanced: Firebase config (admin only — do not use)</summary><div class="field"><label>Firebase config</label>
-        <textarea id="fbConfigInput" rows="5" placeholder='{ "apiKey": "...", "projectId": "..." }' style="width:100%;font-size:.75rem">${escapeHtml(getFirebaseConfig()?JSON.stringify(getFirebaseConfig(),null,2):'')}</textarea>
+${(state.settings&&state.settings.adminOpen)?`<details style="margin-top:12px" id="devFirebaseBox"><summary>Admin only: Firebase and sync code</summary>
+      <div class="field"><label>Firebase config</label>
+        <textarea id="fbConfigInput" rows="5" style="width:100%;font-size:.75rem">${escapeHtml(getFirebaseConfig()?JSON.stringify(getFirebaseConfig(),null,2):'')}</textarea>
       </div>
-      <p style="font-size:.78rem;color:var(--muted);margin:8px 0">Paste config once → Save &amp; start live sync. Firebase Console must have Google sign-in enabled.</p>
-      <details style="margin-top:10px">
-        <summary style="cursor:pointer;font-weight:700;font-size:.9rem">Advanced: private sync code (only if not using Google sign-in)</summary>
-        <p style="font-size:.8rem;color:var(--muted)">Prefer Sign in with Google above. Use a private code only if Google sign-in is not available — same code on laptop and phone.</p>
-        <div class="field"><label>Private sync code</label>
-          <input id="syncCodeInput" placeholder="e.g. GOURI-STUDY-9xK2" value="">
-        </div>
-      </details>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;max-width:320px">
-        <button class="btn sm" id="saveSyncBtn">Save &amp; start live sync</button>
-        <button class="btn ghost sm" id="pullSyncBtn">Pull from cloud now</button>
-      </div>
+      <p style="font-size:.78rem;color:var(--muted);margin:8px 0">Only if Google sign-in breaks. Students never need this. App updates are a new website upload and a new phone build, not this box.</p>
+      <div class="field"><label>Private sync code (old)</label><input id="syncCodeInput" value=""></div>
+      <button class="btn sm" id="saveSyncBtn" type="button">Save</button>
+      <button class="btn ghost sm" id="pullSyncBtn" type="button">Pull from cloud now</button>
+      </details>`:''}
       </div>
     </details>
 
-    <details class="setgroup">
+${(state.settings&&state.settings.adminOpen)?`    <details class="setgroup">
       <summary>Import tasks (from other apps)</summary>
       <div class="setgroup-body">
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">
@@ -14093,6 +14032,8 @@ function viewSettings(){
         <div id="taskCsvStatus" style="font-size:.85rem;margin-top:8px;color:var(--muted)"></div>
       </div>
     </details>
+
+`:''}
 
     <details class="setgroup">
       <summary>Terms of use</summary>
@@ -14225,7 +14166,7 @@ function viewSettings(){
     </div></details></div>
     <details class="setgroup"><summary>Report a problem</summary>
       <div class="setgroup-body">
-        <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px;line-height:1.45">Something not working? Send a note to the person who shared SnapBack with you. Include what you were doing and what you expected.</p>
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px;line-height:1.45">This sends an email to SnapBack support at vs_uma@hotmail.com. It does not go to a teacher unless you put their address in the note.</p>
         <textarea id="bugReportText" rows="4" placeholder="Example: Task reminder on 2 Oct had no sound." style="width:100%"></textarea>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
           <button type="button" class="btn" id="bugReportEmailBtn">Email this report</button>
@@ -16686,6 +16627,19 @@ function wireView(){
   if(state.view==='settings'){
     const gh=document.getElementById('gotoHelpBtn'); if(gh) gh.addEventListener('click', ()=>navigateTo('help'));
     const stBtn=document.getElementById('startTourBtn'); if(stBtn) stBtn.addEventListener('click', ()=>startTour(0));
+    const settingsTitle=document.getElementById('settingsTitle');
+    if(settingsTitle){
+      settingsTitle.addEventListener('click', function(){
+        state._adminTaps = (state._adminTaps||0)+1;
+        if(state._adminTaps>=7){
+          state._adminTaps=0;
+          if(!state.settings) state.settings={};
+          state.settings.adminOpen = !state.settings.adminOpen;
+          showAppMessage(state.settings.adminOpen?'Admin tools on':'Admin tools off', state.settings.adminOpen?'Firebase and CSV import are visible on this device only.':'Hidden again.');
+          try{ persistRender(); }catch(e){ render(); }
+        }
+      });
+    }
     const tSearch=document.getElementById('taskSearch');
     if(tSearch){
       tSearch.addEventListener('input', ()=>{ state.taskSearch=tSearch.value||''; try{ persistRender(); }catch(e){ render(); } });
@@ -16992,6 +16946,8 @@ function wireView(){
     }
     const gOut=document.getElementById('googleSignOutBtn');
     if(gOut) gOut.addEventListener('click', ()=>signOutUser());
+    const delAcc=document.getElementById('deleteAccountBtn');
+    if(delAcc) delAcc.addEventListener('click', ()=>{ try{ deleteMySnapBackData(); }catch(e){} });
 
     const sc=document.getElementById('syncCodeInput'); if(sc) sc.value=getSyncCode();
     const fb=document.getElementById('fbConfigInput'); if(fb){ const c=getFirebaseConfig(); if(c) fb.value=JSON.stringify(c,null,2); }
