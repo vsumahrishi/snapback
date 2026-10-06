@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="321">
+<meta name="snapback-build" content="323">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4232,6 +4232,11 @@ function wireNudgeForegroundHooks(){
       });
     }
   }catch(e){}
+  if(!window._nudgeCloudPull){
+    window._nudgeCloudPull = setInterval(function(){
+      try{ armPhoneCloudNudgeSync(); }catch(e){}
+    }, 60000);
+  }
 }
 
 function firebaseRefreshToken(user){
@@ -4274,17 +4279,20 @@ function armPhoneCloudNudgeSync(){
 async function scheduleNativeWakeAlarms(){
   if(!isNativeApp()) return 0;
   try{ await ensureNativeNotifListeners(); }catch(e){}
+  try{ nextWakeDate(); }catch(e){}
   const wa = state.wakeAlarm;
+  const upcoming = (typeof nextForNudge==='function') ? nextForNudge(wa) : null;
   // Prefer real AlarmManager plugin (rings when app is closed)
   try{
     const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
     if(plug && typeof plug.schedule === 'function'){
-      if(!wa || !wa.enabled || !wa.time){
+      if(!upcoming){
+        // Before the laptop copy arrives, do not wipe an alarm the phone already set.
+        if(!_cloudReady) return 0;
         if(typeof plug.cancel === 'function') await plug.cancel();
         return 0;
       }
       const days = Array.isArray(wa.days) ? wa.days : [];
-      if(!wa.onceDate && !days.length){ if(typeof plug.cancel==='function') await plug.cancel(); return 0; }
       const res = await plug.schedule({
         enabled: true,
         time: wa.time || '07:00',
@@ -4295,7 +4303,7 @@ async function scheduleNativeWakeAlarms(){
       const n = (res && (res.scheduled!=null)) ? res.scheduled : 0;
       if(res && res.canScheduleExactAlarms === false){
         try{
-          showAppMessage('Allow exact alarms', 'Phone Settings → Alarms & reminders → allow SnapBack. Then Save Nudge again.');
+          showAppMessage('Allow exact alarms', 'Phone Settings → Alarms & reminders → allow SnapBack. Then open SnapBack again.');
           if(typeof plug.openExactAlarmSettings === 'function') await plug.openExactAlarmSettings();
         }catch(e){}
       }
@@ -5676,6 +5684,7 @@ function navigateTo(view){
   } else if(state.view==='challenges' && state.challengeId){
     state.returnChallengeId=state.challengeId;
   }
+  if(view==='calendar' && state.view!=='calendar') calendarBrowsing=false;
   const loader=document.getElementById('viewLoader');
   if(loader){ loader.classList.add('on'); }
   state.view = view;
@@ -5703,6 +5712,7 @@ function goBack(){
   let prev='today';
   if(state.navHistory && state.navHistory.length) prev=state.navHistory.pop();
   if(prev==='challenges' && state.returnChallengeId) state.challengeId=state.returnChallengeId;
+  if(prev==='calendar') calendarBrowsing=false;
   state.view=prev;
   persistRender();
 }
@@ -5724,6 +5734,7 @@ function onNavPop(ev){
     state.challengeId = snap.challengeId || null;
     state.returnChallengeId = snap.returnChallengeId || null;
     if(snap.listMode) state.listMode = snap.listMode;
+  if((snap.view||'')==='calendar') calendarBrowsing=false;
     try{ persistRender(); }catch(e){}
     return;
   }
@@ -9822,8 +9833,8 @@ function importIcsText(text, source){
   focusDates.sort();
   const upcoming=focusDates.filter(function(d){ return d>=today; });
   const show=upcoming[0] || focusDates[focusDates.length-1] || today;
-  state.calRef = show;
-  state.selectedDay = show;
+  state.calRef = todayStr();
+  state.selectedDay = todayStr();
   state.calMode = 'month';
   state.view = 'calendar';
   state.calNote = '';
@@ -10829,7 +10840,9 @@ function viewNudge(){
   return `
   <div class="pagehead">
     <h1>Nudge</h1>
-    <p>${native?'This rings when the phone is locked, after you allow alarms for SnapBack.':'On a laptop, or on iPhone, this rings only while SnapBack is open. The Android app can ring when the phone is locked.'}</p>
+    <p>${native
+      ? 'This phone rings too, even when the laptop is open and even if you leave SnapBack. Sign in with the same Gmail. Allow Alarms and reminders for SnapBack. A nudge saved on the laptop reaches this phone within a minute.'
+      : 'On a laptop this rings only while SnapBack is open. The phone rings as well, even if this tab is open.'}</p>
   </div>
   ${nudgeSection('create', editing?'Edit Nudge':'Create a Nudge', form)}
   ${nudgeSection('yours', 'Your Nudges', yours)}`;
@@ -10891,10 +10904,12 @@ function viewCalendar(){
   }
   if(!calendarBrowsing){
     const tday=todayStr();
-    if(!state.calRef || String(state.calRef).slice(0,7)!==tday.slice(0,7)){
-      state.calRef=tday;
-      state.selectedDay=tday;
-    }
+    state.calRef=tday;
+    state.selectedDay=tday;
+    state.calMode='month';
+    if(!state.schedOpen) state.schedOpen={};
+    state.schedOpen.glance=true;
+    calendarBrowsing=true;
   }
   const mode=state.calMode||'month';
   const ref=new Date(state.calRef+'T00:00:00');
