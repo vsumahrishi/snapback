@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="324">
+<meta name="snapback-build" content="325">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -6324,6 +6324,16 @@ async function syncIcsCalendarUrl(url){
 
 async function signInWithGoogle(){
   if(_googleSignInBusy) return;
+  try{
+    if(!_currentUser && _auth && _auth.currentUser){
+      const u=_auth.currentUser;
+      _currentUser={ uid:u.uid, email:u.email||'', displayName:u.displayName||'', photoURL:u.photoURL||'' };
+    }
+  }catch(e){}
+  if(_currentUser && (_currentUser.email || _currentUser.uid)){
+    showAppMessage('Already signed in with Google', _currentUser.email||'');
+    return;
+  }
   initFirebase();
   if(!_auth){
     showAppMessage('Firebase not ready', 'Google login is not configured in this build.');
@@ -8410,16 +8420,21 @@ function dayCommitments(dateStr, opts){
     });
   }
   rows.sort((a,b)=>String(a.time||'').localeCompare(String(b.time||'')));
+  function cTime(t){
+    const m=String(t||'').match(/(\d{1,2}):(\d{2})/);
+    return m ? String(m[1]).padStart(2,'0')+':'+m[2] : '';
+  }
+  function cScore(x){
+    return (x.end?4:0) + (x.kind==='class'?2:0) + (x.kind==='block'?1:0);
+  }
   const collapsed=[];
-  const seenTitle={};
+  const seen={};
   rows.forEach(function(r){
-    const k=String(r.title||'').toLowerCase().replace(/\s+/g,' ').trim();
-    if(!k){ collapsed.push(r); return; }
-    if(seenTitle[k]==null){ seenTitle[k]=collapsed.length; collapsed.push(r); return; }
-    const prev=collapsed[seenTitle[k]];
-    const workout=prev.kind==='exercise'||r.kind==='exercise';
-    if(!workout){ collapsed.push(r); return; }
-    if(String(r.time||'')>=String(prev.time||'')) collapsed[seenTitle[k]]=r;
+    const mk=(typeof meetingKey==='function' ? meetingKey(r.title||'') : '') || String(r.title||'').toLowerCase().replace(/\s+/g,' ').trim();
+    if(!mk){ collapsed.push(r); return; }
+    const k=cTime(r.time)+'|'+mk;
+    if(seen[k]==null){ seen[k]=collapsed.length; collapsed.push(r); return; }
+    if(cScore(r)>=cScore(collapsed[seen[k]])) collapsed[seen[k]]=r;
   });
   collapsed.sort((a,b)=>String(a.time||'').localeCompare(String(b.time||'')));
   return collapsed;
@@ -10850,17 +10865,12 @@ function viewNudge(){
   try{
     if(native){
       const mail=(_currentUser&&_currentUser.email)||(_auth&&_auth.currentUser&&_auth.currentUser.email)||'';
-      phoneNote = mail
-        ? '<p style="margin:8px 0 0">Signed in as <b>'+escapeHtml(mail)+'</b>. Nudges saved on the laptop with this Gmail show in the list below and ring on this phone.</p>'
-        : '<p style="margin:8px 0 0">This phone is not signed in. Open Settings, then Account, and tap Sign in with Google. Use the same Gmail as the laptop. Until then, a nudge saved on the laptop will not show here and will not ring.</p>';
+      if(!mail) phoneNote='<p style="margin:8px 0 0">Not signed in. Settings, Account, Sign in with Google. Use the same Gmail as the laptop.</p>';
     }
   }catch(e){}
   return `
   <div class="pagehead">
     <h1>Nudge</h1>
-    <p>${native
-      ? 'This phone rings too, even when the laptop is open and even if you leave SnapBack. Allow Alarms and reminders for SnapBack.'
-      : 'On a laptop this rings only while SnapBack is open. The phone rings as well, even if this tab is open.'}</p>
     ${phoneNote}
   </div>
   ${nudgeSection('create', editing?'Edit Nudge':'Create a Nudge', form)}
@@ -14045,10 +14055,9 @@ function viewSettings(){
       <div class="setgroup-body">
       ${authStatusHtml()}
       <div style="margin-top:12px">
-        <button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google (recommended)</button>
-        <p style="font-size:.8rem;color:var(--muted);margin:8px 0 0;line-height:1.45">
-          Sign in with the same Google account on the laptop and on the phone. You do not save a nudge twice. A nudge saved on the laptop is picked up by the phone, and a nudge saved on the phone shows on the laptop. The phone rings even if the laptop is shut. The laptop rings only while its SnapBack tab is open. If the internet is off, each device keeps its last copy, then catches up when you are back online. A username works on this device only.
-        </p>
+        ${_currentUser
+          ? '<button type="button" class="btn ghost" id="googleSignInBtn" style="width:100%">Already signed in with Google</button>'
+          : '<button type="button" class="btn" id="googleSignInBtn" style="width:100%">Sign in with Google (recommended)</button><p style="font-size:.8rem;color:var(--muted);margin:8px 0 0;line-height:1.45">Sign in with the same Google account on the laptop and on the phone. You do not save a nudge twice. A nudge saved on the laptop is picked up by the phone, and a nudge saved on the phone shows on the laptop. The phone rings even if the laptop is shut. The laptop rings only while its SnapBack tab is open. If the internet is off, each device keeps its last copy, then catches up when you are back online. A username works on this device only.</p>'}
       </div>
       <details style="margin-top:12px;display:none" id="devFirebaseBox" data-admin-only="1"><summary style="font-size:.8rem;color:var(--muted);cursor:pointer">Advanced: Firebase config (admin only — do not use)</summary><div class="field"><label>Firebase config</label>
         <textarea id="fbConfigInput" rows="5" placeholder='{ "apiKey": "...", "projectId": "..." }' style="width:100%;font-size:.75rem">${escapeHtml(getFirebaseConfig()?JSON.stringify(getFirebaseConfig(),null,2):'')}</textarea>
@@ -16958,6 +16967,16 @@ function wireView(){
     const gIn=document.getElementById('googleSignInBtn');
     if(gIn){
       gIn.onclick = function(){
+        try{
+          if(!_currentUser && _auth && _auth.currentUser){
+            const u=_auth.currentUser;
+            _currentUser={ uid:u.uid, email:u.email||'', displayName:u.displayName||'', photoURL:u.photoURL||'' };
+          }
+        }catch(e){}
+        if(_currentUser && (_currentUser.email || _currentUser.uid)){
+          showAppMessage('Already signed in with Google', _currentUser.email||'');
+          return;
+        }
         const raw=(document.getElementById('fbConfigInput')?.value||'').trim();
         if(raw){
           try{ setFirebaseConfig(parseFirebaseConfigText(raw)); }catch(e){}
