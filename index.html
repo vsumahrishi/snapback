@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="323">
+<meta name="snapback-build" content="324">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -400,8 +400,8 @@ details.setgroup .setgroup-body{margin-top:12px}
   .taskactions{width:100%;justify-content:flex-start;margin-top:8px;gap:8px}
   .check{width:22px;height:22px}
   .btn,.btn.sm{padding:11px 14px;font-size:.88rem;min-height:44px}
-  .navbtn{padding:10px 12px;font-size:.82rem}
-  .navbtn .ico{font-size:1rem}
+  .navbtn{padding:10px 12px;font-size:.9rem}
+  .navbtn .ico{width:28px;min-width:28px;font-size:1.2rem}
   .ringwrap{width:200px;height:200px}
   .monthgrid{gap:3px}
   .daycell{min-height:56px;padding:3px 4px}
@@ -530,6 +530,17 @@ body.share-only{background:#f7f6f2}
 <div id="mobileDrawerRoot"></div>
 
 <script>
+(function(){
+  try{
+    if(!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform())) return;
+    var g=sessionStorage.getItem.bind(sessionStorage);
+    var s=sessionStorage.setItem.bind(sessionStorage);
+    var r=sessionStorage.removeItem.bind(sessionStorage);
+    sessionStorage.getItem=function(k){ var v=g(k); if(v!=null) return v; try{ return localStorage.getItem('sb_sess_'+k); }catch(e){ return null; } };
+    sessionStorage.setItem=function(k,v){ s(k,v); try{ localStorage.setItem('sb_sess_'+k, String(v)); }catch(e){} };
+    sessionStorage.removeItem=function(k){ r(k); try{ localStorage.removeItem('sb_sess_'+k); }catch(e){} };
+  }catch(e){}
+})();
 /* ============================================================
    Storage — works in Claude artifact runtime AND as a plain file
    ============================================================ */
@@ -5702,13 +5713,11 @@ function navigateTo(view){
   setTimeout(()=>{ const l=document.getElementById('viewLoader'); if(l) l.classList.remove('on'); }, 280);
 }
 function goBack(){
-  try{
-    if(typeof isNativeApp==='function' && isNativeApp() && window.history.length>1){
-      history.back();
-      return;
-    }
-  }catch(e){}
-  if(state.view==='tasks' && state.listMode && state.listMode!=='all') state.listMode='all';
+  if(state.view==='tasks' && state.listMode && state.listMode!=='all'){
+    state.listMode='all';
+    persistRender();
+    return;
+  }
   let prev='today';
   if(state.navHistory && state.navHistory.length) prev=state.navHistory.pop();
   if(prev==='challenges' && state.returnChallengeId) state.challengeId=state.returnChallengeId;
@@ -5797,20 +5806,25 @@ function handlePhoneBack(){
   const now=Date.now();
   if(now-_phoneBackAt<350) return;
   _phoneBackAt=now;
-  try{ if(closePhoneBackLayer()) return; }catch(e){}
   try{
-    if(window.history.length>1){
-      history.back();
+    if(typeof mobileMenuOpen!=='undefined' && mobileMenuOpen){
+      mobileMenuOpen=false;
+      if(typeof renderMobileDrawer==='function') renderMobileDrawer();
       return;
     }
   }catch(e){}
-  if((state.navHistory && state.navHistory.length) || (state.view && state.view!=='today')){
+  try{ if(closePhoneBackLayer()) return; }catch(e){}
+  if((state.navHistory && state.navHistory.length) || (state.view && state.view!=='today') || (state.view==='tasks' && state.listMode && state.listMode!=='all')){
     goBack();
     return;
   }
   try{
     const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
-    if(App && typeof App.exitApp==='function') App.exitApp();
+    if(App && typeof App.exitApp==='function'){ App.exitApp(); return; }
+  }catch(e){}
+  try{
+    const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+    if(plug && typeof plug.exitApp==='function') plug.exitApp();
   }catch(e){}
 }
 function wirePhoneBack(){
@@ -5986,7 +6000,6 @@ function applyCloudPayload(payload){
       try{ pushCloudSync(); }catch(e){}
       return;
     }
-    if(native) return;
   }
   if(_cloudReady && _localRev > remoteAt + 1500){
     try{ pushCloudSync(); }catch(e){}
@@ -6034,6 +6047,7 @@ function startCloudSync(){
   if(!ref) return;
   _unsubSync = ref.onSnapshot(snap=>{
     if(!snap.exists){
+      if(typeof isNativeApp==='function' && isNativeApp()) return;
       _cloudReady = true;
       try{ pushCloudSync(); }catch(e){}
       return;
@@ -6326,18 +6340,10 @@ async function signInWithGoogle(){
         window.Capacitor.Plugins.FirebaseAuth
       );
       if(!plugin || typeof plugin.signInWithGoogle!=='function'){
-        const web = (typeof DEFAULT_PUBLIC_WEB_URL!=='undefined' && DEFAULT_PUBLIC_WEB_URL) || 'https://vsumahrishi.github.io/snapback/';
-        showAppMessage(
-          'Use website for Gmail',
-          'This APK does not have the Google plugin yet. Opening the SnapBack website so you can sign in with Gmail there (same account syncs).'
-        );
-        try{
-          if(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser){
-            window.Capacitor.Plugins.Browser.open({ url: web });
-          } else {
-            window.open(web, '_blank');
-          }
-        }catch(e){ window.open(web, '_blank'); }
+        const provider = new firebase.auth.GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        try{ await _auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); }catch(e){}
+        await _auth.signInWithRedirect(provider);
         return;
       }
       const res = await plugin.signInWithGoogle();
@@ -6438,6 +6444,7 @@ async function completeRedirectSignIn(){
     initFirebase();
     if(!_auth) return;
     const result = await _auth.getRedirectResult();
+    const fromRedirect = !!(result && result.user);
     const user = (result && result.user) || _auth.currentUser;
     if(!user) return;
     _currentUser = {
@@ -6450,9 +6457,11 @@ async function completeRedirectSignIn(){
     if(_currentUser.email) state.profile.email = _currentUser.email;
     setSessionLoggedIn(true, true);
     try{ saveState(); }catch(e){}
-    try{ startCloudSync(); pushCloudSync(); }catch(e){}
-    showAppMessage('Signed in with Google', _currentUser.email||'Google account connected');
-    try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+    try{ startCloudSync(); }catch(e){}
+    if(fromRedirect){
+      showAppMessage('Signed in with Google', _currentUser.email||'Google account connected');
+      try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+    }
   }catch(e){
     console.warn('redirect result', e);
   }
@@ -8420,7 +8429,7 @@ function commitmentRowsHtml(rows, emptyText){
   return rows.map(c=>{
     const when=(c.time?escapeHtml(c.time):'All day')+(c.end?('–'+escapeHtml(c.end)):'');
     const color=c.kind==='exercise'?'var(--pine)':c.kind==='block'?'var(--purple)':'var(--blue)';
-    const inner=`<span class="dotcolor" style="background:${color}"></span><b>${when}</b>&nbsp;${escapeHtml(c.title)}${c.room?(' · '+escapeHtml(c.room)):''}`;
+    const inner=`<span class="dotcolor" style="background:${color}"></span><b class="when">${when}</b><span class="ctitle">${escapeHtml(c.title)}${c.room?(' · '+escapeHtml(c.room)):''}</span>`;
     if(c.kind==='task' && c.id!=null){
       return `<button type="button" class="classrow" data-action="open-task-menu" data-id="${c.id}" style="width:100%;text-align:left;background:transparent;border:none;cursor:pointer">${inner}</button>`;
     }
@@ -10837,12 +10846,22 @@ function viewNudge(){
     </div>`;
   }).join('');
   const yours=rows || '<p style="margin:0;color:var(--muted)">No Nudges yet.</p>';
+  let phoneNote='';
+  try{
+    if(native){
+      const mail=(_currentUser&&_currentUser.email)||(_auth&&_auth.currentUser&&_auth.currentUser.email)||'';
+      phoneNote = mail
+        ? '<p style="margin:8px 0 0">Signed in as <b>'+escapeHtml(mail)+'</b>. Nudges saved on the laptop with this Gmail show in the list below and ring on this phone.</p>'
+        : '<p style="margin:8px 0 0">This phone is not signed in. Open Settings, then Account, and tap Sign in with Google. Use the same Gmail as the laptop. Until then, a nudge saved on the laptop will not show here and will not ring.</p>';
+    }
+  }catch(e){}
   return `
   <div class="pagehead">
     <h1>Nudge</h1>
     <p>${native
-      ? 'This phone rings too, even when the laptop is open and even if you leave SnapBack. Sign in with the same Gmail. Allow Alarms and reminders for SnapBack. A nudge saved on the laptop reaches this phone within a minute.'
+      ? 'This phone rings too, even when the laptop is open and even if you leave SnapBack. Allow Alarms and reminders for SnapBack.'
       : 'On a laptop this rings only while SnapBack is open. The phone rings as well, even if this tab is open.'}</p>
+    ${phoneNote}
   </div>
   ${nudgeSection('create', editing?'Edit Nudge':'Create a Nudge', form)}
   ${nudgeSection('yours', 'Your Nudges', yours)}`;
@@ -17212,6 +17231,7 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   }
   render();
   try{ wirePhoneBack(); }catch(e){}
+  try{ if(typeof completeRedirectSignIn==='function') await completeRedirectSignIn(); }catch(e){}
   try{
     if(typeof isNativeApp==='function' && isNativeApp()) history.replaceState(navSnapshot(), 'SnapBack', '#/');
   }catch(e){}
