@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="318">
+<meta name="snapback-build" content="319">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -3970,7 +3970,8 @@ function saveWakeAlarmFromForm(){
       math: !mathEl || mathEl.checked,
       alert: alertEl && alertEl.value==='silent' ? 'silent' : 'regular',
       snoozesMax: 2,
-      snoozesLeft: 2
+      snoozesLeft: 2,
+      created: Date.now()
     };
     if(repeating && !days.length){
       showAppMessage('Pick at least one day.', '');
@@ -4006,26 +4007,9 @@ function saveWakeAlarmFromForm(){
     // schedule after persist
     try{ scheduleWakeAlarms(); }catch(e){ console.warn(e); }
     try{
-      if(typeof isNativeApp==='function' && isNativeApp()){
-        scheduleNativeWakeAlarms().then(function(n){
-          const timeLabel = (state.wakeAlarm && state.wakeAlarm.time) ? state.wakeAlarm.time : '';
-          if(state.wakeAlarm && state.wakeAlarm.enabled){
-            showAppMessage('Saved', 'Nudge is set for '+timeLabel+'. This phone rings even if you close SnapBack. The laptop shows the same nudge.');
-          } else {
-            showAppMessage('Nudge off', 'No Nudge until you save again.');
-          }
-        }).catch(function(e){
-          showAppMessage('Saved', 'Nudge is set for '+((state.wakeAlarm&&state.wakeAlarm.time)||'')+'.');
-        });
-      } else {
-        showAppMessage(
-          state.wakeAlarm.enabled?'Saved':'Nudge off',
-          state.wakeAlarm.enabled ? ('Nudge is set for '+state.wakeAlarm.time+'. This laptop rings at that time only if this browser tab stays open. The phone rings even if the laptop is shut. Opening SnapBack after the time has passed does not ring a late nudge.') : 'No Nudge until you save again.'
-        );
-      }
-    }catch(e){
-      showAppMessage(state.wakeAlarm.enabled?'Saved':'Nudge off', state.wakeAlarm.enabled?('Nudge is set for '+state.wakeAlarm.time+'. This laptop rings only if this browser tab stays open. The phone rings even if the laptop is shut.'):'No Nudge until you save again.');
-    }
+      if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms();
+    }catch(e){}
+    showAppMessage(state.wakeAlarm && state.wakeAlarm.enabled ? 'Saved' : 'Nudge off', '');
     try{
       if(typeof Notification!=='undefined' && Notification.permission==='default') Notification.requestPermission();
     }catch(e){}
@@ -4115,6 +4099,26 @@ function nudgeWhenOn(n, dateStr){
   d.setHours(hh, mm, 0, 0);
   return d;
 }
+function nudgeIsRepeat(n){
+  return !!(n && !n.onceDate && Array.isArray(n.days) && n.days.length);
+}
+function nudgeIsPast(n){
+  if(!n || nudgeIsRepeat(n)) return false;
+  if(!n.onceDate || !n.time) return false;
+  const when=new Date(String(n.onceDate).slice(0,10)+'T'+String(n.time).slice(0,5)+':00');
+  if(isNaN(when.getTime())) return false;
+  return when.getTime() < Date.now();
+}
+function prunePastNudges(){
+  if(!Array.isArray(state.nudges)) return false;
+  const next=state.nudges.filter(function(n){ return !nudgeIsPast(n); });
+  if(next.length===state.nudges.length) return false;
+  state.nudges=next;
+  if(state.wakeAlarm && nudgeIsPast(state.wakeAlarm)){
+    state.wakeAlarm=Object.assign({}, state.wakeAlarm, {enabled:false});
+  }
+  return true;
+}
 function checkDueNudges(){
   try{ ensureNudges(); }catch(e){}
   if(!state.notifiedKeys) state.notifiedKeys=[];
@@ -4141,6 +4145,7 @@ function checkDueNudges(){
     }catch(e){}
   });
   if(state.notifiedKeys.length>500) state.notifiedKeys=state.notifiedKeys.slice(-300);
+  try{ if(prunePastNudges()) dirty=true; }catch(e){}
   if(dirty){ try{ saveState(); }catch(e){} }
 }
 function scheduleWakeAlarms(){
@@ -5075,7 +5080,7 @@ function renderModal(){
       <div class="quotecard" style="max-width:400px;text-align:left">
         <div class="qeyebrow">SnapBack</div>
         <div style="font-weight:800;font-size:1.1rem;margin-bottom:8px">${escapeHtml(m.title)}</div>
-        <p style="font-size:.95rem;line-height:1.45;margin:0 0 16px;white-space:pre-wrap">${escapeHtml(m.body)}</p>
+        ${m.body?`<p style="font-size:.95rem;line-height:1.45;margin:0 0 16px;white-space:pre-wrap">${escapeHtml(m.body)}</p>`:''}
         <div style="display:flex;flex-direction:column;gap:8px">
           <button class="btn" id="appMsgOk">${escapeHtml(m.ok||'OK')}</button>
           ${m.cancel?`<button class="btn ghost" id="appMsgCancel">${escapeHtml(m.cancel)}</button>`:''}
@@ -5702,6 +5707,7 @@ let _auth = null;
 let _unsubSync = null;
 let _unsubAuth = null;
 let _syncApplying = false;
+let _cloudReady = false;
 let _syncTimer = null;
 let _currentUser = null; // { uid, email, displayName, photoURL }
 
@@ -5816,15 +5822,52 @@ function syncPayloadFromState(){
   }
   return payload;
 }
+function mergeCloudList(localArr, remoteArr){
+  const remote = Array.isArray(remoteArr) ? remoteArr : [];
+  const local = Array.isArray(localArr) ? localArr : [];
+  const seen = {};
+  const out = [];
+  remote.forEach(function(item){
+    if(!item || typeof item!=='object') return;
+    const id = item.id!=null && String(item.id)!=='' ? String(item.id) : '';
+    if(id){
+      if(seen[id]) return;
+      seen[id]=1;
+    }
+    out.push(item);
+  });
+  local.forEach(function(item){
+    if(!item || typeof item!=='object') return;
+    const id = item.id!=null ? String(item.id) : '';
+    if(!id || seen[id]) return;
+    seen[id]=1;
+    out.push(item);
+  });
+  return out;
+}
 function applyCloudPayload(payload){
   if(!payload || typeof payload!=='object') return;
   if(state._icsImportGuard && Date.now() < state._icsImportGuard) return;
   if(state._calEditGuard && Date.now() < state._calEditGuard) return;
   _syncApplying = true;
+  const first = !_cloudReady;
+  let keepLocal = false;
   const keys = cloudSyncKeys();
-  keys.forEach(k=>{ if(payload[k]!==undefined) state[k]=payload[k]; });
+  keys.forEach(k=>{
+    if(payload[k]===undefined) return;
+    if(first && Array.isArray(payload[k])){
+      const merged = mergeCloudList(state[k], payload[k]);
+      if(merged.length > payload[k].length) keepLocal = true;
+      state[k] = merged;
+    } else {
+      state[k] = payload[k];
+    }
+  });
+  try{ if(prunePastNudges()) keepLocal = true; }catch(e){}
   saveState();
   _syncApplying = false;
+  _cloudReady = true;
+  if(keepLocal){ try{ pushCloudSync(); }catch(e){} }
   try{ nextWakeDate(); }catch(e){}
   render();
   try{ scheduleWakeAlarms(); }catch(e){}
@@ -5845,15 +5888,20 @@ function startCloudSync(){
   const ref = cloudDocRef();
   if(!ref) return;
   _unsubSync = ref.onSnapshot(snap=>{
-    if(!snap.exists) return;
+    if(!snap.exists){
+      _cloudReady = true;
+      try{ pushCloudSync(); }catch(e){}
+      return;
+    }
     const data = snap.data();
-    if(!data) return;
+    if(!data){ _cloudReady = true; return; }
     if(_syncApplying) return;
     applyCloudPayload(data);
   }, err => console.warn('sync listen', err));
 }
 function pushCloudSync(){
   if(_syncApplying) return;
+  if(!_cloudReady) return;
   const db = initFirebase();
   if(!db) return;
   const ref = cloudDocRef();
@@ -5861,6 +5909,7 @@ function pushCloudSync(){
   clearTimeout(_syncTimer);
   _syncTimer = setTimeout(()=>{
     try{
+      if(!_cloudReady || _syncApplying) return;
       ref.set(syncPayloadFromState(), { merge: true });
     }catch(e){ console.warn('pushCloudSync', e); }
   }, 400);
@@ -6260,6 +6309,7 @@ async function signOutUser(){
   try{
     if(_auth) await _auth.signOut();
     _currentUser = null;
+    _cloudReady = false;
     stopCloudSync();
     showAppMessage('Signed out', 'Your data on this device stays until you Reset. Cloud data stays with your Google account.');
     persistRender();
@@ -10615,7 +10665,15 @@ function viewNudge(){
       <button class="btn ghost" id="testWakeBtn" type="button">Preview</button>
       ${editing?'<button class="btn ghost" type="button" data-action="nudge-cancel">Cancel</button>':''}
     </div>`;
-  const rows=(state.nudges||[]).map(function(n){
+  try{ if(prunePastNudges()) saveState(); }catch(e){}
+  const nudgeRowsSrc=(state.nudges||[]).map(function(n,i){ return {n:n,i:i}; }).filter(function(x){ return !nudgeIsPast(x.n); });
+  nudgeRowsSrc.sort(function(a,b){
+    const ac=Number(a.n.created)||0, bc=Number(b.n.created)||0;
+    if(ac!==bc) return bc-ac;
+    return b.i-a.i;
+  });
+  const rows=nudgeRowsSrc.map(function(x){
+    const n=x.n;
     const when=n.onceDate ? prettyDate(n.onceDate) : ((n.days||[]).map(function(i){ return dayNames[i]; }).join(', ')||'No days');
     return `<div style="border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px">
       <div style="font-weight:700">${escapeHtml(n.time||'')} · ${escapeHtml(when)}</div>
