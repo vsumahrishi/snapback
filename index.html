@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="319">
+<meta name="snapback-build" content="321">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -5681,19 +5681,139 @@ function navigateTo(view){
   state.view = view;
   try{
     document.title = 'SnapBack';
-    const path = view==='today' ? '/snapback/' : '/snapback/#/'+view;
-    history.pushState({view}, 'SnapBack', path);
+    if(typeof isNativeApp==='function' && isNativeApp()){
+      const hash = view==='today' ? '#/' : '#/'+view;
+      history.pushState(navSnapshot(), 'SnapBack', hash);
+    } else {
+      const path = view==='today' ? '/snapback/' : '/snapback/#/'+view;
+      history.pushState({view:view}, 'SnapBack', path);
+    }
   }catch(e){}
   persistRender();
   setTimeout(()=>{ const l=document.getElementById('viewLoader'); if(l) l.classList.remove('on'); }, 280);
 }
 function goBack(){
+  try{
+    if(typeof isNativeApp==='function' && isNativeApp() && window.history.length>1){
+      history.back();
+      return;
+    }
+  }catch(e){}
   if(state.view==='tasks' && state.listMode && state.listMode!=='all') state.listMode='all';
   let prev='today';
   if(state.navHistory && state.navHistory.length) prev=state.navHistory.pop();
   if(prev==='challenges' && state.returnChallengeId) state.challengeId=state.returnChallengeId;
   state.view=prev;
   persistRender();
+}
+function navSnapshot(){
+  return {
+    sb:1,
+    view: state.view||'today',
+    nav: (state.navHistory||[]).slice(),
+    challengeId: state.challengeId||null,
+    returnChallengeId: state.returnChallengeId||null,
+    listMode: state.listMode||'all'
+  };
+}
+function onNavPop(ev){
+  const snap = ev && ev.state;
+  if(snap && snap.sb){
+    state.view = snap.view || 'today';
+    state.navHistory = Array.isArray(snap.nav) ? snap.nav.slice() : [];
+    state.challengeId = snap.challengeId || null;
+    state.returnChallengeId = snap.returnChallengeId || null;
+    if(snap.listMode) state.listMode = snap.listMode;
+    try{ persistRender(); }catch(e){}
+    return;
+  }
+  if(snap && snap.view){
+    state.view = snap.view;
+    try{ persistRender(); }catch(e){}
+    return;
+  }
+  if(typeof isNativeApp==='function' && isNativeApp() && state.view && state.view!=='today'){
+    state.view='today';
+    state.navHistory=[];
+    try{ persistRender(); }catch(e){}
+  }
+}
+let _phoneBackAt = 0;
+function closePhoneBackLayer(){
+  if(state.wakeMathOpen) return true;
+  if(state.nudgePreview){ try{ stopNudgePreview(); }catch(e){} return true; }
+  if(state.appMsg){ try{ closeAppMsg('cancel'); }catch(e){} return true; }
+  if(state.appPrompt){ try{ closeAppPrompt(false); }catch(e){} return true; }
+  if(state.quoteModalOpen){ try{ closeQuote(); }catch(e){} return true; }
+  if(state.tour && state.tour.open){ try{ endTour(false); }catch(e){} return true; }
+  if(state.focusFinish){ state.focusFinish=null; persistRender(); return true; }
+  if(state.seriesAsk){ try{ seriesChoice('cancel'); }catch(e){ state.seriesAsk=null; persistRender(); } return true; }
+  if(state.dayPop || state.calDraft){ try{ closeDayPop(); }catch(e){} return true; }
+  if(state.wizard && state.wizard.step){
+    if(state.wizard.step==='result') state.wizard.step='questions';
+    else if(state.wizard.step==='questions') state.wizard.step='pick-task';
+    else state.wizard=null;
+    persistRender();
+    return true;
+  }
+  if(state.dueWizard && state.dueWizard.step){
+    const order=['pick','situation','find-date','triage','future'];
+    const i=order.indexOf(state.dueWizard.step);
+    if(i<=0) state.dueWizard=null;
+    else state.dueWizard.step=order[i-1];
+    persistRender();
+    return true;
+  }
+  if(state.projectWizard){
+    const w=state.projectWizard;
+    if(w.step==='stream') w.step='teamMode';
+    else if(w.step==='teamMode') w.step='kind';
+    else if(w.step==='kind') w.step = w.fromExisting ? 'existing' : 'choose';
+    else if(w.step==='team') w.step='details';
+    else if(w.step==='existing') w.step='choose';
+    else if(w.step==='details' || w.step===3) w.step='stream';
+    else state.projectWizard=null;
+    persistRender();
+    return true;
+  }
+  if(state.taskMenuOpen){ try{ closeTaskMenu(); }catch(e){} return true; }
+  if(state.editingTaskId){ state.editingTaskId=null; persistRender(); return true; }
+  if(state.pickTom || state.pickTimer || state.focusPodAsk){ state.pickTom=null; state.pickTimer=null; state.focusPodAsk=null; persistRender(); return true; }
+  if(state.view==='challenges' && state.challengeId){ state.challengeId=null; persistRender(); return true; }
+  return false;
+}
+function handlePhoneBack(){
+  const now=Date.now();
+  if(now-_phoneBackAt<350) return;
+  _phoneBackAt=now;
+  try{ if(closePhoneBackLayer()) return; }catch(e){}
+  try{
+    if(window.history.length>1){
+      history.back();
+      return;
+    }
+  }catch(e){}
+  if((state.navHistory && state.navHistory.length) || (state.view && state.view!=='today')){
+    goBack();
+    return;
+  }
+  try{
+    const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+    if(App && typeof App.exitApp==='function') App.exitApp();
+  }catch(e){}
+}
+function wirePhoneBack(){
+  if(window.__snapbackPhoneBack) return;
+  window.__snapbackPhoneBack = true;
+  window.addEventListener('popstate', onNavPop);
+  document.addEventListener('backbutton', function(e){
+    try{ if(e && e.preventDefault) e.preventDefault(); }catch(err){}
+    handlePhoneBack();
+  });
+  try{
+    const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+    if(App && App.addListener) App.addListener('backButton', function(){ handlePhoneBack(); });
+  }catch(e){}
 }
 
 
@@ -5708,6 +5828,10 @@ let _unsubSync = null;
 let _unsubAuth = null;
 let _syncApplying = false;
 let _cloudReady = false;
+let _cloudRev = 0;
+let _localRev = 0;
+let _lastSyncJson = '';
+const SYNC_EPOCH = 320;
 let _syncTimer = null;
 let _currentUser = null; // { uid, email, displayName, photoURL }
 
@@ -5809,70 +5933,80 @@ function cloudDocRef(){
   return userDocRef() || legacySyncDocRef();
 }
 function cloudSyncKeys(){
-  return ['tasks','classes','studyBlocks','externalBusy','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm','nudges','projects','exercisePlan','ifThen','energyFocus','screenPlan','habitNudges','semester','bodyDouble'];
+  return ['tasks','classes','studyBlocks','externalBusy','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm','nudges','projects','exercisePlan','ifThen','energyFocus','screenPlan','habitNudges','semester','bodyDouble','calTwinSkip'];
 }
 function syncPayloadFromState(){
   const keys = cloudSyncKeys();
   const payload = {};
   keys.forEach(k=>{ if(state[k]!==undefined) payload[k]=state[k]; });
   payload.updatedAt = new Date().toISOString();
+  payload.syncEpoch = SYNC_EPOCH;
   if(_currentUser){
     payload.ownerUid = _currentUser.uid;
     payload.ownerEmail = _currentUser.email||'';
   }
   return payload;
 }
-function mergeCloudList(localArr, remoteArr){
-  const remote = Array.isArray(remoteArr) ? remoteArr : [];
-  const local = Array.isArray(localArr) ? localArr : [];
-  const seen = {};
-  const out = [];
-  remote.forEach(function(item){
-    if(!item || typeof item!=='object') return;
-    const id = item.id!=null && String(item.id)!=='' ? String(item.id) : '';
-    if(id){
-      if(seen[id]) return;
-      seen[id]=1;
-    }
-    out.push(item);
+function localHasSharedData(){
+  return (Array.isArray(state.nudges) && state.nudges.length)
+    || (Array.isArray(state.classes) && state.classes.length)
+    || (Array.isArray(state.studyBlocks) && state.studyBlocks.length)
+    || (Array.isArray(state.tasks) && state.tasks.length)
+    || (Array.isArray(state.externalBusy) && state.externalBusy.length);
+}
+function syncBodyJson(){
+  const payload = {};
+  cloudSyncKeys().forEach(function(k){
+    if(state[k]!==undefined) payload[k]=state[k];
   });
-  local.forEach(function(item){
-    if(!item || typeof item!=='object') return;
-    const id = item.id!=null ? String(item.id) : '';
-    if(!id || seen[id]) return;
-    seen[id]=1;
-    out.push(item);
-  });
-  return out;
+  return JSON.stringify(payload);
 }
 function applyCloudPayload(payload){
   if(!payload || typeof payload!=='object') return;
   if(state._icsImportGuard && Date.now() < state._icsImportGuard) return;
   if(state._calEditGuard && Date.now() < state._calEditGuard) return;
-  _syncApplying = true;
-  const first = !_cloudReady;
-  let keepLocal = false;
-  const keys = cloudSyncKeys();
-  keys.forEach(k=>{
-    if(payload[k]===undefined) return;
-    if(first && Array.isArray(payload[k])){
-      const merged = mergeCloudList(state[k], payload[k]);
-      if(merged.length > payload[k].length) keepLocal = true;
-      state[k] = merged;
-    } else {
-      state[k] = payload[k];
+  const remoteAt = Date.parse(payload.updatedAt||'') || 0;
+  const epoch = Number(payload.syncEpoch)||0;
+  const native = (typeof isNativeApp==='function' && isNativeApp());
+  // Old copies mixed the phone's saved data back in. The laptop's current copy is the shared one until both are on this version.
+  if(epoch < SYNC_EPOCH){
+    if(!native && localHasSharedData()){
+      _cloudReady = true;
+      try{ pushCloudSync(); }catch(e){}
+      return;
     }
+    if(native) return;
+  }
+  if(_cloudReady && _localRev > remoteAt + 1500){
+    try{ pushCloudSync(); }catch(e){}
+    return;
+  }
+  _syncApplying = true;
+  const keys = cloudSyncKeys();
+  keys.forEach(function(k){
+    if(payload[k]===undefined) return;
+    state[k] = payload[k];
   });
-  try{ if(prunePastNudges()) keepLocal = true; }catch(e){}
+  state.calTwins = [];
+  state.calClashes = [];
+  let pruned = false;
+  try{ pruned = !!prunePastNudges(); }catch(e){}
   saveState();
   _syncApplying = false;
   _cloudReady = true;
-  if(keepLocal){ try{ pushCloudSync(); }catch(e){} }
+  _cloudRev = remoteAt || Date.now();
+  _localRev = _cloudRev;
+  _lastSyncJson = syncBodyJson();
+  if(pruned){
+    _lastSyncJson = '';
+    _localRev = Date.now();
+    try{ pushCloudSync(); }catch(e){}
+  }
   try{ nextWakeDate(); }catch(e){}
   render();
   try{ scheduleWakeAlarms(); }catch(e){}
   try{
-    if(typeof isNativeApp==='function' && isNativeApp()){
+    if(native){
       scheduleNativeWakeAlarms();
       armPhoneCloudNudgeSync();
     }
@@ -5906,11 +6040,18 @@ function pushCloudSync(){
   if(!db) return;
   const ref = cloudDocRef();
   if(!ref) return;
+  if(syncBodyJson()===_lastSyncJson) return;
   clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(()=>{
+  _syncTimer = setTimeout(function(){
     try{
       if(!_cloudReady || _syncApplying) return;
-      ref.set(syncPayloadFromState(), { merge: true });
+      if(syncBodyJson()===_lastSyncJson) return;
+      const payload = syncPayloadFromState();
+      const sentAt = Date.parse(payload.updatedAt)||Date.now();
+      _localRev = sentAt;
+      _cloudRev = sentAt;
+      _lastSyncJson = syncBodyJson();
+      ref.set(payload, { merge: true });
     }catch(e){ console.warn('pushCloudSync', e); }
   }, 400);
 }
@@ -17055,6 +17196,10 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
     state.quoteIndex=Math.floor(Math.random()*allQuotes().length);
   }
   render();
+  try{ wirePhoneBack(); }catch(e){}
+  try{
+    if(typeof isNativeApp==='function' && isNativeApp()) history.replaceState(navSnapshot(), 'SnapBack', '#/');
+  }catch(e){}
 })();
 </script>
 </body>
