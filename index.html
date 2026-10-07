@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="326">
+<meta name="snapback-build" content="329">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -1571,7 +1571,9 @@ function captureNudgeDraft(){
   const alertEl=document.querySelector('input[name="wakeAlert"]:checked');
   const snd=document.getElementById('wakeSoundSelect');
   const once=document.getElementById('wakeOnceDate');
+  const nameEl=document.getElementById('wakeName');
   state.nudgeFormDraft={
+    name: nameEl&&nameEl.value||'',
     time: tm.value||'',
     onceDate: once&&once.value||'',
     repeating: !!(whenEl && whenEl.value==='repeat'),
@@ -1617,6 +1619,7 @@ function hasPendingNudge(){
   }catch(e){ return false; }
 }
 function triggerWakeMath(reason, note){
+  if(typeof isNativeApp==='function' && isNativeApp()) return;
   if(!state.wakeAlarm) state.wakeAlarm={snoozesLeft:2,snoozesMax:2,time:'07:00',days:[0,1,2,3,4]};
   if(reason==='scheduled' || reason==='notification'){
     state.wakeAlarm.snoozesLeft = state.wakeAlarm.snoozesMax||2;
@@ -3812,6 +3815,11 @@ function playReminderChime(){
 function checkHabitNudges(now){
   if(typeof ensureHabitPlans==='function') ensureHabitPlans();
   if(!state.habitNudges) return false;
+  // Wait for the shared copy. Otherwise the web asks again for an answer the phone already saved.
+  try{
+    const signed = (typeof getSessionLoggedIn==='function' && getSessionLoggedIn()) || (typeof isLoggedIn==='function' && isLoggedIn());
+    if(signed && !_cloudReady) return false;
+  }catch(e){}
   if(!state.notifiedKeys) state.notifiedKeys=[];
   const today=todayStr();
   const dow=mondayIndex(new Date(today+'T12:00:00'));
@@ -3850,12 +3858,22 @@ function checkHabitNudges(now){
     });
   }
   if(state.habitNudges.meal!==false){
-    const t=hm('19:30');
-    if(now>=t && now<t+40*60*1000) once('meal:'+today, 'Did you eat a real meal today?', {kind:'yesno', log:'meal', date:today, text:'Did you eat a real meal today?'});
+    const answered=state.mealLog && (state.mealLog[today]===true || state.mealLog[today]===false);
+    if(answered){
+      if(state.notifiedKeys.indexOf('meal:'+today)<0) state.notifiedKeys.push('meal:'+today);
+    } else {
+      const t=hm('19:30');
+      if(now>=t && now<t+40*60*1000) once('meal:'+today, 'Did you eat a real meal today?', {kind:'yesno', log:'meal', date:today, text:'Did you eat a real meal today?'});
+    }
   }
   if(state.habitNudges.sleep!==false){
-    const t=hm('08:00');
-    if(now>=t && now<t+40*60*1000) once('sleep:'+today, 'Log last night’s sleep.', {kind:'sleep', date:today, text:'How many hours did you sleep?'});
+    const already=state.sleepLog && state.sleepLog[today]!=null && String(state.sleepLog[today])!=='';
+    if(already){
+      if(state.notifiedKeys.indexOf('sleep:'+today)<0) state.notifiedKeys.push('sleep:'+today);
+    } else {
+      const t=hm('08:00');
+      if(now>=t && now<t+40*60*1000) once('sleep:'+today, 'How many hours did you sleep?', {kind:'sleep', date:today, text:'How many hours did you sleep?'});
+    }
   }
   if(state.habitNudges.screen!==false && state.screenPlan){
     const t=hm(state.screenPlan.nudgeTime||'21:00');
@@ -3876,7 +3894,15 @@ function answerHabitAsk(which){
   const a=state.habitAsk; if(!a) return;
   ensureHabitPlans();
   const yes = which!=='no';
-  if(a.log==='meal') state.mealLog[a.date]=yes;
+  if(a.log==='meal'){
+    state.mealLog[a.date]=yes;
+    const mealHabit=(state.habits||[]).find(function(h){ return h.id===2 || /meal/i.test(h.name||''); });
+    if(mealHabit){
+      if(!state.habitLog) state.habitLog={};
+      state.habitLog[a.date]=state.habitLog[a.date]||{};
+      state.habitLog[a.date][mealHabit.id]=yes;
+    }
+  }
   if(a.log==='exercise'){
     if(!state.exerciseLog[a.date]) state.exerciseLog[a.date]={};
     state.exerciseLog[a.date][a.id]=yes;
@@ -3887,14 +3913,31 @@ function answerHabitAsk(which){
   try{ saveState(); }catch(e){}
   persistRender();
 }
+function dismissHabitAsk(){
+  const a=state.habitAsk;
+  if(a){
+    if(!state.notifiedKeys) state.notifiedKeys=[];
+    const key=a.kind==='sleep'?('sleep:'+(a.date||todayStr())):(a.log==='meal'?('meal:'+(a.date||todayStr())):'');
+    if(key && state.notifiedKeys.indexOf(key)<0) state.notifiedKeys.push(key);
+  }
+  state.habitAsk=null;
+  try{ saveState(); }catch(e){}
+  try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+}
 function saveSleepAsk(){
   const a=state.habitAsk; if(!a) return;
   ensureHabitPlans();
   const v=document.getElementById('sleepHours')&&document.getElementById('sleepHours').value;
   state.sleepLog[a.date]=v||'';
+  const sleepHabit=(state.habits||[]).find(function(h){ return h.id===3 || /sleep/i.test(h.name||''); });
+  if(sleepHabit){
+    if(!state.habitLog) state.habitLog={};
+    state.habitLog[a.date]=state.habitLog[a.date]||{};
+    const n=parseFloat(String(v));
+    state.habitLog[a.date][sleepHabit.id]=isNaN(n)?v:n;
+  }
   state.habitAsk=null;
   try{ saveState(); }catch(e){}
-  showAppMessage('Sleep saved','That hour count is stored for today.');
   persistRender();
 }
 function fireReminder(body){
@@ -3990,9 +4033,11 @@ function saveWakeAlarmFromForm(){
     const editingId=state.nudgeEditId||'';
     const mathEl=document.getElementById('wakeMathOn');
     const alertEl=document.querySelector('input[name="wakeAlert"]:checked');
+    const nameEl=document.getElementById('wakeName');
     const item={
       id: editingId || uid(),
       enabled: true,
+      name: nameEl && nameEl.value ? String(nameEl.value).trim() : '',
       time: (tm && tm.value) ? tm.value : '07:00',
       onceDate: repeating ? '' : ((once && once.value) ? once.value : todayStr()),
       days: repeating ? days : [],
@@ -4166,13 +4211,16 @@ function checkDueNudges(){
     if(!freshEnough(t)) return;
     state.wakeAlarm=Object.assign({enabled:true}, n);
     state.wakeAlarm.snoozesLeft=n.snoozesMax||2;
-    try{ triggerWakeMath('scheduled', ''); }catch(e){}
-    try{
-      if(typeof Notification!=='undefined' && Notification.permission==='granted'){
-        const note=new Notification('SnapBack', {body:'Nudge for '+String(n.time||'').slice(0,5), tag:key});
-        note.onclick=function(){ try{ window.focus(); }catch(e2){} };
-      }
-    }catch(e){}
+    try{ triggerWakeMath('scheduled', n.name||''); }catch(e){}
+    if(!(typeof isNativeApp==='function' && isNativeApp())){
+      try{
+        if(typeof Notification!=='undefined' && Notification.permission==='granted'){
+          const who=n.name ? (n.name+' · '+String(n.time||'').slice(0,5)) : ('Nudge for '+String(n.time||'').slice(0,5));
+          const note=new Notification('SnapBack', {body:who, tag:key});
+          note.onclick=function(){ try{ window.focus(); }catch(e2){} };
+        }
+      }catch(e){}
+    }
   });
   if(state.notifiedKeys.length>500) state.notifiedKeys=state.notifiedKeys.slice(-300);
   try{ if(prunePastNudges()) dirty=true; }catch(e){}
@@ -4328,7 +4376,8 @@ async function scheduleNativeWakeAlarms(){
         time: wa.time || '07:00',
         days: days,
         sound: wa.sound || (state.settings && state.settings.alarmSound) || 'chime',
-        onceDate: wa.onceDate || ''
+        onceDate: wa.onceDate || '',
+        label: wa.name || ''
       });
       const n = (res && (res.scheduled!=null)) ? res.scheduled : 0;
       if(res && res.canScheduleExactAlarms === false){
@@ -4795,6 +4844,10 @@ function renderMain(){
       document.body.classList.remove('share-only');
     }
   }catch(e){}
+  if(!_authChecked && !(typeof isLoggedIn==='function' && isLoggedIn()) && !(typeof isPublicShareView==='function' && isPublicShareView())){
+    el.innerHTML='<div class="pagehead" style="padding:48px 20px"><h1>SnapBack</h1></div>';
+    return;
+  }
   if(typeof needsLoginScreen==='function' && needsLoginScreen()){
     el.innerHTML = viewLogin();
     try{ wireLoginScreen(); }catch(e){ console.warn(e); }
@@ -4882,14 +4935,16 @@ function renderModal(){
   if(state.habitAsk){
     const a=state.habitAsk;
     const sleepOpts=['0','1','2','3','4','5','6','7','8','9','10','10+'].map(h=>`<option>${h}</option>`).join('');
-    root.innerHTML=`<div class="overlay"><div class="quotecard" style="text-align:left;max-width:380px">
-      <div style="font-weight:800;font-size:1.05rem;margin-bottom:10px">${escapeHtml(a.text||'')}</div>
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="text-align:left;max-width:380px;position:relative">
+      <button type="button" id="habitAskClose" style="position:absolute;top:8px;right:8px;border:none;background:transparent;font-size:1rem;cursor:pointer;color:var(--ink)">Close</button>
+      <div style="font-weight:800;font-size:1.05rem;margin:0 56px 10px 0">${escapeHtml(a.text||'')}</div>
       ${a.kind==='sleep'?`<select id="sleepHours" style="width:100%;margin-bottom:10px">${sleepOpts}</select><button class="btn" id="sleepSaveAsk" type="button">Save</button>`:`<div style="display:flex;flex-direction:column;gap:8px"><button class="btn" id="habitYes" type="button">Yes</button><button class="btn ghost" id="habitNo" type="button">No</button><button class="btn ghost" id="habitLater" type="button">Not yet, but I will</button></div>`}
     </div></div>`;
     const y=document.getElementById('habitYes'); if(y) y.onclick=function(){ answerHabitAsk('yes'); };
     const n=document.getElementById('habitNo'); if(n) n.onclick=function(){ answerHabitAsk('no'); };
     const later=document.getElementById('habitLater'); if(later) later.onclick=function(){ answerHabitAsk('later'); };
     const s=document.getElementById('sleepSaveAsk'); if(s) s.onclick=saveSleepAsk;
+    const hc=document.getElementById('habitAskClose'); if(hc) hc.onclick=function(){ dismissHabitAsk(); };
     return;
   }
   if(state.breathingOpen){
@@ -5715,6 +5770,7 @@ function navigateTo(view){
     state.returnChallengeId=state.challengeId;
   }
   if(view==='calendar' && state.view!=='calendar') calendarBrowsing=false;
+  if(view==='money' && state.view!=='money') state.moneyMonth=todayStr().slice(0,7);
   const loader=document.getElementById('viewLoader');
   if(loader){ loader.classList.add('on'); }
   state.view = view;
@@ -5986,7 +6042,7 @@ function cloudDocRef(){
   return userDocRef() || legacySyncDocRef();
 }
 function cloudSyncKeys(){
-  return ['tasks','classes','studyBlocks','externalBusy','habits','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm','nudges','projects','exercisePlan','ifThen','energyFocus','screenPlan','habitNudges','semester','bodyDouble','calTwinSkip'];
+  return ['tasks','classes','studyBlocks','externalBusy','habits','habitLog','sleepLog','mealLog','exerciseLog','notifiedKeys','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm','nudges','projects','exercisePlan','ifThen','energyFocus','screenPlan','habitNudges','semester','bodyDouble','calTwinSkip'];
 }
 function syncPayloadFromState(){
   const keys = cloudSyncKeys();
@@ -6113,9 +6169,25 @@ function pushCloudSync(){
 }
 function startAuthListener(){
   const db = initFirebase();
-  if(!_auth) return;
+  if(!_auth){ _authChecked=true; return; }
   if(_unsubAuth) return;
   _unsubAuth = _auth.onAuthStateChanged(user=>{
+    if(!user && typeof getSessionLoggedIn==='function' && getSessionLoggedIn() && !_currentUser){
+      if(!_authRestoreWait){
+        _authRestoreWait = setTimeout(function(){
+          _authRestoreWait=null;
+          try{
+            if(_auth && _auth.currentUser) return;
+            _authChecked=true;
+            _currentUser=null;
+            try{ render(); }catch(e2){}
+          }catch(e){}
+        }, 1800);
+      }
+      return;
+    }
+    if(_authRestoreWait){ clearTimeout(_authRestoreWait); _authRestoreWait=null; }
+    _authChecked=true;
     if(user){
       _currentUser = {
         uid: user.uid,
@@ -6137,6 +6209,12 @@ function startAuthListener(){
     }
     try{ if(state.view==='settings') persistRender(); else render(); }catch(e){}
   });
+  setTimeout(function(){
+    if(_authChecked) return;
+    if(typeof getSessionLoggedIn==='function' && getSessionLoggedIn()) return;
+    _authChecked=true;
+    try{ render(); }catch(e){}
+  }, 2500);
 }
 let _googleSignInBusy=false;
 
@@ -6605,8 +6683,11 @@ function isLoggedIn(){
   }catch(e){}
   return false;
 }
+let _authChecked=false;
+let _authRestoreWait=null;
 function needsLoginScreen(){
   if(typeof isPublicShareView==='function' && isPublicShareView()) return false;
+  if(!_authChecked) return false;
   return !isLoggedIn();
 }
 function clearLocalAccountOnDevice(){
@@ -7170,12 +7251,12 @@ function viewTechniques(){
     {id:'bodydouble', label:'Body Doubling', desc:'Work-with-structure ritual', ico:'👥'},
     {id:'planAhead', label:'Plan this week', desc:'Short list for this week only', ico:'📆'}
   ];
-  return hubPage('Techniques', 'Each tool opens its own screen. Pick a task there (or create one). Changes save on the task everywhere — Home, Tasks, Challenges.', cards);
+  return hubPage('Techniques', '', cards);
 }
 function hubPage(title, sub, cards){
   return `<div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
-    <div class="eyebrow">${escapeHtml(sub)}</div>
+    ${sub?`<div class="eyebrow">${escapeHtml(sub)}</div>`:''}
     <h1>${escapeHtml(title)}</h1>
   </div>
   <div style="display:grid;gap:10px">
@@ -7241,8 +7322,8 @@ const CHALLENGES = [
   {id:'bounce', title:'I keep switching tasks', blurb:'I start one thing and jump to another.', ico:'🐇'},
   {id:'what_next', title:'I do not know what to do next', blurb:'Choosing the next step uses up all my energy.', ico:'🧭'},
   {id:'miss_due', title:'I am afraid I will miss a due date', blurb:'Deadlines live in my head and leak out.', ico:'⏰'},
-  {id:'schedule_tight', title:'Plans and schedules stress me out', blurb:'Rigid calendars freeze you. Use energy, cues, and short timers instead of a packed timetable.', ico:'📅'},
-  {id:'life_blur', title:'Study and personal life mix together', blurb:'Work and rest bleed together. Use physical boundaries and clear labels — not another full schedule.', ico:'🌓'},
+  {id:'schedule_tight', title:'Plans and schedules stress me out', blurb:'A rigid calendar freezes me. I need a cue and a short timer, not a packed timetable.', ico:'📅'},
+  {id:'life_blur', title:'Study and personal life mix together', blurb:'Work and rest run together for me. I need a boundary I can feel, not another full schedule.', ico:'🌓'},
   {id:'adhd_brain', title:'My brain needs ADHD-friendly setup', blurb:'I need short paths, not a complicated system.', ico:'🧠'}
 ];
 
@@ -10760,6 +10841,7 @@ function viewNudge(){
     <div style="font-size:.78rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase">Current time</div>
     <div id="nudgeNowClock" style="font-size:2.1rem;font-weight:800;margin:2px 0 10px">${nowClock}</div>
     <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${escapeHtml(timeVal)}"></div>
+    <div class="field" style="margin-top:8px"><label>Name (optional)</label><input id="wakeName" maxlength="80" placeholder="Example: Pack laptop charger" value="${escapeHtml((editing&&editing.name)||(draft&&draft.name)||'')}"></div>
     <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">The clock above is the time now. The time you set is when this Nudge should ring.</p>
     <div style="margin-top:12px;font-weight:700">When</div>
     <label style="display:flex;align-items:center;margin-top:8px"><input type="radio" name="wakeWhen" value="once" ${savedRepeat?'':'checked'}> One time</label>
@@ -10796,7 +10878,7 @@ function viewNudge(){
     const n=x.n;
     const when=n.onceDate ? prettyDate(n.onceDate) : ((n.days||[]).map(function(i){ return dayNames[i]; }).join(', ')||'No days');
     return `<div style="border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px">
-      <div style="font-weight:700">${escapeHtml(n.time||'')} · ${escapeHtml(when)}</div>
+      <div style="font-weight:700">${n.name?escapeHtml(n.name)+' · ':''}${escapeHtml(n.time||'')} · ${escapeHtml(when)}</div>
       <div style="font-size:.85rem;color:var(--muted);margin:4px 0 8px">${n.alert==='silent'?'Silent notification':'Regular notification'} · ${n.math===false?'No math problem':'Math problem to stop it'}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost sm" type="button" data-action="nudge-edit" data-id="${escapeHtml(n.id)}">Edit</button>
@@ -12356,7 +12438,7 @@ function viewProjectWizard(){
     <div style="display:grid;gap:12px">
       <button class="card" data-action="proj-start-existing" style="text-align:left;cursor:pointer;border:2px solid var(--pine);background:var(--pine-soft)">
         <div style="font-weight:800">Convert an existing item</div>
-        <div style="font-size:.88rem;color:var(--muted);margin-top:4px">Pick a task, a class, or type under Other — then turn it into a project with milestones.</div>
+        <div style="font-size:.88rem;color:var(--muted);margin-top:4px">${isStudentMode()?'Pick a task, a class, or type a title of my own.':'Pick a task, or type a title of my own.'}</div>
       </button>
       <button class="card" data-action="proj-start-new" style="text-align:left;cursor:pointer;border:2px solid #1F497D;background:#eef3f9">
         <div style="font-weight:800;color:#1F497D">Start a new project</div>
@@ -12370,13 +12452,13 @@ function viewProjectWizard(){
     return `<div class="pagehead">
       <button class="btn ghost sm" data-action="proj-wiz-cancel" style="margin-bottom:8px">← Cancel</button>
       <h1>Convert existing</h1>
-      <p>Choose a task, a class, or Other (type your own title).</p>
+      <p>${isStudentMode()?'Choose a task, a class, or type my own title.':'Choose a task, or type my own title.'}</p>
     </div>
     <div class="card">
       <label>Task</label>
       <select id="projExistTask"><option value="">— None —</option>${tasks.map(x=>`<option value="${x.id}">${escapeHtml(x.title)}</option>`).join('')}</select>
-      <label style="margin-top:12px">Class</label>
-      <select id="projExistClass"><option value="">— None —</option>${classes.map(c=>`<option value="${c.id}">${escapeHtml(c.title)}</option>`).join('')}</select>
+      ${isStudentMode()?`<label style="margin-top:12px">Class</label>
+      <select id="projExistClass"><option value="">— None —</option>${classes.map(c=>`<option value="${c.id}">${escapeHtml(c.title)}</option>`).join('')}</select>`:''}
       <label style="margin-top:12px">Or Other (type a title)</label>
       <input id="projExistOther" placeholder="e.g. Biology Chapter 4 project">
       <button class="btn" data-action="proj-exist-continue" style="margin-top:14px;width:100%">Continue → Academic or Non-academic</button>
@@ -12403,7 +12485,7 @@ function viewProjectWizard(){
     return `<div class="pagehead">
       <button class="btn ghost sm" data-action="proj-wiz-back" style="margin-bottom:8px">← Back</button>
       <h1>Individual or group?</h1>
-      <p>${w.kind==='academic'?'Class project setup':'How you will run this project'}</p>
+      <p>${isStudentMode()&&w.kind==='academic'?'Class project setup':'How I will run this project'}</p>
     </div>
     <div style="display:grid;gap:12px;grid-template-columns:1fr 1fr">
       <button class="card" data-action="proj-team-mode" data-mode="individual" style="text-align:left;cursor:pointer;border:2px solid var(--line)">
@@ -13738,7 +13820,7 @@ function viewStudyTools(){
   if(!state.studyToolOpen) state.studyToolOpen = {};
   const cats = isStudentMode() ? STUDY_TOOLS : STUDY_TOOLS.filter(function(c){ return /Notes|Reading|Posters/.test(c.category); });
   return `
-  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">${isStudentMode()?'For schoolwork':'For work'}</div><h1>${isStudentMode()?'Study Tools':'Work tools'}</h1><p>These open in a new tab. SnapBack does not run them.</p></div>
+  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><h1>${isStudentMode()?'Study Tools':'Work tools'}</h1></div>
   ${cats.map((cat,ci)=>{
     const open = !!state.studyToolOpen[ci];
     return `<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
@@ -13758,6 +13840,26 @@ function viewStudyTools(){
 /* ============================================================
    VIEW: Stats
    ============================================================ */
+function loggedHabitValue(h, d){
+  const direct = state.habitLog && state.habitLog[d] ? state.habitLog[d][h.id] : undefined;
+  if(direct!=null && direct!=='') return direct;
+  if(/sleep/i.test(h.name||'') && state.sleepLog && state.sleepLog[d]!=null && state.sleepLog[d]!==''){
+    const n=parseFloat(String(state.sleepLog[d]));
+    return isNaN(n) ? state.sleepLog[d] : n;
+  }
+  if(/meal/i.test(h.name||'') && state.mealLog && (state.mealLog[d]===true || state.mealLog[d]===false)) return !!state.mealLog[d];
+  return undefined;
+}
+function statTaskLines(list, kind){
+  const shown=list.slice(0,5);
+  if(!shown.length) return '<div class="empty">None.</div>';
+  const rows=shown.map(function(t){
+    const badge = kind==='done' ? '<span class="badge low">done</span>' : '<span class="badge '+(isOverdue(t)?'overdue':'medium')+'">'+(isOverdue(t)?'overdue':'not done')+'</span>';
+    return '<div class="deadline-row">'+badge+'<span style="flex:1">'+escapeHtml(t.title)+'</span></div>';
+  }).join('');
+  const more=list.length-shown.length;
+  return rows+(more?'<p style="font-size:.82rem;color:var(--muted);margin:8px 0 0">'+more+' more. The count above is the full number.</p>':'');
+}
 function viewStats(){
   const start=state.statsRangeStart, end=state.statsRangeEnd;
   const days=dateRangeArray(start,end);
@@ -13769,16 +13871,18 @@ function viewStats(){
   const focusSessions=days.reduce((sum,d)=>sum+(state.focusSessionLog[d]||0),0);
   const focusMinutes=focusSessions*(state.settings.workMin||25);
 
-  const habitStats=state.habits.map(h=>{
-    const entries=days.map(d=>state.habitLog[d]?state.habitLog[d][h.id]:undefined).filter(v=>v!=null && v!=='');
+  const habitStats=(state.habits||[]).map(h=>{
+    const entries=days.map(d=>loggedHabitValue(h,d)).filter(v=>v!=null && v!=='' && v!==false);
     let summary;
     if(h.type==='number'){
-      const nums=entries.filter(v=>typeof v==='number');
-      summary = nums.length ? `avg ${(nums.reduce((a,b)=>a+b,0)/nums.length).toFixed(1)} · logged ${nums.length}/${days.length} days` : 'no data logged';
+      const nums=days.map(d=>loggedHabitValue(h,d)).map(v=>typeof v==='number'?v:parseFloat(String(v))).filter(n=>!isNaN(n));
+      summary = nums.length ? `avg ${(nums.reduce((a,b)=>a+b,0)/nums.length).toFixed(1)} · ${nums.length} of ${days.length} days` : 'No answers in this range';
     }else if(h.type==='note'){
-      summary = `${entries.length}/${days.length} days logged`;
+      summary = entries.length ? `${entries.length} of ${days.length} days` : 'No answers in this range';
     }else{
-      summary = `${entries.filter(v=>v).length}/${days.length} days`;
+      const yes=days.filter(d=>loggedHabitValue(h,d)===true).length;
+      const any=days.filter(d=>{ const v=loggedHabitValue(h,d); return v===true||v===false; }).length;
+      summary = any ? `${yes} of ${days.length} days` : 'No answers in this range';
     }
     return {...h, summary};
   });
@@ -13788,7 +13892,7 @@ function viewStats(){
   const earned=moneyInRange.filter(m=>m.type==='income').reduce((a,b)=>a+b.amount,0);
 
   return `
-  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">Zoom out and see the shape of it</div><h1>Stats</h1><p>Pick a range and see what actually happened — completed, left out, and everything in between.</p></div>
+  <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><div class="eyebrow">Zoom out and see the shape of it</div><h1>Stats</h1><p>Counts for the dates you pick. The task list stays on Tasks.</p></div>
 
   <div class="card">
     <div class="filters">
@@ -13808,14 +13912,6 @@ function viewStats(){
     <div class="statbox"><div class="lbl">Tasks completed</div><div class="val" style="color:var(--pine)">${completed.length}</div></div>
     <div class="statbox"><div class="lbl">Left undone</div><div class="val" style="color:var(--brick)">${leftOut.length}</div></div>
     <div class="statbox"><div class="lbl">Focus sessions</div><div class="val">${focusSessions}</div></div>
-  </div>
-
-  <div class="card">
-    <h3>Tasks due in this range</h3>
-    <div class="grouplabel" style="margin-top:0">Completed (${completed.length})</div>
-    ${completed.length ? completed.map(t=>`<div class="deadline-row"><span class="badge low">done</span><span style="flex:1">${escapeHtml(t.title)} <span style="color:var(--muted)">· due ${t.date}</span></span></div>`).join('') : '<div class="empty">None completed in this range.</div>'}
-    <div class="grouplabel">Left out (${leftOut.length})</div>
-    ${leftOut.length ? leftOut.map(t=>`<div class="deadline-row"><span class="badge ${isOverdue(t)?'overdue':'medium'}">${isOverdue(t)?'overdue':'not done'}</span><span style="flex:1">${escapeHtml(t.title)} <span style="color:var(--muted)">· due ${t.date}</span></span></div>`).join('') : '<div class="empty">Nothing left out — everything due in this range got done.</div>'}
   </div>
 
   <div class="card">
