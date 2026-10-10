@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="351">
+<meta name="snapback-build" content="353">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -12795,6 +12795,101 @@ function finishHeard(area, statusEl){
   }
   applySpokenForm(kind, said, statusEl);
 }
+function resampleTo16k(buffer, fromRate){
+  if(!buffer || !buffer.length) return new Float32Array(0);
+  if(fromRate===16000) return buffer;
+  const ratio=fromRate/16000;
+  const len=Math.max(1, Math.round(buffer.length/ratio));
+  const out=new Float32Array(len);
+  for(let i=0;i<len;i++){
+    const x=i*ratio;
+    const i0=Math.floor(x);
+    const i1=Math.min(i0+1, buffer.length-1);
+    const t=x-i0;
+    out[i]=buffer[i0]*(1-t)+buffer[i1]*t;
+  }
+  return out;
+}
+function loadWhisper(statusEl){
+  if(window._snapWhisper) return Promise.resolve(window._snapWhisper);
+  if(window._snapWhisperPromise) return window._snapWhisperPromise;
+  window._snapWhisperPromise = import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2')
+    .then(function(mod){
+      const env=mod.env;
+      env.allowLocalModels=false;
+      env.useBrowserCache=true;
+      return mod.pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny.en', {
+        quantized:true,
+        progress_callback:function(p){
+          if(!statusEl || !p) return;
+          if(p.status==='progress' && p.total){
+            statusEl.textContent='Getting speech ready… '+Math.round(100*p.loaded/p.total)+'%';
+          } else if(p.status==='initiate' || p.status==='download'){
+            statusEl.textContent='Getting speech ready…';
+          }
+        }
+      });
+    })
+    .then(function(pipe){
+      window._snapWhisper=pipe;
+      return pipe;
+    })
+    .catch(function(err){
+      window._snapWhisperPromise=null;
+      throw err;
+    });
+  return window._snapWhisperPromise;
+}
+function startBrowserMic(statusEl){
+  _micChunks=[];
+  return navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true}}).then(function(stream){
+    _micStream=stream;
+    let rec;
+    try{ rec=new MediaRecorder(stream, {mimeType:'audio/webm'}); }
+    catch(e){ rec=new MediaRecorder(stream); }
+    rec.ondataavailable=function(ev){ if(ev.data && ev.data.size) _micChunks.push(ev.data); };
+    rec.start();
+    _micRecorder=rec;
+    loadWhisper(statusEl).catch(function(){});
+    if(statusEl) statusEl.textContent='Listening… speak now. Click Done speaking when you finish.';
+  });
+}
+function stopBrowserMic(){
+  return new Promise(function(resolve){
+    const rec=_micRecorder;
+    _micRecorder=null;
+    const finish=function(blob){
+      if(_micStream){ try{ _micStream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){} _micStream=null; }
+      resolve(blob||null);
+    };
+    if(!rec || rec.state==='inactive'){ finish(null); return; }
+    rec.onstop=function(){
+      const blob=new Blob(_micChunks, {type:rec.mimeType||'audio/webm'});
+      _micChunks=[];
+      finish(blob);
+    };
+    try{ rec.stop(); }catch(e){ finish(null); }
+  });
+}
+function transcribeBlob(blob, statusEl){
+  if(!blob || blob.size<800) return Promise.resolve('');
+  if(statusEl) statusEl.textContent='Turning that into text…';
+  return loadWhisper(statusEl).then(function(pipe){
+    return blob.arrayBuffer().then(function(buf){
+      const ctx=new AudioContext();
+      return ctx.decodeAudioData(buf.slice(0)).then(function(audio){
+        const ch=audio.getChannelData(0);
+        const samples=resampleTo16k(ch, audio.sampleRate);
+        try{ ctx.close(); }catch(e){}
+        return pipe(samples, {language:'english', task:'transcribe'});
+      });
+    });
+  }).then(function(out){
+    let text=String((out && out.text) || '').replace(/\s+/g,' ').trim();
+    text=text.replace(/^(thanks for watching|thank you|you)\.?$/i,'').trim();
+    return text;
+  });
+}
 function startHoldTalk(area, statusEl, kind){
   _talkHeld = true;
   _talkKind = kind || '';
@@ -12842,41 +12937,14 @@ function startHoldTalk(area, statusEl, kind){
     });
     return;
   }
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if(!SR){
-    if(statusEl) statusEl.textContent = 'This browser cannot hear speech. Use Chrome or Edge, or type it instead.';
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder==='undefined'){
+    if(statusEl) statusEl.textContent='This browser cannot record. Type it instead.';
     return;
   }
-  try{ if(_talkRec){ _talkRec.onend=null; _talkRec.onerror=null; _talkRec.onresult=null; _talkRec.abort(); } }catch(e){}
-  const rec = new SR();
-  const lang = (navigator.language && String(navigator.language).indexOf('en')===0) ? navigator.language : 'en-US';
-  rec.lang = lang;
-  rec.continuous = false;
-  rec.interimResults = true;
-  rec.maxAlternatives = 1;
-  rec.onresult = function(ev){
-    let interim = '';
-    for(let i = ev.resultIndex; i < ev.results.length; i++){
-      const bit = ev.results[i][0].transcript;
-      if(ev.results[i].isFinal) _talkOnText(bit, true, 0);
-      else interim += bit;
-    }
-    if(interim) _talkOnText(interim, false, 0);
-  };
-  rec.onerror = function(e){ if(_talkOnText) _talkOnText('', false, (e && e.error) || ''); };
-  rec.onend = function(){
-    if(_talkPartial && _talkOnText) _talkOnText(_talkPartial, true, 0);
-    if(_talkClickMode && _talkHeld && !_talkFatal){
-      setTimeout(function(){ try{ if(_talkHeld && !_talkFatal) rec.start(); }catch(e){} }, 300);
-    }
-  };
-  _talkRec = rec;
-  try{
-    rec.start();
-    if(statusEl) statusEl.textContent = 'Listening… speak now. Click Done speaking when you finish.';
-  }catch(err){
-    if(statusEl) statusEl.textContent = 'Could not start the microphone. Allow it, then click Hold and speak again.';
-  }
+  startBrowserMic(statusEl).catch(function(){
+    _talkFatal=true;
+    if(statusEl) statusEl.textContent='Allow the microphone for this site, then click Hold and speak again.';
+  });
 }
 function stopHoldTalk(area, statusEl){
   const was = _talkHeld;
@@ -12884,13 +12952,38 @@ function stopHoldTalk(area, statusEl){
   _talkClickMode = false;
   _talkFatal = true;
   const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
-  if(plug && plug.stopListen){ try{ plug.stopListen(); }catch(e){} }
-  try{ if(_talkRec){ _talkRec.onend=null; _talkRec.stop(); } }catch(e){}
-  if(was) finishHeard(area, statusEl);
+  const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() && plug && plug.stopListen;
+  if(native){
+    try{ plug.stopListen(); }catch(e){}
+    if(was) finishHeard(area, statusEl);
+    return;
+  }
+  if(!was || !_micRecorder){
+    if(was) finishHeard(area, statusEl);
+    return;
+  }
+  if(statusEl) statusEl.textContent='Turning that into text…';
+  stopBrowserMic().then(function(blob){
+    return transcribeBlob(blob, statusEl);
+  }).then(function(text){
+    if(text){
+      _talkTranscript=text;
+      _talkPartial='';
+      _talkFatal=false;
+      finishHeard(area, statusEl);
+    } else if(statusEl){
+      statusEl.textContent='No words came through. Click Hold and speak and try again.';
+    }
+  }).catch(function(){
+    if(statusEl) statusEl.textContent='Could not turn that into text. Stay online the first time so the speech model can download, then try again.';
+  });
 }
 let _talkClickMode = false;
 let _talkFatal = false;
 let _talkTries = 0;
+let _micChunks = [];
+let _micStream = null;
+let _micRecorder = null;
 function wireHoldTalk(btnId, areaId, statusId){
   const btn = document.getElementById(btnId);
   const area = document.getElementById(areaId);
