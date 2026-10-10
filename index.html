@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="353">
+<meta name="snapback-build" content="354">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -5570,10 +5570,6 @@ function renderMain(){
       document.body.classList.remove('share-only');
     }
   }catch(e){}
-  if(!_authChecked && !(typeof isLoggedIn==='function' && isLoggedIn()) && !(typeof isPublicShareView==='function' && isPublicShareView())){
-    el.innerHTML='<div class="pagehead" style="padding:48px 20px"><h1>SnapBack</h1></div>';
-    return;
-  }
   if(typeof needsLoginScreen==='function' && needsLoginScreen()){
     el.innerHTML = viewLogin();
     try{ wireLoginScreen(); }catch(e){ console.warn(e); }
@@ -6929,10 +6925,9 @@ function startAuthListener(){
   });
   setTimeout(function(){
     if(_authChecked) return;
-    if(typeof getSessionLoggedIn==='function' && getSessionLoggedIn()) return;
     _authChecked=true;
     try{ render(); }catch(e){}
-  }, 2500);
+  }, 1200);
 }
 let _googleSignInBusy=false;
 
@@ -7399,6 +7394,7 @@ function isLoggedIn(){
   try{
     if(typeof _auth!=='undefined' && _auth && _auth.currentUser && _auth.currentUser.uid) return true;
   }catch(e){}
+  try{ if(typeof getSessionLoggedIn==='function' && getSessionLoggedIn()) return true; }catch(e){}
   return false;
 }
 let _authChecked=false;
@@ -12842,17 +12838,44 @@ function loadWhisper(statusEl){
 }
 function startBrowserMic(statusEl){
   _micChunks=[];
-  return navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true}}).then(function(stream){
+  const pending=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true}}).then(function(stream){
     _micStream=stream;
     let rec;
     try{ rec=new MediaRecorder(stream, {mimeType:'audio/webm'}); }
     catch(e){ rec=new MediaRecorder(stream); }
     rec.ondataavailable=function(ev){ if(ev.data && ev.data.size) _micChunks.push(ev.data); };
-    rec.start();
+    rec.start(200);
     _micRecorder=rec;
     loadWhisper(statusEl).catch(function(){});
-    if(statusEl) statusEl.textContent='Listening… speak now. Click Done speaking when you finish.';
+    if(statusEl && !(_talkTranscript||_talkPartial)) statusEl.textContent='Listening… speak now. Click Done speaking when you finish.';
   });
+  _micStartPromise=pending;
+  return pending;
+}
+function startWebSpeechQuiet(statusEl){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR) return;
+  try{ if(_talkRec){ _talkRec.onend=null; _talkRec.onerror=null; _talkRec.abort(); } }catch(e){}
+  const rec=new SR();
+  rec.lang=(navigator.language && String(navigator.language).indexOf('en')===0) ? navigator.language : 'en-US';
+  rec.continuous=true;
+  rec.interimResults=true;
+  rec.onresult=function(ev){
+    let interim='';
+    for(let i=ev.resultIndex;i<ev.results.length;i++){
+      const bit=ev.results[i][0].transcript;
+      if(ev.results[i].isFinal) noteHeard(bit, true);
+      else interim+=bit;
+    }
+    if(interim){
+      _talkPartial=interim;
+      if(statusEl) statusEl.textContent='Hearing… '+((_talkTranscript+' '+interim).replace(/\s+/g,' ').trim());
+    }
+  };
+  rec.onerror=function(){};
+  rec.onend=function(){ if(_talkHeld){ try{ rec.start(); }catch(e){} } };
+  _talkRec=rec;
+  try{ rec.start(); }catch(e){}
 }
 function stopBrowserMic(){
   return new Promise(function(resolve){
@@ -12945,6 +12968,7 @@ function startHoldTalk(area, statusEl, kind){
     _talkFatal=true;
     if(statusEl) statusEl.textContent='Allow the microphone for this site, then click Hold and speak again.';
   });
+  try{ startWebSpeechQuiet(statusEl); }catch(e){}
 }
 function stopHoldTalk(area, statusEl){
   const was = _talkHeld;
@@ -12958,12 +12982,21 @@ function stopHoldTalk(area, statusEl){
     if(was) finishHeard(area, statusEl);
     return;
   }
-  if(!was || !_micRecorder){
-    if(was) finishHeard(area, statusEl);
+  if(!was) return;
+  try{ if(_talkRec){ _talkRec.onend=null; _talkRec.onerror=null; _talkRec.stop(); } }catch(e){}
+  const heard=(_talkTranscript||'').trim() || (_talkPartial||'').trim();
+  if(heard){
+    _talkTranscript=heard;
+    _talkPartial='';
+    _talkFatal=false;
+    stopBrowserMic();
+    finishHeard(area, statusEl);
     return;
   }
   if(statusEl) statusEl.textContent='Turning that into text…';
-  stopBrowserMic().then(function(blob){
+  Promise.resolve(_micStartPromise).then(function(){
+    return stopBrowserMic();
+  }).then(function(blob){
     return transcribeBlob(blob, statusEl);
   }).then(function(text){
     if(text){
@@ -19143,6 +19176,7 @@ if (typeof isNativeApp === 'function' && isNativeApp()) {
     }
   }
   render();
+  try{ startAuthListener(); }catch(e){}
   try{ wirePhoneBack(); }catch(e){}
   try{ if(typeof completeRedirectSignIn==='function') await completeRedirectSignIn(); }catch(e){}
   try{
