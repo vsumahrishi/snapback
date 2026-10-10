@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="337">
+<meta name="snapback-build" content="340">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -2249,7 +2249,6 @@ function quickAddTask(){
   const parsed=parseQuickAdd(raw);
   const id=uid();
   state.tasks.unshift({id,title:parsed.title,notes:'',date:parsed.date,time:parsed.time,priority:'medium',urgent:false,important:false,tier:'could',frog:false,meetingUrl:'',reminderLeads:[0],reminderTime:'',startDate:'',startTime:'',startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:parsed.title},strategic:{what:parsed.title},flip:{}});
-  state.pendingStrategyTaskId = id;
   input.value='';
   persistRender();
 }
@@ -2321,8 +2320,6 @@ function addTask(){
   else if(eis==='later'){ urgent=false; important=false; eisSet=true; }
   const taskObj={id,title,notes:'',date:date||'',time,priority,urgent,important,eisSet,tier:'could',frog:false,context:taskContext,technique:technique,meetingUrl:'',nudgeWhen:nudgeWhen,reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{},created:Date.now()};
   state.tasks.unshift(taskObj);
-  state.pendingStrategyTaskId = id;
-  // Always show in list after add (Today filter hides future dates)
   state.filter = 'all';
   state.contextFilter = state.contextFilter || 'all';
   pushUndo({type:'add-task', id, label:'Task added — Undo'});
@@ -3532,8 +3529,9 @@ function applyStatsThisWeek(){
   const today=new Date();
   const dow=mondayIndex(today);
   const monday=new Date(today); monday.setDate(today.getDate()-dow);
+  const sunday=new Date(monday); sunday.setDate(monday.getDate()+6);
   state.statsRangeStart=toDateStr(monday);
-  state.statsRangeEnd=todayStr();
+  state.statsRangeEnd=toDateStr(sunday);
 }
 function statsPreset(preset){
   const today=new Date();
@@ -3953,7 +3951,9 @@ function checkHabitNudges(now){
   };
   const times=habitTimes();
   if(state.habitNudges.water!==false){
-    [times.water1||'10:00', times.water2||'16:00'].forEach(function(hh, idx){
+    ['water1','water2'].forEach(function(slot, idx){
+      const hh=habitClock(slot);
+      if(!hh) return;
       const t=hm(hh);
       if(now>=t && now<t+40*60*1000) once('water:'+today+':'+idx, 'Did you drink water?', {kind:'yesno', log:'water', date:today, text:'Did you drink water?'});
     });
@@ -3975,8 +3975,11 @@ function checkHabitNudges(now){
     if(answered){
       if(state.notifiedKeys.indexOf('meal:'+today)<0) state.notifiedKeys.push('meal:'+today);
     } else {
-      const t=hm(times.meal||'19:30');
-      if(now>=t && now<t+40*60*1000) once('meal:'+today, 'Did you eat a real meal today?', {kind:'yesno', log:'meal', date:today, text:'Did you eat a real meal today?'});
+      const mealAt=habitClock('meal');
+      if(mealAt){
+        const t=hm(mealAt);
+        if(now>=t && now<t+40*60*1000) once('meal:'+today, 'Did you eat a real meal today?', {kind:'yesno', log:'meal', date:today, text:'Did you eat a real meal today?'});
+      }
     }
   }
   if(state.habitNudges.sleep!==false){
@@ -3984,8 +3987,11 @@ function checkHabitNudges(now){
     if(already){
       if(state.notifiedKeys.indexOf('sleep:'+today)<0) state.notifiedKeys.push('sleep:'+today);
     } else {
-      const t=hm(times.sleep||'08:00');
-      if(now>=t && now<t+40*60*1000) once('sleep:'+today, 'How many hours did you sleep?', {kind:'sleep', date:today, text:'How many hours did you sleep?'});
+      const sleepAt=habitClock('sleep');
+      if(sleepAt){
+        const t=hm(sleepAt);
+        if(now>=t && now<t+40*60*1000) once('sleep:'+today, 'How many hours did you sleep?', {kind:'sleep', date:today, text:'How many hours did you sleep?'});
+      }
     }
   }
   if(state.habitNudges.screen!==false && state.screenPlan){
@@ -4415,11 +4421,12 @@ function scheduleWakeAlarms(){
 
 function habitTimes(){
   if(!state.habitTimes || typeof state.habitTimes!=='object') state.habitTimes={};
-  if(!state.habitTimes.sleep) state.habitTimes.sleep='08:00';
-  if(!state.habitTimes.meal) state.habitTimes.meal='19:30';
-  if(!state.habitTimes.water1) state.habitTimes.water1='10:00';
-  if(!state.habitTimes.water2) state.habitTimes.water2='16:00';
   return state.habitTimes;
+}
+function habitClock(key){
+  const hidden={sleep:'08:00', meal:'19:30', water1:'10:00', water2:'16:00'};
+  if(state.habitTimes && state.habitTimes[key]) return state.habitTimes[key];
+  return hidden[key]||'';
 }
 function isCustomHabit(h){
   return !!(h && (h.custom || Number(h.id)>5));
@@ -4492,16 +4499,18 @@ function habitPopupItems(){
   }
   for(let i=0;i<7;i++){
     const dateStr=icsAddDays(today, i);
-    if(state.habitNudges.sleep!==false && !habitAnswered('sleep', dateStr)){
-      pushItem('sleep:'+dateStr, atClock(dateStr, times.sleep), 'How many hours did you sleep?', {kind:'habit', mode:'ask', askKind:'sleep', log:'sleep', hkey:'sleep:'+dateStr, date:dateStr, text:'How many hours did you sleep?'});
+    if(state.habitNudges.sleep!==false && habitClock('sleep') && !habitAnswered('sleep', dateStr)){
+      pushItem('sleep:'+dateStr, atClock(dateStr, habitClock('sleep')), 'How many hours did you sleep?', {kind:'habit', mode:'ask', askKind:'sleep', log:'sleep', hkey:'sleep:'+dateStr, date:dateStr, text:'How many hours did you sleep?'});
     }
-    if(state.habitNudges.meal!==false && !habitAnswered('meal', dateStr)){
-      pushItem('meal:'+dateStr, atClock(dateStr, times.meal), 'Did you eat a real meal today?', {kind:'habit', mode:'ask', askKind:'yesno', log:'meal', hkey:'meal:'+dateStr, date:dateStr, text:'Did you eat a real meal today?'});
+    if(state.habitNudges.meal!==false && habitClock('meal') && !habitAnswered('meal', dateStr)){
+      pushItem('meal:'+dateStr, atClock(dateStr, habitClock('meal')), 'Did you eat a real meal today?', {kind:'habit', mode:'ask', askKind:'yesno', log:'meal', hkey:'meal:'+dateStr, date:dateStr, text:'Did you eat a real meal today?'});
     }
     if(state.habitNudges.water!==false){
-      [times.water1||'10:00', times.water2||'16:00'].forEach(function(hh, idx){
-        const key='water:'+dateStr+':'+idx;
-        pushItem(key, atClock(dateStr, hh), 'Did you drink water?', {kind:'habit', mode:'ask', askKind:'yesno', log:'water', hkey:key, date:dateStr, text:'Did you drink water?'});
+      ['water1','water2'].forEach(function(slot, idx){
+        const hh=habitClock(slot);
+        if(!hh) return;
+        const wkey='water:'+dateStr+':'+idx;
+        pushItem(wkey, atClock(dateStr, hh), 'Did you drink water?', {kind:'habit', mode:'ask', askKind:'yesno', log:'water', hkey:wkey, date:dateStr, text:'Did you drink water?'});
       });
     }
     if(state.habitNudges.screen!==false && state.screenPlan && !habitAnswered('screen', dateStr)){
@@ -4668,6 +4677,16 @@ function popDayChecks(selected){
   }).join('');
 }
 function schedulePopupHtml(){
+  if(state.workoutAsk){
+    const names=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const dayName=names[Number(state.workoutAsk.day)]||'that day';
+    return `<div class="overlay"><div class="quotecard" style="text-align:left;max-width:420px;position:relative">
+      <button type="button" id="wpAskClose" aria-label="Close" style="position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.45rem;line-height:1;cursor:pointer;color:var(--ink)">×</button>
+      <div style="font-weight:800;margin:0 36px 14px 0">Is this a recurring plan for every ${escapeHtml(dayName)}?</div>
+      <button class="btn" id="wpAskYes" type="button" style="width:100%;margin-bottom:8px">Yes</button>
+      <button class="btn ghost" id="wpAskNo" type="button" style="width:100%">No</button>
+    </div></div>`;
+  }
   if(state.exSavePopup){
     const p=state.exSavePopup;
     let inner='';
@@ -4719,6 +4738,9 @@ function schedulePopupHtml(){
   </div></div>`;
 }
 function wireSchedulePopup(){
+  const wx=document.getElementById('wpAskClose'); if(wx) wx.onclick=function(){ applyWorkoutAsk('close'); };
+  const wy=document.getElementById('wpAskYes'); if(wy) wy.onclick=function(){ applyWorkoutAsk('yes'); };
+  const wn=document.getElementById('wpAskNo'); if(wn) wn.onclick=function(){ applyWorkoutAsk('no'); };
   const c1=document.getElementById('exPopClose'); if(c1) c1.onclick=function(){ state.exSavePopup=null; renderModal(); };
   const j=document.getElementById('exJust'); if(j) j.onclick=function(){ state.exSavePopup.step='date'; renderModal(); };
   const r=document.getElementById('exRep'); if(r) r.onclick=function(){ state.exSavePopup.step='repeat'; renderModal(); };
@@ -5322,6 +5344,7 @@ function triggerInstall(){
 }
 function dismissInstallBanner(){ installBannerDismissed=true; render(); }
 function installBannerHtml(){
+  return "";
   if(typeof isPublicShareView==='function' && isPublicShareView()) return '';
 
   if(installBannerDismissed || isAppInstalled()) return '';
@@ -6346,57 +6369,6 @@ function renderModal(){
     document.getElementById('jigOverlay').addEventListener('click', (e)=>{
       if(e.target.id==='jigOverlay'){ state.jigPromptOpen=false; renderModal(); }
     });
-    return;
-  }
-
-  // Post-create mindset prompt (after adding a task)
-  if(state.pendingStrategyTaskId){
-    const t = findTask(state.pendingStrategyTaskId);
-    if(!t){ state.pendingStrategyTaskId=null; root.innerHTML=''; return; }
-    root.innerHTML=`<div class="overlay" id="strategyOverlay">
-      <div class="quotecard" style="text-align:left;max-width:480px">
-        <div class="qeyebrow">Help this task stick</div>
-        <div class="qtext" style="font-size:1.05rem;margin-bottom:8px">You just added: <b>${escapeHtml(t.title)}</b></div>
-        <p style="color:var(--muted);font-size:.85rem;margin:0 0 12px">Take 20 seconds to set one or more helpers. You can edit these any time on the task card.</p>
-        <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:14px">
-          <div>
-            <div style="font-size:.72rem;font-weight:700;color:var(--muted)">WHEN-THEN</div>
-            <input id="psWhen" placeholder="When I finish this…" style="margin-top:4px" value="${escapeHtml((t.whenThen&&t.whenThen.when)||'')}">
-            <input id="psThen" placeholder="Then I will…" style="margin-top:4px" value="${escapeHtml((t.whenThen&&t.whenThen.then)||'')}">
-          </div>
-          <div>
-            <div style="font-size:.72rem;font-weight:700;color:var(--muted)">REWARD AFTER</div>
-            <input id="psReward" placeholder="e.g. 10 min of a show, coffee, walk" style="margin-top:4px" value="${escapeHtml((t.rewarding&&t.rewarding.reward)||'')}">
-          </div>
-          <div>
-            <div style="font-size:.72rem;font-weight:700;color:var(--muted)">WHEN / WHERE / HOW</div>
-            <input id="psSWhen" placeholder="When?" style="margin-top:4px" value="${escapeHtml((t.strategic&&t.strategic.when)||'')}">
-            <input id="psSWhere" placeholder="Where?" style="margin-top:4px" value="${escapeHtml((t.strategic&&t.strategic.where)||'')}">
-            <input id="psSHow" placeholder="First tiny step" style="margin-top:4px" value="${escapeHtml((t.strategic&&t.strategic.how)||'')}">
-          </div>
-          <div>
-            <div style="font-size:.72rem;font-weight:700;color:var(--muted)">FLIP THE SCRIPT</div>
-            <input id="psFrom" placeholder="Unhelpful thought" style="margin-top:4px" value="${escapeHtml((t.flip&&t.flip.from)||'')}">
-            <input id="psTo" placeholder="Helpful reframe" style="margin-top:4px" value="${escapeHtml((t.flip&&t.flip.to)||'')}">
-          </div>
-        </div>
-        <div class="qactions" style="justify-content:flex-end">
-          <button class="btn ghost sm" id="psSkip">Skip for now</button>
-          <button class="btn sm" id="psSave">Save helpers</button>
-        </div>
-      </div>
-    </div>`;
-    const save = ()=>{
-      t.whenThen = {when: document.getElementById('psWhen').value.trim(), then: document.getElementById('psThen').value.trim()};
-      t.rewarding = {avoid: t.title, reward: document.getElementById('psReward').value.trim()};
-      t.strategic = {what: t.title, when: document.getElementById('psSWhen').value.trim(), where: document.getElementById('psSWhere').value.trim(), how: document.getElementById('psSHow').value.trim()};
-      t.flip = {from: document.getElementById('psFrom').value.trim(), to: document.getElementById('psTo').value.trim()};
-      state.pendingStrategyTaskId = null;
-      persistRender();
-    };
-    document.getElementById('psSave').addEventListener('click', save);
-    document.getElementById('psSkip').addEventListener('click', ()=>{ state.pendingStrategyTaskId=null; persistRender(); });
-    document.getElementById('strategyOverlay').addEventListener('click',(e)=>{ if(e.target.id==='strategyOverlay'){ state.pendingStrategyTaskId=null; persistRender(); }});
     return;
   }
 
@@ -8426,7 +8398,7 @@ function openAIWithPrompt(prompt, ai){
   };
   const names={grok:'Grok', chatgpt:'ChatGPT', claude:'Claude', gemini:'Gemini', perplexity:'Perplexity'};
   const label=names[which]||'your AI';
-  showAppMessage('Opening '+label, 'Prompt copied. Paste if the box is empty.');
+  showAppMessage('Opening '+label, 'Paste if the box is empty.');
   try{ window.open(urls[which]||urls.grok, '_blank', 'noopener'); }catch(e){
     showAppMessage('Open AI', 'Could not open browser. Prompt is copied — paste into your AI app.');
   }
@@ -9916,7 +9888,7 @@ function exportBackup(){
     a.click();
     a.remove();
     setTimeout(()=>URL.revokeObjectURL(a.href), 2500);
-    showAppMessage('Backup saved', 'File: snapback-backup-'+todayStr()+'.json — usually in your Downloads folder. Keep it in Drive/OneDrive or email it to yourself. To restore later: Settings → Backup & restore → Choose backup file & restore.');
+    showAppMessage('Backup saved', 'File: snapback-backup-'+todayStr()+'.json — usually in your Downloads folder. Keep it in Drive/OneDrive or email it to yourself. To restore later: Settings → Backup & restore → Choose backup file and Restore.');
   }catch(e){
     showAppMessage('Backup failed', String(e && e.message || e));
   }
@@ -11950,6 +11922,13 @@ function viewTimer(){
         <input type="number" id="podMinutes" min="1" max="180" value="${s.workMin||25}">
       </div>
       <p style="font-size:.82rem;color:var(--muted);margin:6px 0 0">Set the minutes, then press Start.</p>
+      <div class="row" style="margin-top:12px">
+        <div class="field"><label>Short break</label><input type="number" id="podShort" min="1" max="30" value="${s.shortBreakMin||5}"></div>
+        <div class="field"><label>Long break</label><input type="number" id="podLong" min="5" max="60" value="${s.longBreakMin||15}"></div>
+        <div class="field"><label>Sessions before a long break</label><input type="number" id="podSessions" min="2" max="8" value="${s.sessionsBeforeLong||4}"></div>
+      </div>
+      ${toggleRow('setAutoBreak','Start breaks automatically', s.autoStartBreaks)}
+      ${toggleRow('setAutoWork','Start the next focus session automatically', s.autoStartWork)}
       <div class="sessiondots">${dots}</div>
       <div style="color:var(--muted);font-size:.8rem;margin-top:8px">
         ${activeTask ? `${activeTask.pomodoros||0} focus session(s) logged on “${escapeHtml(activeTask.title)}”` : 'Pick a task above to track sessions against it'}
@@ -13386,7 +13365,7 @@ function viewProjectDetail(p){
     <div class="field"><label>WhatsApp number (optional, country code, no +)</label>
       <input id="projShareWa" placeholder="e.g. 9198xxxxxxxx" value="${escapeHtml((state.profile&&state.profile.waPhone)||'')}">
     </div>
-    <div class="field" style="margin-top:8px"><label>Email (optional)</label>
+    <div class="field" style="margin-top:8px"><label>Person's email</label>
       <input id="projShareEmail" type="email" placeholder="teammate@email.com or teacher@school.edu" value="${escapeHtml((state.profile&&state.profile.teacherEmail)||'')}">
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
@@ -13963,7 +13942,10 @@ function saveExercisePlan(){
 function clearExercisePlan(which){
   ensureHabitPlans();
   if(which==='all') state.exercisePlan=[];
-  else state.exercisePlan=state.exercisePlan.filter(function(r){ return String(r.day)!==String(which); });
+  else if(String(which).indexOf('id:')===0){
+    const id=String(which).slice(3);
+    state.exercisePlan=state.exercisePlan.filter(function(r){ return String(r.id)!==id; });
+  } else state.exercisePlan=state.exercisePlan.filter(function(r){ return String(r.day)!==String(which); });
   syncExerciseLinks();
   try{ saveState(); }catch(e){}
   persistRender();
@@ -13981,49 +13963,172 @@ function saveScreenPlan(){
   try{ saveState(); }catch(e){}
   showAppMessage('Saved','Saved.');
 }
-function exerciseTableHtml(){
-  ensureHabitPlans();
-  const names=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-  const todayP=todayStr();
-  const rows=state.exercisePlan.filter(function(r){
-    if(r.onceDate && String(r.onceDate)<todayP) return false;
-    if(!r.onceDate && r.to && String(r.to)<todayP) return false;
-    return true;
-  }).slice().sort(function(a,b){ return a.day-b.day || String(a.start).localeCompare(String(b.start)); });
-  if(!rows.length) return '<p style="color:var(--muted);margin:0">No sessions yet.</p>';
-  const colors=['#dbeafe','#d1fae5','#fef3c7','#ede9fe','#ffe4e6','#e0f2fe','#ffedd5'];
-  return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:separate;border-spacing:0;font-size:.86rem;border-radius:12px;overflow:hidden">
-    <tr>
-      <th style="background:#3b82f6;color:#fff;padding:8px">Day</th>
-      <th style="background:#10b981;color:#fff;padding:8px">Time</th>
-      <th style="background:#f59e0b;color:#fff;padding:8px">Focus</th>
-      <th style="background:#7c3aed;color:#fff;padding:8px">Details</th>
-      <th style="background:#ef4444;color:#fff;padding:8px">Duration</th>
-      <th style="background:#64748b;color:#fff;padding:8px"></th>
-    </tr>
-    ${rows.map(function(r){
-      const bg=colors[r.day%colors.length];
-      let dur='';
-      try{
-        const sh=String(r.start||'').split(':').map(Number);
-        const eh=String(r.end||'').split(':').map(Number);
-        const mins=(eh[0]*60+(eh[1]||0))-(sh[0]*60+(sh[1]||0));
-        if(mins>0) dur=mins+' min';
-      }catch(e){}
-      const detail=escapeHtml(r.details||'')+(r.km?(' · '+escapeHtml(String(r.km))+' km'):'');
-      return `<tr style="background:${bg}"><td style="padding:8px;font-weight:700">${names[r.day]||''}</td><td style="padding:8px">${escapeHtml(formatTime12(r.start))} – ${escapeHtml(formatTime12(r.end))}</td><td style="padding:8px">${escapeHtml(r.focus||'')}</td><td style="padding:8px">${detail}</td><td style="padding:8px">${dur}</td><td style="padding:8px"><button type="button" class="btn ghost sm" data-action="ex-edit" data-id="${escapeHtml(r.id)}">Edit</button></td></tr>`;
-    }).join('')}
-  </table></div>`;
+function workoutDurText(start, end){
+  if(!start || !end) return '';
+  const sh=String(start).split(':').map(Number);
+  const eh=String(end).split(':').map(Number);
+  const mins=(eh[0]*60+(eh[1]||0))-(sh[0]*60+(sh[1]||0));
+  return mins>0 ? (mins+' min') : '';
 }
-function nudgeRow(key, label, timeKey){
+function workoutDates(){
+  const today=todayStr();
+  if((state.workoutView||'week')!=='month'){
+    const dow=mondayIndex(new Date(today+'T12:00:00'));
+    const monday=icsAddDays(today, -dow);
+    const out=[];
+    for(let i=0;i<7;i++) out.push(icsAddDays(monday, i));
+    return out;
+  }
+  const y=Number(today.slice(0,4)), m=Number(today.slice(5,7));
+  const n=new Date(y, m, 0).getDate();
+  const out=[];
+  for(let i=1;i<=n;i++) out.push(today.slice(0,7)+'-'+String(i).padStart(2,'0'));
+  return out;
+}
+function planOnDate(dateStr){
+  const hits=(state.exercisePlan||[]).filter(function(r){ return exerciseOccursOn(r, dateStr); });
+  hits.sort(function(a,b){ return (a.onceDate?0:1)-(b.onceDate?0:1); });
+  return hits[0]||null;
+}
+function workoutDateLabel(ds){
+  const d=new Date(ds+'T12:00:00');
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return d.getDate()+' '+months[d.getMonth()];
+}
+function readWorkoutRow(date){
+  const tr=document.querySelector('tr[data-wp-row="'+date+'"]');
+  const draft=(state.workoutDraft && state.workoutDraft.date===date) ? state.workoutDraft : {};
+  if(!tr) return draft.date?draft:null;
+  const g=function(k){
+    const el=tr.querySelector('[data-wp="'+k+'"]');
+    return el ? el.value : '';
+  };
+  const dayEl=tr.querySelector('[data-wp="day"]');
+  return {
+    date: date,
+    day: dayEl ? Number(dayEl.value) : (draft.day!=null ? Number(draft.day) : mondayIndex(new Date(date+'T12:00:00'))),
+    start: tr.querySelector('[data-wp="start"]') ? g('start') : (draft.start||''),
+    end: tr.querySelector('[data-wp="end"]') ? g('end') : (draft.end||''),
+    focus: tr.querySelector('[data-wp="focus"]') ? g('focus') : (draft.focus||''),
+    details: tr.querySelector('[data-wp="details"]') ? g('details') : (draft.details||''),
+    planId: tr.getAttribute('data-plan')||draft.planId||'',
+    wasRepeat: tr.getAttribute('data-repeat')==='1' || !!draft.wasRepeat,
+    km: draft.km||''
+  };
+}
+function applyWorkoutAsk(choice){
+  const a=state.workoutAsk;
+  if(!a) return;
+  ensureHabitPlans();
+  let row=null;
+  if(choice==='no' && a.wasRepeat){
+    row={id:uid()};
+    state.exercisePlan.push(row);
+  } else if(a.planId){
+    row=(state.exercisePlan||[]).find(function(r){ return String(r.id)===String(a.planId); });
+  }
+  if(!row){
+    row={id:a.planId||uid()};
+    state.exercisePlan.push(row);
+  }
+  row.day=Number(a.day);
+  row.start=a.start||'';
+  row.end=a.end||'';
+  row.focus=a.focus||'';
+  row.details=a.details||'';
+  if(a.km) row.km=a.km;
+  if(choice==='yes'){
+    row.onceDate='';
+    if(!row.from) row.from=a.date;
+    if(row.to==null) row.to='';
+  } else if(choice==='no'){
+    row.onceDate=a.date;
+    row.from='';
+    row.to='';
+  } else if(!a.planId || !a.wasRepeat){
+    row.onceDate=a.date;
+    row.from='';
+    row.to='';
+  }
+  state.workoutAsk=null;
+  state.workoutEdit='';
+  state.workoutDraft=null;
+  state.workoutTimeOpen='';
+  state.workoutFocusOpen='';
+  syncExerciseLinks();
+  try{ saveState(); }catch(e){}
+  persistRender();
+}
+function workoutPlanHtml(){
+  ensureHabitPlans();
+  const view=(state.workoutView||'week')==='month'?'month':'week';
+  const names=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  const focuses=['Aerobics','Aqua Zumba','Barre','Bodybuilding','Bouldering','Boxing','Calisthenics','Cardio','CrossFit','Cycling','Dance','Dance Fitness','HIIT','Hip-Hop Cardio','Kickboxing','Meditation','Pilates','Powerlifting','Qi Gong','Rowing','Running','Stretch Therapy','Swimming','Tabata','Tai Chi','Treadmill','Walking','Weight Training','Yoga','Zumba'];
+  const colors=['#dbeafe','#d1fae5','#fef3c7','#ede9fe','#ffe4e6','#e0f2fe','#ffedd5'];
+  const dates=workoutDates();
+  const rows=dates.map(function(ds){
+    const plan=planOnDate(ds);
+    const editing=state.workoutEdit===ds;
+    const draft=(editing && state.workoutDraft && state.workoutDraft.date===ds) ? state.workoutDraft : null;
+    const dow=draft && draft.day!=null ? Number(draft.day) : (plan ? Number(plan.day) : mondayIndex(new Date(ds+'T12:00:00')));
+    const start=(draft && draft.start!=null) ? draft.start : (plan&&plan.start)||'';
+    const end=(draft && draft.end!=null) ? draft.end : (plan&&plan.end)||'';
+    const focus=(draft && draft.focus!=null) ? draft.focus : (plan&&plan.focus)||'';
+    const details=(draft && draft.details!=null) ? draft.details : (plan&&plan.details)||'';
+    const bg=colors[(dow>=0?dow:0)%colors.length];
+    const timeOpen=editing && state.workoutTimeOpen===ds;
+    const focusOpen=editing && state.workoutFocusOpen===ds;
+    const timeText=(start||end) ? (escapeHtml(formatTime12(start))+' – '+escapeHtml(formatTime12(end))) : 'Set time';
+    const focusText=focus ? escapeHtml(focus) : 'Choose';
+    let dayCell=names[dow]||'';
+    let timeCell=timeText;
+    let focusCell=focusText;
+    let detailCell=escapeHtml(details);
+    if(editing){
+      dayCell=`<select data-wp="day" style="width:100%;font-weight:700">${names.map(function(n,i){ return '<option value="'+i+'"'+(Number(dow)===i?' selected':'')+'>'+n+'</option>'; }).join('')}</select><div style="font-weight:500;font-size:.75rem;color:#334155;margin-top:4px">${escapeHtml(workoutDateLabel(ds))}</div>`;
+      timeCell=timeOpen
+        ? `<div class="field" style="margin:0"><label>From</label><input type="time" data-wp="start" value="${escapeHtml(start)}"></div><div class="field" style="margin:6px 0 0"><label>To</label><input type="time" data-wp="end" value="${escapeHtml(end)}"></div>`
+        : `<button type="button" class="btn ghost sm" data-action="wp-time" data-date="${ds}">${timeText}</button>`;
+      const opts=['<option value="">Choose</option>'].concat(focuses.map(function(f){ return '<option'+(focus===f?' selected':'')+'>'+escapeHtml(f)+'</option>'; }));
+      if(focus && focuses.indexOf(focus)<0) opts.push('<option selected>'+escapeHtml(focus)+'</option>');
+      focusCell=focusOpen
+        ? `<select data-wp="focus" style="width:100%">${opts.join('')}</select>`
+        : `<button type="button" class="btn ghost sm" data-action="wp-focus" data-date="${ds}">${focusText}</button>`;
+      detailCell=`<input data-wp="details" value="${escapeHtml(details)}" placeholder="Type here" style="width:100%">`;
+    } else {
+      dayCell=`<div style="font-weight:700">${escapeHtml(names[dow]||'')}</div><div style="font-weight:500;font-size:.75rem;color:#334155">${escapeHtml(workoutDateLabel(ds))}</div>`;
+    }
+    const buttons=editing
+      ? `<button type="button" class="btn sm" data-action="wp-save" data-date="${ds}">Save</button>`
+      : `<button type="button" class="btn ghost sm" data-action="wp-edit" data-date="${ds}">Edit</button>`+(plan?` <button type="button" class="btn ghost sm" data-action="ex-clear" data-id="${escapeHtml(plan.id)}">Clear</button>`:'');
+    return `<tr data-wp-row="${ds}" data-plan="${plan?escapeHtml(plan.id):''}" data-repeat="${plan&&!plan.onceDate?'1':'0'}" style="background:${bg}"><td style="padding:8px">${dayCell}</td><td style="padding:8px">${timeCell}</td><td style="padding:8px">${focusCell}</td><td style="padding:8px">${detailCell}</td><td style="padding:8px" data-wp-dur="${ds}">${escapeHtml(workoutDurText(start,end))}</td><td style="padding:8px;white-space:nowrap">${buttons}</td></tr>`;
+  }).join('');
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 10px">
+      <span style="font-weight:800">Workout Plan</span>
+      <span style="display:flex;gap:6px">
+        <button type="button" class="${view==='week'?'btn sm':'btn ghost sm'}" data-action="workout-view" data-mode="week">Week</button>
+        <button type="button" class="${view==='month'?'btn sm':'btn ghost sm'}" data-action="workout-view" data-mode="month">Month</button>
+      </span>
+    </div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:separate;border-spacing:0;font-size:.86rem;border-radius:12px;overflow:hidden">
+      <tr>
+        <th style="background:#3b82f6;color:#fff;padding:8px">Day</th>
+        <th style="background:#10b981;color:#fff;padding:8px">Time</th>
+        <th style="background:#f59e0b;color:#fff;padding:8px">Focus</th>
+        <th style="background:#7c3aed;color:#fff;padding:8px">Details</th>
+        <th style="background:#ef4444;color:#fff;padding:8px">Duration</th>
+        <th style="background:#64748b;color:#fff;padding:8px"></th>
+      </tr>
+      ${rows}
+    </table></div>`;
+}
+function nudgeRow(key, label){
   ensureHabitPlans();
   const on=state.habitNudges[key]!==false;
   const yesCls=on?'btn sm':'btn ghost sm';
   const noCls=on?'btn ghost sm':'btn sm';
-  const timeHtml=timeKey?`<input type="time" data-habit-time="${timeKey}" value="${escapeHtml((habitTimes()[timeKey])||'')}" style="width:112px">`:'';
   return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
     <span style="font-weight:600;flex:1;min-width:90px">${escapeHtml(label)}</span>
-    ${timeHtml}
     <span style="display:flex;gap:6px;flex:0 0 auto">
       <button type="button" class="${yesCls}" data-action="nudge-set" data-key="${key}" data-on="1">Yes</button>
       <button type="button" class="${noCls}" data-action="nudge-set" data-key="${key}" data-on="0">No</button>
@@ -14035,11 +14140,8 @@ function hydrateNudgeRow(){
   const on=state.habitNudges.water!==false;
   const yesCls=on?'btn sm':'btn ghost sm';
   const noCls=on?'btn ghost sm':'btn sm';
-  const tm=habitTimes();
   return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 0;border-bottom:1px solid var(--line);flex-wrap:wrap">
     <span style="font-weight:600;flex:1;min-width:90px">Hydrate</span>
-    <input type="time" data-habit-time="water1" value="${escapeHtml(tm.water1||'10:00')}" style="width:112px">
-    <input type="time" data-habit-time="water2" value="${escapeHtml(tm.water2||'16:00')}" style="width:112px">
     <span style="display:flex;gap:6px;flex:0 0 auto">
       <button type="button" class="${yesCls}" data-action="nudge-set" data-key="water" data-on="1">Yes</button>
       <button type="button" class="${noCls}" data-action="nudge-set" data-key="water" data-on="0">No</button>
@@ -14064,43 +14166,7 @@ function viewHabits(){
   const extra=(state.habits||[]).filter(function(h){ return isCustomHabit(h) && !h.stopped; }).map(h=>nudgeRow('habit_'+h.id, h.name)).join('');
   return `
   <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><h1>Healthy Habits</h1></div>
-  ${habitSec('exercise','Exercise', `
-    ${habitSec('exKey','Key the plan', `
-      <div class="row">
-        <div class="field"><label>Day</label>
-          <select id="exDay">
-            <option value="" ${form.day===''?'selected':''}>Select a day</option>
-            ${full.map((n,i)=>`<option value="${i}" ${String(form.day)===String(i)?'selected':''}>${n}</option>`).join('')}
-          </select>
-        </div>
-        <div class="field"><label>Focus</label>
-          <select id="exFocus">
-            ${focuses.map(f=>`<option ${form.focus===f?'selected':''}>${f}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      <div class="field" id="exOtherWrap" style="${showOther?'':'display:none'}"><label>If you chose Other</label><input id="exOther" value="${escapeHtml(form.other||'')}" placeholder="Type the session"></div>
-      <div class="field"><label>Details</label><textarea id="exDetails" rows="2" placeholder="Example: squats, bench, rows">${escapeHtml(form.details||'')}</textarea></div>
-      <div class="row">
-        <div class="field"><label>Start</label><input type="time" id="exStart" value="${escapeHtml(form.start||'07:30')}"></div>
-        <div class="field"><label>End</label><input type="time" id="exEnd" value="${escapeHtml(form.end||'08:15')}"></div>
-        <div class="field" id="exKmWrap" style="${showKm?'':'display:none'}"><label>Distance (km)</label><input id="exKm" inputmode="decimal" value="${escapeHtml(form.km||'')}" placeholder="3"></div>
-      </div>
-      ${form.editId ? (form.onceDate ? `<div class="field" style="margin-top:8px"><label>Date</label><input type="date" id="exOnce" value="${escapeHtml(form.onceDate||'')}"></div>` : `<div class="row" style="margin-top:8px"><div class="field"><label>From</label><input type="date" id="exFrom" value="${escapeHtml(form.from||'')}"></div><div class="field"><label>To</label><input type="date" id="exTo" value="${escapeHtml(form.to||'')}"></div></div><p style="font-size:.78rem;color:var(--muted);margin:0 0 8px">Leave To empty to keep going until you stop it.</p>`) : ''}
-      <button type="button" class="btn" id="exSave" style="margin-top:8px">${form.editId?'Update this day':'Save session'}</button>
-      ${form.editId?'<button type="button" class="btn ghost" id="exEditCancel" style="margin-top:8px;margin-left:8px">Cancel edit</button>':''}
-      <div class="row" style="margin-top:14px;align-items:flex-end">
-        <div class="field"><label>Clear</label>
-          <select id="exClearDay">
-            <option value="all">Entire plan</option>
-            ${full.map((n,i)=>`<option value="${i}">${n} only</option>`).join('')}
-          </select>
-        </div>
-        <button type="button" class="btn ghost" id="exClear" style="margin-bottom:2px">Clear</button>
-      </div>
-    `)}
-    ${habitSec('exSee','See the plan', exerciseTableHtml())}
-  `)}
+  ${habitSec('exercise','Exercise', workoutPlanHtml())}
   ${habitSec('screen','Screen time', `
     <p style="font-size:.85rem;color:var(--muted);margin-top:0">How long do you want screens for each day this week, and when should SnapBack nudge you to stop?</p>
     ${names.map((n,i)=>{
@@ -14133,9 +14199,9 @@ function viewHabits(){
   ${habitSec('nudges','Nudges', `
     <p style="font-size:.9rem;margin-top:0">Click Yes for a Nudge.</p>
     ${nudgeRow('exercise','Exercise')}
-    ${nudgeRow('meal','Meal','meal')}
+    ${nudgeRow('meal','Meal')}
     ${hydrateNudgeRow()}
-    ${nudgeRow('sleep','Sleep','sleep')}
+    ${nudgeRow('sleep','Sleep')}
     ${nudgeRow('screen','Screen time')}
     ${extra}
   `)}
@@ -14760,20 +14826,12 @@ function viewSettings(){
     </details>
 
     <details class="setgroup">
-      <summary>Webapp Link</summary>
+      <summary>Web App Link</summary>
         <p style="font-size:.8rem;color:var(--muted);margin:10px 0 8px">Open the same SnapBack on a laptop: tap <b>Copy link</b>, paste in any browser. (A shorter custom domain needs your own domain name later — the link still works as-is.)</p>
       <div class="field"><label>Your web app link</label>
         <input id="publicWebUrlInput" readonly value="${escapeHtml((state.settings&&state.settings.publicWebUrl)||DEFAULT_PUBLIC_WEB_URL||'')}" style="font-size:.85rem">
       </div>
       <button type="button" class="btn" id="copyPublicWebUrlBtn" style="margin-top:8px;width:100%">Copy link</button>
-      </div>
-    </details>
-
-    <details class="setgroup">
-      <summary>Calendar</summary>
-      <div class="setgroup-body">
-        <p style="font-size:.85rem;color:var(--muted);margin:8px 0">Bring in or export a calendar from Plan → Schedule.</p>
-        <button type="button" class="btn" data-action="nav" data-view="calendar">Open Schedule</button>
       </div>
     </details>
 
@@ -14818,15 +14876,15 @@ ${(state.settings&&state.settings.adminOpen)?`    <details class="setgroup">
 `:''}
 
     <details class="setgroup">
-      <summary>Terms of use</summary>
+      <summary>Terms of Use</summary>
       <div class="setgroup-body">
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Licence, privacy summary, and rules against republishing SnapBack as another product.</p>
-        <button type="button" class="btn" data-action="nav" data-view="terms" style="width:100%">Read Terms of use</button>
+        <button type="button" class="btn" data-action="nav" data-view="terms" style="width:100%">Read Terms of Use</button>
       </div>
     </details>
 
     <details class="setgroup">
-      <summary>Backup & restore</summary>
+      <summary>Backup & Restore</summary>
       <div class="setgroup-body">
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px;line-height:1.45">
           Sign in with Google and your work is kept. You can also download a file copy below.
@@ -14854,72 +14912,28 @@ ${(state.settings&&state.settings.adminOpen)?`    <details class="setgroup">
     </details>
 
 
-  <details class="setgroup"><summary>Appearance &amp; celebrations</summary>
+  <details class="setgroup"><summary>Permissions</summary>
     <div class="setgroup-body">
-      ${toggleRow('setDarkMode','Dark mode', !!s.darkMode)}
+      <p style="font-weight:700;margin:0 0 6px">Notifications</p>
+      ${toggleRow('setDeadlineNotify','Task and class nudges', s.deadlineNotify!==false)}
+      <button type="button" class="btn sm" id="grantNotifyBtn" style="margin-top:8px">Grant permission</button>
+      <div id="notifyStatus" style="font-size:.85rem;margin-top:6px;color:var(--muted)">${escapeHtml(state.lastNotifyMsg||'')}</div>
+      <p style="font-size:.8rem;color:var(--muted);margin:8px 0 14px;font-style:italic">On Android: Settings → Apps → SnapBack → Notifications → allow all; Battery → Unrestricted.</p>
+      <p style="font-weight:700;margin:0 0 6px">Confetti</p>
       ${toggleRow('setCelebrateOn','Confetti when a task is marked done', s.celebrateOnComplete !== false)}
-      ${toggleRow('setCelebrateSound','Ask for a short celebratory beat', s.celebrateSound !== false)}
-    </div>
-  </details>
-
-  <details class="setgroup"><summary>Timer lengths (minutes)</summary>
-    <div class="setgroup-body"><div class="grid4">
-      ${numField('setWork','Focus session', s.workMin,5,90)}${numField('setShort','Short break', s.shortBreakMin,1,30)}
-      ${numField('setLong','Long break', s.longBreakMin,5,60)}${numField('setSessions','Sessions before long break', s.sessionsBeforeLong,2,8)}
-    </div></div>
-  </details>
-
-  <details class="setgroup"><summary>Auto-start</summary>
-    <div class="setgroup-body">
-      ${toggleRow('setAutoBreak','Start breaks automatically', s.autoStartBreaks)}
-      ${toggleRow('setAutoWork','Start next focus session automatically', s.autoStartWork)}
-    </div>
-  </details>
-
-  <details class="setgroup"><summary>Sounds &amp; notifications (timers)</summary>
-    <div class="setgroup-body">
-      <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">
-        <b>When this is used:</b> short sound when a <b>timer or session ends</b>
-        (Focus Pod work/break, Body Doubling phases, and similar in-app timers).
-        <br><b>Not</b> the Nudge sound — choose that on the <b>Nudge</b> page in the side menu.
-        Focus Pod background noise (brown/pink/rain…) is set on the Focus Pod screen.
-      </p>
-      <div class="field"><label>Timer / session end sound</label><select id="setAlarmSound">
-          <option value="chime" ${s.alarmSound==='chime'?'selected':''}>Chime</option>
-          <option value="bell" ${s.alarmSound==='bell'?'selected':''}>Bell</option>
-          <option value="beep" ${s.alarmSound==='beep'?'selected':''}>Beep</option>
-          <option value="digital" ${s.alarmSound==='digital'?'selected':''}>Digital</option>
-          <option value="radar" ${s.alarmSound==='radar'?'selected':''}>Radar</option>
-          <option value="knock" ${s.alarmSound==='knock'?'selected':''}>Wake burst</option>
-        </select></div>
-      <div class="field"><label>Volume</label><input type="range" id="setSoundVol" min="0.2" max="1" step="0.05" value="${s.soundVolume||0.85}"></div>
-      <button type="button" class="btn sm" id="testSoundBtn" data-action="test-sound">Test sound</button>
-      <div id="testSoundStatus" style="font-size:.85rem;margin-top:6px;color:var(--muted)"></div>
-      <div style="margin-top:14px">
-        ${toggleRow('setDeadlineNotify','Task and class Nudges', s.deadlineNotify!==false)}
-        <button type="button" class="btn sm" id="grantNotifyBtn" style="margin-top:8px">Grant permission</button>
-        <div id="notifyStatus" style="font-size:.85rem;margin-top:6px;color:var(--muted)">${escapeHtml(state.lastNotifyMsg||'')}</div>
-        <p style="font-size:.8rem;color:var(--muted);margin-top:8px">On Android: Settings → Apps → SnapBack → Notifications → allow all; Battery → Unrestricted.</p>
-      </div>
-    </div>
-  </details>
-
-  <details class="setgroup"><summary>Quotes</summary>
-    <div class="setgroup-body">
-      <p style="font-size:.85rem;color:var(--muted)">Custom quotes appear in the random quote picker.</p>
-      <div class="row"><input id="customQuoteInput" placeholder="Add a quote"><button class="btn sm" id="addQuoteBtn">Add</button></div>
-    </div>
-  </details>
-
-  <details class="setgroup"><summary>Install app</summary><div style="margin-top:8px">
+      ${toggleRow('setCelebrateSound','Confetti with a short beat', s.celebrateSound !== false)}
+      <p style="font-weight:700;margin:12px 0 6px">Display</p>
+      ${toggleRow('setDarkMode','Dark mode', !!s.darkMode)}
+      ${toggleRow('setQuoteOnLoad','Show one quote a day', s.quoteOnLoad !== false)}
+      <p style="font-weight:700;margin:12px 0 6px">Install the web app</p>
       ${(typeof isNativeApp==='function' && isNativeApp()) ? `<p style="color:var(--muted);font-size:.85rem">You already have the phone app installed.</p>`
         : isAppInstalled() ? `<p style="color:var(--muted);font-size:.85rem">Already installed on this device.</p>`
         : deferredInstallPrompt ? `<button class="btn" id="settingsInstallBtn">Install SnapBack</button>`
-        : isIOSDevice ? `<p style="color:var(--muted);font-size:.85rem">Tap the Share icon in Safari, then "Add to Home Screen".</p>`
-        : `<p style="color:var(--muted);font-size:.85rem">On a phone browser, use Install if offered. For full alarms, use the SnapBack APK.</p>`}
+        : isIOSDevice ? `<p style="color:var(--muted);font-size:.85rem">Tap the Share icon in Safari, then Add to Home Screen.</p>`
+        : `<p style="color:var(--muted);font-size:.85rem">On a laptop browser, use Install if it is offered. The phone still needs the SnapBack app for alarms.</p>`}
     </div>
-    </div></details></div>
-    <details class="setgroup"><summary>Delete data</summary><div style="margin-top:8px">
+  </details>
+    <details class="setgroup"><summary>Delete Data</summary><div style="margin-top:8px">
       <p style="color:var(--muted);font-size:.85rem;margin:0 0 12px">Clear everything, or only chosen items.</p>
       <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:360px">
         <div style="width:100%">${deleteControl('reset', null, 'Reset All')}</div>
@@ -14946,7 +14960,7 @@ ${(state.settings&&state.settings.adminOpen)?`    <details class="setgroup">
       </div>
     </div>
     </div></details></div>
-    <details class="setgroup"><summary>Report a problem</summary>
+    <details class="setgroup"><summary>Report a Problem</summary>
       <div class="setgroup-body">
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px;line-height:1.45">This sends an email to SnapBack support at vs_uma@hotmail.com. It does not go to a teacher unless you put their address in the note.</p>
         <textarea id="bugReportText" rows="4" placeholder="Example: Task reminder on 2 Oct had no sound." style="width:100%"></textarea>
@@ -14971,7 +14985,7 @@ ${(state.settings&&state.settings.adminOpen)?`    <details class="setgroup">
       </div>
       <div class="field" style="margin-top:8px"><label>Preview (editable — your edits are kept when you share)</label><textarea id="sharePreview" rows="6" style="width:100%;font-size:.85rem"></textarea>
         <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">Edit freely. WhatsApp / Email / Download / Copy use this text. “Regenerate from tasks” rebuilds from the date range above (asks first if you edited).</p></div>
-      <div class="field"><label>WhatsApp number (optional, with country code)</label><input id="shareWaPhone" placeholder="e.g. 9198xxxxxxxx" value="${escapeHtml((state.profile&&state.profile.waPhone)||'')}"></div>
+      <div class="field"><label>Person's WhatsApp number</label><input id="shareWaPhone" placeholder="e.g. 9198xxxxxxxx" value="${escapeHtml((state.profile&&state.profile.waPhone)||'')}"></div>
       <div class="field"><label>Email (optional)</label><input id="shareEmail" type="email" placeholder="teacher@school.edu" value="${escapeHtml((state.profile&&state.profile.teacherEmail)||'')}"></div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
         <button type="button" class="btn" id="shareRefreshPreview">Regenerate from tasks</button>
@@ -15866,6 +15880,7 @@ function wireView(){
     else if(action==='accept-terms') el.addEventListener('click', ()=>{ acceptTermsAndContinue(); });
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
     else if(action==='ex-edit') el.addEventListener('click', ()=>{ beginExerciseEdit(el.dataset.id); });
+    else if(action==='ex-clear') el.addEventListener('click', ()=>{ clearExercisePlan('id:'+el.dataset.id); });
     else if(action==='sched-toggle' || action==='habit-sec') el.addEventListener('click', ()=>{
       const bag = action==='habit-sec' ? 'habitOpen' : 'schedOpen';
       if(!state[bag]) state[bag] = action==='sched-toggle' ? {glance:true} : {today:true};
@@ -16956,36 +16971,79 @@ function wireView(){
   }
   if(state.view==='habits'){
     const addHabitBtn=document.getElementById('addHabitBtn'); if(addHabitBtn) addHabitBtn.addEventListener('click', addHabit);
-    const exSave=document.getElementById('exSave'); if(exSave) exSave.addEventListener('click', saveExercisePlan);
     const screenSave=document.getElementById('screenSave'); if(screenSave) screenSave.addEventListener('click', saveScreenPlan);
-    const exClear=document.getElementById('exClear'); if(exClear) exClear.addEventListener('click', function(){
-      const w=document.getElementById('exClearDay');
-      clearExercisePlan(w?w.value:'all');
+    function stashWorkout(date){
+      const row=readWorkoutRow(date);
+      if(row) state.workoutDraft=row;
+    }
+    main.querySelectorAll('[data-action="workout-view"]').forEach(function(el){
+      el.addEventListener('click', function(){
+        state.workoutView=el.getAttribute('data-mode')==='month'?'month':'week';
+        state.workoutEdit='';
+        state.workoutDraft=null;
+        persistRender();
+      });
     });
-    const exCancel=document.getElementById('exEditCancel');
-    if(exCancel) exCancel.addEventListener('click', function(){
-      state.exForm={day:'', focus:'Weight Training', other:'', details:'', start:'07:30', end:'08:15', km:'', editId:''};
-      persistRender();
+    main.querySelectorAll('[data-action="wp-edit"]').forEach(function(el){
+      el.addEventListener('click', function(){
+        const date=el.getAttribute('data-date');
+        const plan=planOnDate(date);
+        state.workoutEdit=date;
+        state.workoutTimeOpen='';
+        state.workoutFocusOpen='';
+        state.workoutDraft={
+          date:date,
+          day: plan?Number(plan.day):mondayIndex(new Date(date+'T12:00:00')),
+          start:(plan&&plan.start)||'',
+          end:(plan&&plan.end)||'',
+          focus:(plan&&plan.focus)||'',
+          details:(plan&&plan.details)||'',
+          planId:plan?plan.id:'',
+          wasRepeat: !!(plan && !plan.onceDate),
+          km:(plan&&plan.km)||''
+        };
+        if(!state.habitOpen) state.habitOpen={};
+        state.habitOpen.exercise=true;
+        persistRender();
+      });
     });
-    const exFocus=document.getElementById('exFocus');
-    if(exFocus) exFocus.addEventListener('change', function(){
-      state.exForm={
-        editId:(state.exForm&&state.exForm.editId)||'',
-        day:(document.getElementById('exDay')&&document.getElementById('exDay').value)||'',
-        focus:exFocus.value,
-        other:(document.getElementById('exOther')&&document.getElementById('exOther').value)||'',
-        details:(document.getElementById('exDetails')&&document.getElementById('exDetails').value)||'',
-        start:(document.getElementById('exStart')&&document.getElementById('exStart').value)||'07:30',
-        end:(document.getElementById('exEnd')&&document.getElementById('exEnd').value)||'08:15',
-        km:(document.getElementById('exKm')&&document.getElementById('exKm').value)||'',
-        onceDate:(document.getElementById('exOnce')&&document.getElementById('exOnce').value)||((state.exForm&&state.exForm.onceDate)||''),
-        from:(document.getElementById('exFrom')&&document.getElementById('exFrom').value)||((state.exForm&&state.exForm.from)||''),
-        to:(document.getElementById('exTo')&&document.getElementById('exTo').value)||((state.exForm&&state.exForm.to)||'')
-      };
-      const ow=document.getElementById('exOtherWrap');
-      const kw=document.getElementById('exKmWrap');
-      if(ow) ow.style.display = exFocus.value==='Other' ? '' : 'none';
-      if(kw) kw.style.display = needsDistance(exFocus.value) ? '' : 'none';
+    main.querySelectorAll('[data-action="wp-time"]').forEach(function(el){
+      el.addEventListener('click', function(){
+        const date=el.getAttribute('data-date');
+        stashWorkout(date);
+        state.workoutTimeOpen=date;
+        persistRender();
+      });
+    });
+    main.querySelectorAll('[data-action="wp-focus"]').forEach(function(el){
+      el.addEventListener('click', function(){
+        const date=el.getAttribute('data-date');
+        stashWorkout(date);
+        state.workoutFocusOpen=date;
+        persistRender();
+      });
+    });
+    main.querySelectorAll('[data-action="wp-save"]').forEach(function(el){
+      el.addEventListener('click', function(){
+        const date=el.getAttribute('data-date');
+        const row=readWorkoutRow(date);
+        if(!row || row.day==null || isNaN(row.day)){ showAppMessage('Choose a day','Pick the day in that row.'); return; }
+        if(!row.start || !row.end){ showAppMessage('Set the time','Tap Time, then choose From and To.'); return; }
+        state.workoutAsk=row;
+        renderModal();
+      });
+    });
+    main.querySelectorAll('[data-wp="start"],[data-wp="end"]').forEach(function(el){
+      el.addEventListener('change', function(){
+        const tr=el.closest('tr');
+        if(!tr) return;
+        const date=tr.getAttribute('data-wp-row');
+        const start=(tr.querySelector('[data-wp="start"]')||{}).value||'';
+        const end=(tr.querySelector('[data-wp="end"]')||{}).value||'';
+        const cell=tr.querySelector('[data-wp-dur]');
+        if(cell) cell.textContent=workoutDurText(start, end);
+        stashWorkout(date);
+      });
     });
     main.querySelectorAll('[data-action="nudge-set"]').forEach(el=>{
       el.addEventListener('click', function(){
@@ -16998,7 +17056,10 @@ function wireView(){
     main.querySelectorAll('[data-habit-time]').forEach(function(el){
       el.addEventListener('change', function(){
         habitTimes();
-        state.habitTimes[el.getAttribute('data-habit-time')]=el.value;
+        const hk=el.getAttribute('data-habit-time');
+        if(!state.habitTimesUser) state.habitTimesUser={};
+        if(el.value){ state.habitTimesUser[hk]=true; state.habitTimes[hk]=el.value; }
+        else { state.habitTimesUser[hk]=false; delete state.habitTimes[hk]; }
         try{ saveState(); }catch(e){}
         try{ scheduleHabitPopupsSoon(); }catch(e){}
       });
@@ -17054,6 +17115,20 @@ function wireView(){
       }
       try{ saveState(); }catch(e){}
     });
+    function bindPodNum(id, key, lo, hi, fallback){
+      const el=document.getElementById(id);
+      if(!el) return;
+      el.addEventListener('change', function(){
+        let n=Math.round(Number(el.value)||fallback);
+        if(n<lo) n=lo; if(n>hi) n=hi;
+        if(!state.settings) state.settings={};
+        state.settings[key]=n;
+        try{ saveState(); }catch(e){}
+      });
+    }
+    bindPodNum('podShort','shortBreakMin',1,30,5);
+    bindPodNum('podLong','longBreakMin',5,60,15);
+    bindPodNum('podSessions','sessionsBeforeLong',2,8,4);
     main.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>switchTimerMode(b.dataset.mode)));
     const fpPlay=document.getElementById('fpPlaySound');
     if(fpPlay) fpPlay.addEventListener('click', ()=>{
@@ -18002,8 +18077,7 @@ if (typeof isNativeApp === 'function' && isNativeApp()) {
     if(!Array.isArray(state.rewardingRoutines)) state.rewardingRoutines=[];
     if(!Array.isArray(state.strategicPlans)) state.strategicPlans=[];
     if(!Array.isArray(state.flipScripts)) state.flipScripts=[];
-    if(!state.statsRangeStart){ const d=new Date(); d.setDate(d.getDate()-6); state.statsRangeStart=toDateStr(d); }
-    if(!state.statsRangeEnd) state.statsRangeEnd=todayStr();
+    applyStatsThisWeek();
   }
   if(state.settings.quoteOnLoad && state.lastQuoteShownDate!==todayStr()){
     state.lastQuoteShownDate=todayStr();
