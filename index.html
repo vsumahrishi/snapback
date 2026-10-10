@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="342">
+<meta name="snapback-build" content="344">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -2559,6 +2559,42 @@ function daysUntil(dateStr){
   const today=new Date(todayStr()+'T00:00:00');
   const due=new Date(dateStr+'T00:00:00');
   return Math.round((due-today)/86400000);
+}
+function carriedDays(t){
+  if(!t || t.done) return 0;
+  let n=Number(t.carried)||0;
+  if(t.date){
+    const late=-daysUntil(t.date);
+    if(late>0) n=Math.max(n, late);
+  }
+  return n>0 ? n : 0;
+}
+function noteDateMove(t, nextDate){
+  if(!t) return;
+  const old=String(t.date||'');
+  const next=String(nextDate||'');
+  if(old && next && next>old){
+    const gap=Math.round((new Date(next+'T00:00:00')-new Date(old+'T00:00:00'))/86400000);
+    if(gap>0) t.carried=(Number(t.carried)||0)+gap;
+  }
+}
+function slipMarkHtml(t){
+  const n=carriedDays(t);
+  if(!n) return '';
+  const deep=n>=3;
+  const color=deep?'#9a3412':'#b45309';
+  const bg=deep?'#ffedd5':'#fef3c7';
+  return `<button type="button" data-action="slip-help" data-id="${t.id}" title="Still open ${n} day${n===1?'':'s'}. Tap if you cannot start." style="border:1px solid ${color};background:${bg};color:${color};font-weight:800;border-radius:999px;padding:2px 8px;cursor:pointer;font-size:.78rem;line-height:1.2">! ${n}</button>`;
+}
+function setHardOne(id){
+  const t=findTask(id); if(!t) return;
+  if(t.frog){ t.frog=false; }
+  else {
+    (state.tasks||[]).forEach(function(x){ x.frog=false; });
+    t.frog=true;
+  }
+  try{ saveState(); }catch(e){}
+  persistRender();
 }
 function suggestTechnique(t){
   if(t.chunks && t.chunks.length>0) return {label:'Swiss cheese', fn:()=>goCheeseWithTask(t.id)};
@@ -5639,7 +5675,7 @@ function renderModal(){
     const hc=document.getElementById('habitAskClose'); if(hc) hc.onclick=function(){ dismissHabitAsk(); };
     return;
   }
-  if(state.exSavePopup || state.habitAddPopup){
+  if(state.exSavePopup || state.habitAddPopup || state.workoutAsk){
     root.innerHTML=schedulePopupHtml();
     wireSchedulePopup();
     return;
@@ -7932,7 +7968,7 @@ const SB_TOOLS = {
   focusPlate: {title:'Focus Plate', desc:'Cap today: 1 big, 3 medium, 5 small. When the plate is full, you are done.', ico:'🍽', nav:'rule135'},
   biteSize: {title:'Bite Size', desc:'Cut one scary task into tiny steps you can finish in a few minutes.', ico:'🍽', nav:'bitesize'},
   bugMe: {title:'Nudge', desc:'Opens the Nudge page. Set a time and a date or a day. It rings until you solve a short math problem.', ico:'⏰', nav:'nudge'},
-  startWizard: {title:'Start Wizard', desc:'Three quick questions to unstick “I do not know how to begin.”', ico:'🪄', action:'start-wizard'},
+  startWizard: {title:'Can’t start', desc:'A few short questions, then one tiny step.', ico:'🪄', action:'start-wizard'},
   spotlight: {title:'Spotlight', desc:'Opens Tasks and hides everything except 3 open tasks until you finish them.', ico:'🔦', action:'mode-spotlight'},
   smallBatch: {title:'Small Batch', desc:'Opens Tasks with only a set of 3. Finish them, then take the next set.', ico:'📦', action:'mode-batch'},
   oneAtATime: {title:'One at a time', desc:'One task on the whole screen. Nothing else to click.', ico:'1️⃣', action:'mode-one'},
@@ -7947,7 +7983,8 @@ const SB_TOOLS = {
   focusPod: {title:'Focus Pod', desc:'Short focus sprints with breaks — one block at a time.', ico:'🍅', nav:'timer'},
   bodyDouble: {title:'Body Doubling', desc:'A simple “work with structure” ritual when alone is hard.', ico:'👥', nav:'bodydouble'},
   eisenhower: {title:'This or That grid', desc:'Tap Urgent / Important on each task so it jumps to the right box (Do first / Schedule / Later).', ico:'▦', nav:'eisenhower'},
-  mustFrog: {title:'Must-do & Frog', desc:'Open Tasks, pick a task (or create one), then More → Must-do or Frog.', ico:'🐸', nav:'tasks'},
+  mustFrog: {title:'The hard one first', desc:'Mark the task you are avoiding. It sits first on Today. Do that one, then the rest feels easier.', ico:'🐸', action:'hard-first'},
+  stillHere: {title:'Still here', desc:'If a task slips to another day, it keeps one mark and the number of days. Tap the mark if you cannot start.', ico:'⏳', action:'still-here'},
   journal: {title:'Journal stickies', desc:'Catch thoughts as notes. File, do, or drop them later.', ico:'📒', nav:'journal'},
   schedule: {title:'Your Schedule', desc:'See the week as time blocks, not an endless list.', ico:'📅', nav:'calendar'},
   calendar: {title:'Calendar', desc:'Add classes and appointments once; they show on your week.', ico:'🎓', nav:'semester'},
@@ -7975,7 +8012,7 @@ const CHALLENGES = [
 ];
 
 const CHALLENGE_PATHS = {
-  cant_start: ['startWizard','ifThen','biteSize','bugMe','focusPlate','oneAtATime','grabBag'],
+  cant_start: ['mustFrog','startWizard','stillHere','ifThen','biteSize','bugMe','focusPlate','oneAtATime','grabBag'],
   too_much: ['brainDump','backburner','planAhead','spotlight','oneAtATime','focusPlate','eisenhower'],
   list_freeze: ['popPool','spinPick','tileWall','grabBag','oneAtATime'],
   bounce: ['topOfMind','timeOnTask','oneAtATime','focusPod','bodyDouble','today'],
@@ -9360,7 +9397,7 @@ function taskCard(t){
 
   // VIEW MODE — read-only text only; Edit is the only way to change fields
   return `<li class="taskcard ${t.done?'done':''}" style="${frogStyle};padding:14px" data-id="${t.id}">
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px"><div style="font-weight:700;font-size:1.05rem">${escapeHtml(t.title)}</div>${taskDateTag(t)}</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px"><div style="font-weight:700;font-size:1.05rem">${escapeHtml(t.title)}</div>${slipMarkHtml(t)}${taskDateTag(t)}</div>
     <div style="font-size:.88rem;color:var(--muted);margin-bottom:10px">
       ${t.date ? '📅 '+escapeHtml(t.date)+(t.time?' · '+escapeHtml(t.time):'') : 'No date set'}
       ${t.done?' · done':''}
@@ -9372,6 +9409,8 @@ function taskCard(t){
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
         <button type="button" class="btn sm" data-action="task-start" data-id="${t.id}">Start</button>
         <button type="button" class="btn sm" data-action="task-complete" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">Completed</button>
+        <button type="button" class="btn ghost sm" data-action="hard-one" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">${t.frog?'🐸 Hard one':'Hard one'}</button>
+        <button type="button" class="btn ghost sm" data-action="slip-help" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">Can’t start</button>
         <button type="button" class="btn ghost sm" data-action="start-task-edit" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">Edit</button>
       </div>
       <button type="button" class="btn ghost sm" data-action="quick-done" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">${t.done?'Undo done':'Done'}</button>
@@ -9417,6 +9456,7 @@ function viewTasks(){
   else if(f==='undated') list=list.filter(t=>!t.date && !t.done);
   else if(f==='must') list=list.filter(t=>t.tier==='must' && !t.done);
   else if(f==='frog') list=list.filter(t=>t.frog && !t.done);
+  if(state.listMode==='slipped') list=list.filter(t=>carriedDays(t)>0);
   else if(f==='all' || !f) list=list.filter(t=>!t.done); // completed hidden by default
   // hide backburner from main list unless filter says so
   if(f==='backburner') list=(state.tasks||[]).filter(t=>t.backburner && !t.done && !t.exerciseId);
@@ -9853,6 +9893,7 @@ function viewTasks(){
     </div>
     `}
   </div>
+  ${state.listMode==='slipped'?`<p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">These tasks have been waiting. The mark is how many days. Tap it, or tap Can’t start.</p>`:''}
   <ul class="tasklist">${modeBody||''}${items}</ul>
   `:''}
   `;
@@ -14027,40 +14068,49 @@ function readWorkoutRow(date){
     km: draft.km||''
   };
 }
-function applyWorkoutAsk(choice){
-  const a=state.workoutAsk;
-  if(!a) return;
+function upsertWorkout(a, mode){
   ensureHabitPlans();
+  const dayNum=Number(a.day);
+  const fields={
+    day: isNaN(dayNum) ? mondayIndex(new Date(String(a.date)+'T12:00:00')) : dayNum,
+    start: a.start||'',
+    end: a.end||'',
+    focus: a.focus||'',
+    details: a.details||'',
+    km: a.km||''
+  };
+  if(mode==='repeat'){
+    let row=null;
+    const seriesId=a.seriesId||((a.wasRepeat && a.planId)?a.planId:'');
+    if(seriesId) row=(state.exercisePlan||[]).find(function(r){ return String(r.id)===String(seriesId); });
+    if(!row){ row={id:uid()}; state.exercisePlan.push(row); }
+    Object.assign(row, fields);
+    row.onceDate='';
+    if(!row.from) row.from=a.date||todayStr();
+    if(row.to==null) row.to='';
+    if(a.savedId && String(a.savedId)!==String(row.id)){
+      state.exercisePlan=state.exercisePlan.filter(function(r){ return String(r.id)!==String(a.savedId); });
+    }
+    return row;
+  }
   let row=null;
-  if(choice==='no' && a.wasRepeat){
-    row={id:uid()};
-    state.exercisePlan.push(row);
+  if(a.wasRepeat){
+    row=(state.exercisePlan||[]).find(function(r){ return String(r.onceDate||'')===String(a.date) && String(r.id)!==String(a.planId||''); });
+    if(!row){ row={id:uid()}; state.exercisePlan.push(row); }
   } else if(a.planId){
     row=(state.exercisePlan||[]).find(function(r){ return String(r.id)===String(a.planId); });
   }
-  if(!row){
-    row={id:a.planId||uid()};
-    state.exercisePlan.push(row);
-  }
-  row.day=Number(a.day);
-  row.start=a.start||'';
-  row.end=a.end||'';
-  row.focus=a.focus||'';
-  row.details=a.details||'';
-  if(a.km) row.km=a.km;
-  if(choice==='yes'){
-    row.onceDate='';
-    if(!row.from) row.from=a.date;
-    if(row.to==null) row.to='';
-  } else if(choice==='no'){
-    row.onceDate=a.date;
-    row.from='';
-    row.to='';
-  } else if(!a.planId || !a.wasRepeat){
-    row.onceDate=a.date;
-    row.from='';
-    row.to='';
-  }
+  if(!row){ row={id:uid()}; state.exercisePlan.push(row); }
+  Object.assign(row, fields);
+  row.onceDate=a.date;
+  row.from='';
+  row.to='';
+  return row;
+}
+function applyWorkoutAsk(choice){
+  const a=state.workoutAsk;
+  if(!a) return;
+  if(choice==='yes') upsertWorkout(a, 'repeat');
   state.workoutAsk=null;
   state.workoutEdit='';
   state.workoutDraft=null;
@@ -15291,7 +15341,7 @@ function wireView(){
     });
     
     else if(action==='open-date-edit') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); state.editingTaskId=id; persistRender(); });
-    else if(action==='save-inline-date') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const t=findTask(id); if(!t) return; const inp=document.getElementById('inlineDate-'+id)||document.getElementById('editDateText-'+id); if(inp) t.date=(inp.value||'').trim(); state.editingTaskId=null; persistRender(); });
+    else if(action==='save-inline-date') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const t=findTask(id); if(!t) return; const inp=document.getElementById('inlineDate-'+id)||document.getElementById('editDateText-'+id); if(inp){ const nd=(inp.value||'').trim(); noteDateMove(t, nd); t.date=nd; } state.editingTaskId=null; persistRender(); });
     else if(action==='cancel-inline-date') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); state.editingTaskId=null; persistRender(); });
     else if(action==='clear-inline-date') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const t=findTask(id); if(t) t.date=''; persistRender(); });
     else if(action==='delete-chunk') el.addEventListener('click', (e)=>{
@@ -15348,6 +15398,8 @@ function wireView(){
       else t.done=false;
       persistRender();
     });
+    else if(action==='hard-one') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); setHardOne(id); });
+    else if(action==='slip-help') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); state.techniqueTaskId=id; openStartWizard(); });
     else if(action==='start-task-edit') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
       state.editingTaskId=id; state.taskMenuOpen=false; persistRender();
@@ -15372,7 +15424,9 @@ function wireView(){
         if(mo<1||mo>12||d<1||d>31){ showAppMessage('Check the date', 'Month or day looks wrong.'); return; }
         date=y+'-'+String(mo).padStart(2,'0')+'-'+String(d).padStart(2,'0');
       }
+      noteDateMove(t, date||'');
       t.date=date||'';
+      if(document.getElementById('editFrog-'+id)?.checked){ (state.tasks||[]).forEach(function(x){ if(String(x.id)!==String(t.id)) x.frog=false; }); }
       t.time=document.getElementById('editTime-'+id)?.value||'';
       t.priority=document.getElementById('editPri-'+id)?.value||t.priority;
       t.notes=document.getElementById('editNotes-'+id)?.value||'';
@@ -16132,6 +16186,8 @@ function wireView(){
       const p = paths[Number(el.dataset.idx)];
       if(!p) return;
       if(p.action==='challenge-home'){ state.challengeId=null; persistRender(); return; }
+      if(p.action==='hard-first'){ state.listMode='must-frog-pick'; state.filter='all'; navigateTo('tasks'); return; }
+      if(p.action==='still-here'){ state.listMode='slipped'; state.filter='all'; navigateTo('tasks'); return; }
       if(p.action==='start-wizard') openStartWizard();
       else if(p.action==='due-wizard') openDueWizard();
       else if(p.action==='plan-ahead'){ state.view='planAhead'; persistRender(); }
@@ -17068,12 +17124,31 @@ function wireView(){
         const date=el.getAttribute('data-date');
         const row=readWorkoutRow(date);
         const typed=row && (row.start || row.end || row.focus || String(row.details||'').trim());
-        if(!typed){
+        if(!row || !typed){
           showAppMessage('Nothing to save','Change one field, or tap Cancel.');
           return;
         }
-        state.workoutAsk=row;
-        renderModal();
+        const saved=upsertWorkout(row, 'once');
+        state.workoutAsk={
+          date: row.date,
+          day: row.day,
+          start: row.start,
+          end: row.end,
+          focus: row.focus,
+          details: row.details,
+          km: row.km||'',
+          planId: row.planId||'',
+          wasRepeat: !!row.wasRepeat,
+          seriesId: row.wasRepeat ? (row.planId||'') : '',
+          savedId: saved && saved.id
+        };
+        state.workoutEdit='';
+        state.workoutDraft=null;
+        state.workoutTimeOpen='';
+        state.workoutFocusOpen='';
+        syncExerciseLinks();
+        try{ saveState(); }catch(e){}
+        persistRender();
       });
     });
     main.querySelectorAll('[data-wp="start"],[data-wp="end"]').forEach(function(el){
