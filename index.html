@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="333">
+<meta name="snapback-build" content="337">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -3867,7 +3867,13 @@ function requestNotifyPermission(){
 /* ============================================================
    Quote modal
    ============================================================ */
-function allQuotes(){ return QUOTE_BANK.concat(state.settings.customQuotes||[]); }
+function allQuotes(){
+  const bank = QUOTE_BANK.concat(state.settings.customQuotes||[]);
+  if(typeof isStudentMode==='function' && !isStudentMode()){
+    return bank.filter(function(q){ return !/homework|flashcard|\bessay\b|practice exam|syllabus|\bcollege\b/i.test(String(q)); });
+  }
+  return bank;
+}
 function openQuote(){
   const q=allQuotes();
   state.quoteIndex=Math.floor(Math.random()*q.length);
@@ -3922,7 +3928,7 @@ function checkHabitNudges(now){
   function once(key, text, ask){
     if(state.notifiedKeys.indexOf(key)>=0) return;
     const onPhone=typeof isNativeApp==='function' && isNativeApp();
-    if(onPhone && document.hidden) return;
+    if(onPhone) return;
     state.notifiedKeys.push(key);
     changed=true;
     if(!document.hidden){ try{ cancelHabitNotif(key); }catch(e){} }
@@ -4136,12 +4142,13 @@ async function scheduleNativeNotification({key, title, body, when}){
     const { LocalNotifications } = window.Capacitor.Plugins;
     try {
       await LocalNotifications.createChannel({
-        id: 'snapback_reminders_v2',
-        name: 'SnapBack Nudge',
-        description: 'Nudge with sound',
+        id: 'snapback_reminders_v3',
+        name: 'SnapBack reminders',
+        description: 'Meetings, tasks, and classes',
         importance: 5,
         visibility: 1,
-        vibration: true
+        vibration: true,
+        sound: 'default'
       });
     } catch(e) {}
     const id = notifIdFromKey(key);
@@ -4152,7 +4159,10 @@ async function scheduleNativeNotification({key, title, body, when}){
         title: title || 'SnapBack',
         body: body || '',
         schedule: { at: at, allowWhileIdle: true },
-        channelId: 'snapback_reminders_v2',
+        channelId: 'snapback_reminders_v3',
+        sound: 'default',
+        group: 'sb-'+id,
+        groupSummary: false,
         smallIcon: 'ic_stat_icon',
         largeIcon: 'ic_launcher',
         actionTypeId: 'OPEN',
@@ -4538,21 +4548,48 @@ async function scheduleHabitPopups(){
   if(!LocalNotifications || !LocalNotifications.schedule) return;
   try{
     await LocalNotifications.createChannel({
-      id:'snapback_habit_v1',
+      id:'snapback_habit_v2',
       name:'SnapBack checks',
-      description:'A quiet check. Not an alarm.',
-      importance:4,
+      description:'A check with a short sound. Not the math alarm.',
+      importance:5,
       visibility:1,
-      vibration:false
+      vibration:true,
+      sound:'default'
     });
   }catch(e){}
   const items=habitPopupItems();
-  const ids=items.map(function(it){ return {id:notifIdFromKey('habit:'+it.key)}; });
-  const prev=window.__habitNotifIds||[];
-  try{ if(prev.length) await LocalNotifications.cancel({notifications:prev}); }catch(e){}
-  window.__habitNotifIds=ids;
   const future=items.filter(function(it){ return it.when.getTime()>Date.now()+4000; });
-  if(!future.length) return;
+  const futureIds=future.map(function(it){ return {id:notifIdFromKey('habit:'+it.key)}; });
+  let delivered={};
+  try{
+    if(LocalNotifications.getDeliveredNotifications){
+      const got=await LocalNotifications.getDeliveredNotifications();
+      ((got&&got.notifications)||[]).forEach(function(n){ if(n&&n.id!=null) delivered[Number(n.id)]=true; });
+    }
+  }catch(e){}
+  const keep={};
+  futureIds.forEach(function(n){ keep[n.id]=true; });
+  const prev=window.__habitNotifIds||[];
+  const cancel=[];
+  function queueCancel(id){
+    const n=Number(id);
+    if(!n || delivered[n]) return;
+    if(cancel.some(function(c){ return c.id===n; })) return;
+    cancel.push({id:n});
+  }
+  futureIds.forEach(function(n){ queueCancel(n.id); });
+  try{
+    if(LocalNotifications.getPending){
+      const p=await LocalNotifications.getPending();
+      ((p&&p.notifications)||[]).forEach(function(n){
+        if(!n || keep[Number(n.id)] || delivered[Number(n.id)]) return;
+        if(prev.some(function(x){ return Number(x.id)===Number(n.id); })) queueCancel(n.id);
+      });
+    }
+  }catch(e){}
+  try{ if(cancel.length) await LocalNotifications.cancel({notifications:cancel}); }catch(e){}
+  window.__habitNotifIds=futureIds;
+  if(!future.length){ try{ rebuildAllReminderSounds(); }catch(e){} return; }
   try{
     await LocalNotifications.schedule({
       notifications: future.map(function(it){
@@ -4563,13 +4600,17 @@ async function scheduleHabitPopups(){
           title: 'SnapBack',
           body: it.text,
           schedule: { at: it.when, allowWhileIdle: true },
-          channelId: 'snapback_habit_v1',
+          channelId: 'snapback_habit_v2',
+          sound: 'default',
+          group: 'sb-'+notifIdFromKey('habit:'+it.key),
+          groupSummary: false,
           extra: extra,
           autoCancel: true
         };
       })
     });
   }catch(e){ console.warn('habit schedule', e); }
+  try{ rebuildAllReminderSounds(); }catch(e2){}
 }
 function cancelHabitNotif(key){
   if(typeof isNativeApp!=='function' || !isNativeApp() || !key) return;
@@ -4593,6 +4634,7 @@ function openHabitFromNotif(extra){
   const text=extra.text||'';
   if(extra.mode==='note'){
     if(alreadyAsked(key)) return;
+    try{ cancelHabitNotif(key); }catch(e){}
     if(!state.notifiedKeys) state.notifiedKeys=[];
     if(key) state.notifiedKeys.push(key);
     fireQuietReminder(text);
@@ -4816,8 +4858,9 @@ async function ensureNativeNotifListeners(){
       try{
         const note = (n && n.notification) || n || {};
         const key = (note.extra && note.extra.key) || (n && n.extra && n.extra.key) || '';
-        const title = note.title || '';
-        return String(key).indexOf('wake')===0 || /Nudge/i.test(title);
+        const k = String(key);
+        if(k.indexOf('wake-class')===0 || k.indexOf('wake-block')===0 || k.indexOf('wake-task')===0 || k.indexOf('wake-sched')===0) return false;
+        return k.indexOf('wake')===0;
       }catch(e){ return false; }
     }
     await LocalNotifications.addListener('localNotificationReceived', function(n){
@@ -4988,6 +5031,8 @@ async function scheduleNativeWakeAlarms(){
       schedule:{ at:d, allowWhileIdle:true },
       channelId:'snapback_nudge_v2',
       sound:'default',
+      group:'sb-'+(900001+offset),
+      groupSummary:false,
       smallIcon:'ic_stat_icon',
       extra:{ key:'wake-'+toDateStr(d) },
       autoCancel:false,
@@ -4998,6 +5043,58 @@ async function scheduleNativeWakeAlarms(){
   if(!list.length) return 0;
   try{ await LocalNotifications.schedule({ notifications: list }); }catch(e){ return 0; }
   return scheduled;
+}
+
+function rebuildAllReminderSounds(){
+  if(typeof isNativeApp!=='function' || !isNativeApp()) return;
+  let plug=null;
+  try{ plug=window.Capacitor&&window.Capacitor.Plugins&&window.Capacitor.Plugins.NudgeAlarm; }catch(e){}
+  if(!plug || typeof plug.replacePings!=='function') return;
+  const items=[];
+  function add(key, body, when){
+    const at=when instanceof Date ? when.getTime() : new Date(when).getTime();
+    if(!at || at<=Date.now()+1500) return;
+    items.push({key:String(key||''), title:'SnapBack', body:String(body||'').slice(0,140), at:at});
+  }
+  for(let offset=0; offset<14; offset++){
+    const d=new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()+offset);
+    const ds=toDateStr(d);
+    const dow=mondayIndex(d);
+    (state.classes||[]).forEach(function(c){
+      let applies=false;
+      if(c.scope==='session') applies=c.date===ds;
+      else applies=Number(c.day)===dow;
+      if(!applies || !c.start) return;
+      const mins=(c.alarmMinutes!=null)?Number(c.alarmMinutes):15;
+      if(!(mins>0)) return;
+      const parts=String(c.start||'09:00').split(':').map(Number);
+      const startAt=new Date(ds+'T00:00:00'); startAt.setHours(parts[0]||0, parts[1]||0, 0, 0);
+      add('class:'+c.id+':'+ds, (c.title||'Class')+' in '+mins+' min', new Date(startAt.getTime()-mins*60000));
+    });
+    (state.studyBlocks||[]).forEach(function(b){
+      if(b.date!==ds || !b.start) return;
+      const mins=(b.alarmMinutes!=null)?Number(b.alarmMinutes):0;
+      if(!(mins>0)) return;
+      const parts=String(b.start).split(':').map(Number);
+      const startAt=new Date(ds+'T00:00:00'); startAt.setHours(parts[0]||0, parts[1]||0, 0, 0);
+      add('block:'+b.id, (b.label||'Appointment')+' in '+mins+' min', new Date(startAt.getTime()-mins*60000));
+    });
+  }
+  (state.tasks||[]).filter(function(t){ return !t.done && t.date && (t.reminderLeads||[]).length; }).forEach(function(t){
+    const rt=t.reminderTime||t.time||'08:00';
+    (t.reminderLeads||[]).forEach(function(daysBefore){
+      const d=new Date(t.date+'T12:00:00');
+      d.setDate(d.getDate()-daysBefore);
+      const parts=String(rt).split(':').map(Number);
+      d.setHours(parts[0]||9, parts[1]||0, 0, 0);
+      add('task:'+t.id+':'+daysBefore, t.title, d);
+    });
+  });
+  try{
+    habitPopupItems().forEach(function(it){ add('habit:'+it.key, it.text, it.when); });
+  }catch(e){}
+  items.sort(function(a,b){ return a.at-b.at; });
+  plug.replacePings({ items: JSON.stringify(items.slice(0, 48)) }).catch(function(){});
 }
 
 async function syncNativeClassReminders(){
@@ -5050,7 +5147,7 @@ async function syncNativeClassReminders(){
       d.setHours(hh||9,mm||0,0,0);
       scheduleNativeNotification({
         key:'wake-task-'+t.id+'-'+daysBefore,
-        title: 'Nudge',
+        title: 'SnapBack',
         body:t.title,
         when:d
       });
@@ -5061,8 +5158,9 @@ async function syncNativeClassReminders(){
   if(nn && nn.remindAt){
     const [hh,mm]=nn.remindAt.split(':').map(Number);
     const when=new Date(); when.setHours(hh,mm,0,0);
-    scheduleNativeNotification({key:'nn-'+todayStr(), title:'Non-negotiable', body:nn.text, when});
+    scheduleNativeNotification({key:'nn-'+todayStr(), title:'SnapBack', body:nn.text, when});
   }
+  try{ rebuildAllReminderSounds(); }catch(e){}
 }
 
 function checkNotifications(){
@@ -5081,9 +5179,12 @@ function checkNotifications(){
     }
     state.notifiedKeys.push(key);
     changed=true;
-    if(!state.wakeMathOpen){
-      try{ triggerWakeMath('notification', note); }catch(e){}
-    }
+    try{ playReminderChime(); }catch(e){}
+    try{
+      if(!(typeof isNativeApp==='function' && isNativeApp()) && typeof Notification!=='undefined' && Notification.permission==='granted'){
+        new Notification('SnapBack', {body:note});
+      }
+    }catch(e){}
   }
 
   state.tasks.filter(t=>!t.done && t.date && (t.reminderLeads||[]).length).forEach(t=>{
@@ -5175,7 +5276,7 @@ function L(key){
     newTaskSchool: student ? 'School / College' : 'Work',
     ctxSchool: student ? 'School / College' : 'Work',
     semesterEyebrow: student ? 'Your class timetable' : 'Your weekly timetable',
-    studyTools: student ? 'Study Tools' : 'Focus tools',
+    studyTools: student ? 'Study Tools' : 'Work tools',
     justToday: student ? 'Just today. Not the whole semester.' : 'Just today. Not the whole year.',
   };
   return map[key] != null ? map[key] : key;
@@ -7560,7 +7661,7 @@ const TOUR_STEPS = [
   { title: 'Focus Pod', body: 'A timer for one focus block. On that screen, choose a soundscape type, set volume, then <b>Play sound</b>. Session-end beeps are under Settings → Sounds & notifications (timers).', view: 'timer' },
   { title: 'Body Doubling', body: 'Choose one style — Focus Sprint, Guided Cave, or Group Flow — then a task and a goal. The timer walks you through the phases.', view: 'bodydouble' },
   { title: 'Projects & calendar', body: 'Projects break big work into phases. Calendar holds classes and commitments. You can share busy/free times with a link when needed.', view: 'projects' },
-  { title: 'Nudge', body: 'Nudge is its own page in the side menu, not inside Settings. Set a time and a date or a day. It rings until you solve a short math problem. On a task, choose Nudge me. On a class, tick Nudge me 15 minutes before.', view: 'nudge' },
+  { title: 'Nudge', body: 'Nudge is its own page in the side menu, not inside Settings. Set a time and a date or a day. It rings until you solve a short math problem. On a task, choose Nudge me. On a commitment, tick Nudge me 15 minutes before.', view: 'nudge' },
   { title: 'Settings', body: 'Your profile, Google sign-in, and backup. Timer sounds are under Sounds & notifications (timers). Those are not the Nudge sound.', view: 'settings' },
   { title: 'You are set', body: 'Explore at your own pace. Re-open this tour anytime from <b>Settings → Take a tour</b>.', view: 'today' }
 ];
@@ -8861,7 +8962,7 @@ function renderDueWizard(root){
     root.innerHTML=cardStart+`
       <div class="qeyebrow">Find the real date</div>
       <div style="font-weight:800;margin-bottom:8px">Do not plan until the date is real.</div>
-      <p style="font-size:.9rem;line-height:1.45">Open the course page, the email, or the syllabus. Find the due date. Put it here. That is the whole job for this minute.</p>
+      <p style="font-size:.9rem;line-height:1.45">${isStudentMode()?'Open the course page, the email, or the syllabus. Find the due date. Put it here. That is the whole job for this minute.':'Open the email or the page where the date was set. Find the due date. Put it here. That is the whole job for this minute.'}</p>
       <div class="field"><label>Real due date</label><input type="date" id="dueRealDate" value="${escapeHtml((t&&t.date)||'')}"></div>
       <button class="btn" id="dueSaveDate" type="button" style="width:100%;margin-top:8px">Save this date</button>
     `+cardEnd;
@@ -8877,7 +8978,7 @@ function renderDueWizard(root){
       <div style="display:flex;flex-direction:column;gap:8px">
         <button class="btn ghost dueCh" data-c="rough" type="button" style="text-align:left">Hand in a rough, unfinished version</button>
         <button class="btn ghost dueCh" data-c="fifteen" type="button" style="text-align:left">Do 15 minutes of a messy draft, no editing</button>
-        <button class="btn ghost dueCh" data-c="rules" type="button" style="text-align:left">Check the late penalty or if one assignment is dropped</button>
+        <button class="btn ghost dueCh" data-c="rules" type="button" style="text-align:left">${isStudentMode()?'Check the late penalty or if one assignment is dropped':'Check what happens if this is late'}</button>
         <button class="btn ghost dueCh" data-c="ask" type="button" style="text-align:left">Ask for a short extension before I disappear</button>
       </div>
     `+cardEnd;
@@ -8896,7 +8997,7 @@ function renderDueWizard(root){
         <button class="btn ghost dueFu" data-c="early" type="button" style="text-align:left">Put a hard stop 2 days before the real date</button>
         <button class="btn ghost dueFu" data-c="body" type="button" style="text-align:left">Work beside someone, not alone</button>
         <button class="btn ghost dueFu" data-c="micro" type="button" style="text-align:left">Turn it into one tiny step</button>
-        <button class="btn ghost dueFu" data-c="office" type="button" style="text-align:left">See if the college allows flexible deadlines</button>
+        <button class="btn ghost dueFu" data-c="office" type="button" style="text-align:left">${isStudentMode()?'See if the college allows flexible deadlines':'See if the date can move'}</button>
       </div>
     `+cardEnd;
     document.getElementById('dueClose').onclick=dueWizardClose;
@@ -8921,13 +9022,13 @@ function renderDueWizard(root){
   } else if(w.choice==='rules'){
     inner=`<div class="qeyebrow">The actual rule</div>
       <div style="font-weight:800;margin-bottom:8px">Panic shrinks when the penalty is a number.</div>
-      <p style="font-size:.9rem">Open the syllabus or the course page. Look for a late penalty, a grace day, or “lowest score dropped.” Write what you find.</p>
-      <textarea id="dueRuleNote" rows="3" placeholder="Example: 10% off per day, or one assignment dropped" style="width:100%"></textarea>
+      <p style="font-size:.9rem">${isStudentMode()?'Open the syllabus or the course page. Look for a late penalty, a grace day, or “lowest score dropped.” Write what you find.':'Look up what happens if this is late. A fee, a closed door, or nothing. Write what you find.'}</p>
+      <textarea id="dueRuleNote" rows="3" placeholder="${isStudentMode()?'Example: 10% off per day, or one assignment dropped':'Example: no fee if I send it by Friday'}" style="width:100%"></textarea>
       <button class="btn" id="dueRuleSave" type="button" style="width:100%;margin-top:8px">Save what the rule says</button>`;
   } else if(w.choice==='ask'){
     inner=`<div class="qeyebrow">Ask before the silence</div>
       <div style="font-weight:800;margin-bottom:8px">Ask for a specific time. Not “whenever.”</div>
-      <div class="field"><label>Course</label><input id="dueCourse" placeholder="Course name"></div>
+      <div class="field"><label>${isStudentMode()?'Course':'What it is'}</label><input id="dueCourse" placeholder="${isStudentMode()?'Course name':'Name of the task'}"></div>
       <div class="field"><label>I can send it by</label><input type="date" id="dueProposed" value="${escapeHtml(proposedDefault)}"></div>
       <div class="field"><label>Your name</label><input id="dueName" placeholder="Name"></div>
       <textarea id="dueLetter" rows="8" style="width:100%;margin-top:8px" placeholder="The note appears here"></textarea>
@@ -8941,17 +9042,22 @@ function renderDueWizard(root){
   } else if(w.choice==='body'){
     inner=`<div class="qeyebrow">Do not do this alone</div>
       <div style="font-weight:800;margin-bottom:8px">Another person in the room makes starting easier.</div>
-      <p style="font-size:.9rem">Sit with a friend, a classmate, or a busy café. Or open Body Doubling here and pick a short sprint. You do not have to explain the whole assignment.</p>
+      <p style="font-size:.9rem">${isStudentMode()?'Sit with a friend, a classmate, or a busy café. Or open Body Doubling here and pick a short sprint. You do not have to explain the whole assignment.':'Sit with a friend, or in a busy café. Or open Body Doubling here and pick a short sprint. You do not have to explain the whole task.'}</p>
       <button class="btn" id="dueBody" type="button" style="width:100%">Open Body Doubling</button>`;
   } else if(w.choice==='micro'){
     inner=`<div class="qeyebrow">One tiny step</div>
-      <div style="font-weight:800;margin-bottom:8px">Do not write “work on the paper.”</div>
-      <p style="font-size:.9rem">Write one action you can finish in a few minutes. Example: open the file, or find three sources. Bite Size will hold that list.</p>
+      <div style="font-weight:800;margin-bottom:8px">${isStudentMode()?'Do not write “work on the paper.”':'Do not write “work on the whole thing.”'}</div>
+      <p style="font-size:.9rem">${isStudentMode()?'Write one action you can finish in a few minutes. Example: open the file, or find three sources. Bite Size will hold that list.':'Write one action you can finish in a few minutes. Example: open the file, or write the first line. Bite Size will hold that list.'}</p>
       <button class="btn" id="dueMicro" type="button" style="width:100%">Open Bite Size for this task</button>`;
   } else if(w.choice==='office'){
-    inner=`<div class="qeyebrow">A formal safety net</div>
+    inner=isStudentMode()
+      ? `<div class="qeyebrow">A formal safety net</div>
       <div style="font-weight:800;margin-bottom:8px">Some colleges allow flexible deadlines for ADHD.</div>
       <p style="font-size:.9rem">That is a support, not a confession. If you are registered with the disability or accessibility office, you can ask what “flexible deadline” means in this course. If you are not registered, the office can tell you how to start. You do not have to decide today.</p>
+      <button class="btn" id="dueOfficeDone" type="button" style="width:100%">I know what to check</button>`
+      : `<div class="qeyebrow">Can the date move?</div>
+      <div style="font-weight:800;margin-bottom:8px">Ask the person who set the date.</div>
+      <p style="font-size:.9rem">A boss, a client, or a family plan. Ask what “late” actually means, and whether a new date is possible. You do not have to decide today.</p>
       <button class="btn" id="dueOfficeDone" type="button" style="width:100%">I know what to check</button>`;
   } else {
     inner='<p>Choose a step again.</p><button class="btn" id="dueBackSit" type="button">Back</button>';
@@ -12609,13 +12715,13 @@ function viewSemester(){
     <div class="eyebrow">${L('semesterEyebrow')}</div>
     <p style="margin-top:8px"><button type="button" class="btn sm" id="shareFreeBusyBtn2" data-share-calendar="1">Share Calendar</button></p>
     <h1>Calendar</h1>
-    <p>Your master schedule — classes, study, workouts, appointments. Everything appears on Your Schedule. Use Quick add for several items, or Add to schedule for one item with more detail.</p>
+    <p>${isStudentMode()?'Your master schedule — classes, study, workouts, appointments. Everything appears on Your Schedule. Use Quick add for several items, or Add to schedule for one item with more detail.':'Your week — work, workouts, and appointments. Everything appears on Your Schedule. Use Quick add for several items, or Add to schedule for one item with more detail.'}</p>
   </div>
 
   <div class="card" style="background:var(--pine-soft);border-color:var(--pine)">
     <h3 style="margin:0 0 6px">Quick add (paste or type)</h3>
     <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">
-      Put several things at once — classes, gym, study, anything.<br>
+      Put several things at once — ${isStudentMode()?'classes, gym, study, anything.':'meetings, gym, errands, anything.'}<br>
       <b>Option 1:</b> Upload a screenshot of a schedule.<br>
       <b>Option 2:</b> Paste from Excel/Notion, or type lines like <i>Bio Mon 8:30</i> or <i>Gym Tue 3 to 5</i>.<br>
       Prefer one item with more detail? Use <b>Add to schedule</b> below.
@@ -13012,23 +13118,23 @@ function viewProjectWizard(){
       ${isStudentMode()?`<label style="margin-top:12px">Class</label>
       <select id="projExistClass"><option value="">— None —</option>${classes.map(c=>`<option value="${c.id}">${escapeHtml(c.title)}</option>`).join('')}</select>`:''}
       <label style="margin-top:12px">Or Other (type a title)</label>
-      <input id="projExistOther" placeholder="e.g. Biology Chapter 4 project">
-      <button class="btn" data-action="proj-exist-continue" style="margin-top:14px;width:100%">Continue → Academic or Non-academic</button>
+      <input id="projExistOther" placeholder="${isStudentMode()?'e.g. Biology Chapter 4 project':'e.g. Kitchen refresh'}">
+      <button class="btn" data-action="proj-exist-continue" style="margin-top:14px;width:100%">${isStudentMode()?'Continue → Academic or Non-academic':'Continue'}</button>
     </div>`;
   }
   if(w.step==='kind'){
     return `<div class="pagehead">
       <button class="btn ghost sm" data-action="proj-wiz-back" style="margin-bottom:8px">← Back</button>
-      <h1>Academic or non-academic?</h1>
+      <h1>${isStudentMode()?'Academic or non-academic?':'What kind of project?'}</h1>
       <p>${w.title?('Project: <b>'+escapeHtml(w.title)+'</b>'):'Choose the kind of guide you need.'}</p>
     </div>
     <div style="display:grid;gap:12px">
       <button class="card" data-action="proj-kind" data-kind="academic" style="text-align:left;cursor:pointer;border:2px solid #1F497D;background:#eef3f9">
-        <div style="font-weight:800;color:#1F497D">Academic</div>
+        <div style="font-weight:800;color:#1F497D">${isStudentMode()?'Academic':'A structured project'}</div>
         <div style="font-size:.88rem;color:var(--muted);margin-top:4px">Sciences, liberal arts, commerce, engineering — milestones + deadline budget.</div>
       </button>
       <button class="card" data-action="proj-kind" data-kind="non_academic" style="text-align:left;cursor:pointer;border:2px solid #2d6a4f;background:#eef8f2">
-        <div style="font-weight:800;color:#2d6a4f">Non-academic</div>
+        <div style="font-weight:800;color:#2d6a4f">${isStudentMode()?'Non-academic':'Something I am making'}</div>
         <div style="font-size:.88rem;color:var(--muted);margin-top:4px">Portfolio, side hustle, community, passion — MVP → ship → post-mortem.</div>
       </button>
     </div>`;
@@ -13056,7 +13162,7 @@ function viewProjectWizard(){
   if(w.step==='stream'){
     return `<div class="pagehead">
       <button class="btn ghost sm" data-action="proj-wiz-back" style="margin-bottom:8px">← Back</button>
-      <h1>${w.kind==='academic'?'Academic stream':'Project goal'}</h1>
+      <h1>${w.kind==='academic'?(isStudentMode()?'Academic stream':'Type of work'):'Project goal'}</h1>
     </div>
     <div style="display:grid;gap:10px">${Object.keys(streams).map(k=>{
       const s=streams[k];
@@ -13078,7 +13184,7 @@ function viewProjectWizard(){
   </div>
   <div class="card">
     <label>Project title</label>
-    <input id="projTitle" placeholder="e.g. Enzyme activity lab" value="${escapeHtml(w.title||'')}">
+    <input id="projTitle" placeholder="${isStudentMode()?'e.g. Enzyme activity lab':'e.g. Client proposal'}" value="${escapeHtml(w.title||'')}">
     <label style="margin-top:12px">Subject / focus</label>
     <select id="projSubject">${(s.subjects||['Other']).map(x=>`<option value="${escapeHtml(x)}" ${w.subject===x?'selected':''}>${escapeHtml(x)}</option>`).join('')}</select>
     <div id="projSubjectOtherWrap" style="margin-top:8px;${w.subject==='Other'?'':'display:none'}"><input id="projSubjectOther" placeholder="Type your subject" value="${escapeHtml(w.subjectOther||'')}"></div>
@@ -13086,8 +13192,8 @@ function viewProjectWizard(){
     <input type="date" id="projDeadline" value="${escapeHtml(w.deadline||'')}">
     <label style="margin-top:12px">Link a task (optional)</label>
     <select id="projLinkTask"><option value="">— None —</option>${tasks.map(x=>`<option value="${x.id}" ${w.linkTaskId===x.id?'selected':''}>${escapeHtml(x.title)}</option>`).join('')}</select>
-    <label style="margin-top:12px">Link a class (optional)</label>
-    <select id="projLinkClass"><option value="">— None —</option>${classes.map(c=>`<option value="${c.id}" ${w.linkClassId===c.id?'selected':''}>${escapeHtml(c.title)}</option>`).join('')}</select>
+    ${isStudentMode()?`<label style="margin-top:12px">Link a class (optional)</label>
+    <select id="projLinkClass"><option value="">— None —</option>${classes.map(c=>`<option value="${c.id}" ${w.linkClassId===c.id?'selected':''}>${escapeHtml(c.title)}</option>`).join('')}</select>`:''}
     <button class="btn" data-action="proj-generate" style="margin-top:16px;width:100%">Generate my guide</button>
   </div>`;
 }
@@ -14132,19 +14238,6 @@ const STUDY_TOOLS=[
 /* ============================================================
    VIEW: Help & FAQ
    ============================================================ */
-const ORG_CARDS=[
-  {ico:'&#9737;', name:'Today', benefit:'Helps you: answer "what now?" without scrolling through your whole backlog.', how:['Shows your one non-negotiable, plus Must-do vs Could-do','Flags what\'s due soon so nothing sneaks up'], id:'today'},
-  {ico:'&#9776;', name:'Tasks', benefit:'Helps you: keep every assignment in one place instead of scattered notes and memory.', how:['Add a title, date, and priority','Tag Must-do, or Frog if you\'re dreading it'], id:'tasks'},
-  {ico:'&#128197;', name:'Calendar', benefit:'Helps you: see a packed week coming before it\'s too late to plan around it.', how:['Classes, deadlines, and study blocks, color-coded','Export it into your phone\'s real calendar app'], id:'calendar'},
-  {ico:'&#9200;', name:'Nudge', benefit:'Helps you: get up or start, because it rings until you stop it.', how:['Open Nudge from the side menu','Set a time and a date or a day, then Save Nudge'], id:'nudge'},
-  {ico:'&#128176;', name:'Money', benefit:'Helps you: notice spending patterns before they become a real problem.', how:['Log what you spend or earn as it happens','Check the monthly summary and category breakdown'], id:'money'},
-  {ico:'&#127807;', name:'Healthy Habits', benefit:'Helps you: spot the connection between rough days and bad sleep, no food, or too much scrolling.', how:['Log exercise (what you did), sleep hours, screen time','Takes 10 seconds a day'], id:'habits'},
-  {ico:'&#128202;', name:'Stats', benefit:'Helps you: actually see progress instead of just feeling behind.', how:['Pick a date range','See what got done vs. left out, and how habits/money looked'], id:'stats'},
-  {ico:'&#129504;', name:'Mind Maps', benefit:'Helps you: get the shape of a new topic before drowning in the details.', how:['Start with the topic in the middle','Branch off any bubble, click into it to rename'], id:'mindmaps'},
-  {ico:'&#128218;', name:'Study Tools', benefit:'Helps you: skip the "what\'s the best flashcard app" search — these are already picked.', how:['Organized by what you\'re trying to do','Flashcards, quizzes, posters, citations, more'], id:'studytools'},
-  {ico:'&#127925;', name:'Soundscape', benefit:'Helps you: drown out a noisy room without hunting for the right playlist.', how:['Pick a colored noise or a nature sound','Or link your own music — it opens alongside your session'], id:'soundscape'},
-  {ico:'&#9881;', name:'Settings', benefit:'Helps you: make the app match how you work, not a one-size-fits-all default.', how:['Change timer lengths, sounds, notifications'], id:'settings'}
-];
 const TECH_CARDS=[
   {ico:'&#9210;', name:'Focus Pod', when:'Use when: you just need to start', desc:'Work for one timed sprint, then take a short break. Repeat.', how:['Pick a task, hit Start','Work until it chimes, then break'], id:'timer'},
   {ico:'&#127869;', name:'Bite Size', when:'Use when: a task feels too big to start', desc:'Take small bites instead of trying to eat the whole thing at once. Food-themed progress makes it fun.', how:['Add tiny steps, or hit Smart Breakdown','Check them off in any order'], id:'bitesize'},
@@ -14153,15 +14246,36 @@ const TECH_CARDS=[
   {ico:'&#127860;', name:'Focus Plate', when:'Use when: your to-do list is overwhelming', desc:'A hard ceiling: 1 big thing, 3 medium things, 5 small things — nothing else counts today.', how:['Fill in the 1/3/5 slots','Ignore everything else until they\'re done'], id:'rule135'},
   {ico:'&#128101;', name:'Body Doubling', when:'Use when: you can\'t make yourself start alone', desc:'A structured "working alongside someone" session — declare a goal, work, check out.', how:['Pick a session style','Set a goal, then start the timer'], id:'bodydouble'}
 ];
-const FAQ_ITEMS=[
-  {q:'I may miss a due date. What do I do?', a:'Challenges → I am afraid I will miss a due date → Deadline helper. It asks where you are, then offers one step: a rough version, 15 minutes with no editing, the late-penalty rule, a short extension note with a specific date, an earlier hard stop, working beside someone, one tiny step, or checking whether the college allows flexible deadlines.'},
+/* ============================================================
+   VIEW: Help & FAQ
+   ============================================================ */
+function orgCards(){
+  const student=isStudentMode();
+  return [
+  {ico:'&#9737;', name:'Today', benefit:'Helps you: answer "what now?" without scrolling through your whole list.', how:['Shows your one non-negotiable, plus Must-do vs Could-do','Flags what is due soon so nothing sneaks up'], id:'today'},
+  {ico:'&#9776;', name:'Tasks', benefit:student?'Helps you: keep every assignment in one place instead of scattered notes and memory.':'Helps you: keep every task in one place instead of scattered notes and memory.', how:['Add a title, date, and priority','Tag Must-do, or Frog if you are dreading it'], id:'tasks'},
+  {ico:'&#128197;', name:'Calendar', benefit:'Helps you: see a packed week coming before it is too late to plan around it.', how:[student?'Classes, deadlines, and study blocks, color-coded':'Commitments, deadlines, and appointments, color-coded','Export it into your phone\'s real calendar app'], id:'calendar'},
+  {ico:'&#9200;', name:'Nudge', benefit:'Helps you: get up or start, because it rings until you stop it.', how:['Open Nudge from the side menu','Set a time and a date or a day, then Save Nudge'], id:'nudge'},
+  {ico:'&#128176;', name:'Money', benefit:'Helps you: notice spending patterns before they become a real problem.', how:['Log what you spend or earn as it happens','Check the monthly summary and category breakdown'], id:'money'},
+  {ico:'&#127807;', name:'Healthy Habits', benefit:'Helps you: spot the connection between rough days and bad sleep, no food, or too much scrolling.', how:['Log exercise, sleep hours, and screen time','Takes a few seconds a day'], id:'habits'},
+  {ico:'&#128202;', name:'Stats', benefit:'Helps you: see the counts for the dates you pick.', how:['Pick a from date and a to date','See focus sessions and habit counts together'], id:'stats'},
+  {ico:'&#128218;', name:L('studyTools'), benefit:student?'Helps you: open a study tool without searching. Mind maps are in this page.':'Helps you: open a work tool without searching. Mind maps are in this page.', how:student?['Mind maps, flashcards, notes, quizzes, posters, citations']:['Mind maps, notes, reading, and posters'], id:'studytools'},
+  {ico:'&#127925;', name:'Soundscape', benefit:'Helps you: drown out a noisy room without hunting for the right playlist.', how:['Pick a colored noise or a nature sound','Or link your own music — it opens alongside your session'], id:'soundscape'},
+  {ico:'&#9881;', name:'Settings', benefit:'Helps you: make the app match how you work.', how:['Change timer lengths, sounds, and notifications','Choose I am a student, or Not a student'], id:'settings'}
+  ];
+}
+function faqItems(){
+  const student=isStudentMode();
+  return [
+  {q:student?'I may miss a due date. What do I do?':'I may miss a date. What do I do?', a:student?'Challenges → I am afraid I will miss a due date → Deadline helper. It asks where you are, then offers one step: a rough version, 15 minutes with no editing, the late-penalty rule, a short extension note with a specific date, an earlier hard stop, working beside someone, one tiny step, or checking whether the college allows flexible deadlines.':'Challenges → I am afraid I will miss a due date → Deadline helper. It asks where you are, then offers one step: a rough version, 15 minutes with no editing, what happens if it is late, a short note with a new date, an earlier hard stop, working beside someone, one tiny step, or asking if the date can move.'},
   {q:'What is Must-do?', a:'A task that should happen today. Several tasks can be Must-do. They show on Today under Must do. To set one: open the task, tap More, then Move to Must-do. Or open Challenges → Must-do & Frog, choose a task you already created, and tap Mark as Must-do.'},
   {q:'What is a Frog?', a:'The one task to do first. “Eat the frog” means start with the hardest or most important item so the rest feels easier. Only one task should be the Frog. A task can be both Must-do and the Frog: it belongs today, and you start with it. To set one: open the task, tap More, then Mark as Frog. Or open Challenges → Must-do & Frog, choose the task, and tap Mark as Frog or Must-do + Frog.'},
   {q:'What is a Non-negotiable?', a:'The one thing on Focus Plate that you will not drop today, even if the rest of the plate slips. It is not the same as Frog. Frog is which task you start with. Non-negotiable is the one you refuse to skip.'},
   {q:'What is Backburner?', a:'A place to park a task you are not doing today. It is not deleted. From Challenges → Everything feels like too much → Backburner, choose an existing task and tap Move to Backburner.'},
   {q:'Will I lose my work?', a:'Sign in with Google and your work is kept. You can also download a backup file from Settings → Backup.'},
-  {q:'Break a big assignment into steps', a:'Open Bite Size from Challenges or Techniques. Choose the task. The text fills in. Add small steps, or use Ask AI. Keep a step under about 15 minutes.'}
-];
+  {q:student?'Break a big assignment into steps':'Break a big task into steps', a:'Open Bite Size from Challenges or Techniques. Choose the task. The text fills in. Add small steps, or use Ask AI. Keep a step under about 15 minutes.'}
+  ];
+}
 
 /* ============================================================
    VIEW: When-Then Rules
@@ -14200,11 +14314,13 @@ function viewWhenThen(){
   </div>
 
   <div class="card" style="background:var(--pine-soft);border:none">
-    <h3 style="margin:0 0 6px">Examples that work for students</h3>
+    <h3 style="margin:0 0 6px">${isStudentMode()?'Examples that work for students':'Examples'}</h3>
     <ul style="margin:0;padding-left:18px;font-size:.88rem;color:var(--muted)">
-      <li>When I finish the first page of my English paper, then I will get a coffee.</li>
+      ${isStudentMode()?`<li>When I finish the first page of my English paper, then I will get a coffee.</li>
       <li>When I have chosen a topic for my term paper, then I will play for 30 minutes.</li>
-      <li>When I finish reading this chapter, then I will tidy my desk.</li>
+      <li>When I finish reading this chapter, then I will tidy my desk.</li>`:`<li>When I finish the first email, then I will get a coffee.</li>
+      <li>When I have written the first line of the task, then I will step outside for 10 minutes.</li>
+      <li>When I finish the appointment prep, then I will tidy my desk.</li>`}
     </ul>
   </div>`;
 }
@@ -14293,7 +14409,7 @@ function viewFlipScript(){
     {from:"I can't do it.", to:"Once I start, it won't be so bad. I'm feeling tired and a little stressed. Let me take a deep breath."},
     {from:"I can't pay attention right now.", to:"I notice I'm thinking it's too late to start. That's a thought I have a lot. But I can do this for 30 minutes."},
     {from:"It's going to suck.", to:"It'll feel great to finish this. Then after I nail down my topic, I'll play for 30 minutes."},
-    {from:"I have more time to do it later.", to:"Thinking about the whole paper is making me feel gross. I'll break it down and just re-read the assignment first."},
+    {from:"I have more time to do it later.", to: isStudentMode() ? "Thinking about the whole paper is making me feel gross. I'll break it down and just re-read the assignment first." : "Thinking about the whole task is making me feel stuck. I'll do the first small step only."},
     {from:"I'll feel like doing it later.", to:"Good plan — go me! This won't be as bad as I thought. I'm being nice to the Me of the Future."}
   ];
   const custom = state.flipScripts || [];
@@ -14362,7 +14478,7 @@ function viewHelp(){
       <p>Phone: install the SnapBack app. Sign in with the same Gmail on the phone and on the laptop. A username stays on that one device only.</p>
     </details>
     <details class="faqitem"><summary>Set Nudge</summary>
-      <p>Open Nudge in the side menu. Set a time and a date or a day, then Save Nudge. A short math problem stops it. On a task, choose Nudge me: that morning, the day before, or not at all. On a class, tick Nudge me 15 minutes before.</p>
+      <p>Open Nudge in the side menu. Set a time and a date or a day, then Save Nudge. A short math problem stops it. On a task, choose Nudge me: that morning, the day before, or not at all. On a ${isStudentMode()?'class':'commitment'}, tick Nudge me 15 minutes before.</p>
     </details>
     <details class="faqitem"><summary>Turn on notifications on the phone</summary>
       <p>This is in the phone’s own Settings, not inside SnapBack.</p>
@@ -14386,11 +14502,11 @@ function viewHelp(){
     <details class="faqitem"><summary>See my week</summary>
       <p>Plan → Schedule. Use Day, Week, Columns, or Month. Tap an event to edit it. Tap Add on a day, or a time in Day view, to create one.</p>
     </details>
-    <details class="faqitem"><summary>Add many classes at once</summary>
+    <details class="faqitem"><summary>${isStudentMode()?'Add many classes at once':'Add many commitments at once'}</summary>
       <p>Plan → Schedule → Quick add. Type lines, paste a timetable, or upload a screenshot, then Read screenshot. Edit the text. Tap Check what I read, then Yes — save. Cancel adds nothing.</p>
     </details>
   `)}
-  ${helpBox('parts','About each page', ORG_CARDS.map(c=>`<div class="techcard">
+  ${helpBox('parts','About each page', orgCards().map(c=>`<div class="techcard">
       <div class="tc-head"><span class="tc-ico">${c.ico}</span><div class="tc-name">${c.name}</div></div>
       <p style="color:var(--pine);font-weight:600">${c.benefit}</p>
       <p>${c.how.map(h=>'&#8226; '+h).join('<br>')}</p>
@@ -14402,13 +14518,13 @@ function viewHelp(){
       <p>${c.how.map(h=>'&#8226; '+h).join('<br>')}</p>
       <button class="btn ghost sm" data-action="help-goto" data-id="${c.id}">Try it</button>
     </div>`).join(''))}
-  ${helpBox('faq','Common questions', FAQ_ITEMS.map(f=>`<details class="faqitem"><summary>${f.q}</summary><p>${f.a}</p></details>`).join(''))}
+  ${helpBox('faq','Common questions', faqItems().map(f=>`<details class="faqitem"><summary>${f.q}</summary><p>${f.a}</p></details>`).join(''))}
   `;
 }
 
 function viewStudyTools(){
   if(!state.studyToolOpen) state.studyToolOpen = {};
-  const cats = isStudentMode() ? STUDY_TOOLS : STUDY_TOOLS.filter(function(c){ return /Notes|Reading|Posters/.test(c.category); });
+  const cats = isStudentMode() ? STUDY_TOOLS : STUDY_TOOLS.filter(function(c){ return /Mind maps|Notes|Reading|Posters/.test(c.category); });
   return `
   <div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><h1>${isStudentMode()?'Study Tools':'Work tools'}</h1></div>
   ${cats.map((cat,ci)=>{
@@ -14418,7 +14534,7 @@ function viewStudyTools(){
       <span style="font-weight:800">${escapeHtml(cat.category)}</span>
       <span style="color:var(--muted);flex-shrink:0">${open?'▾':'▸'}</span>
     </button>
-    ${open?`<div style="padding:0 16px 14px">${cat.tools.map(tool=>`<div class="deadline-row">
+    ${open?`<div style="padding:0 16px 14px">${/Mind maps/.test(cat.category)?`<div class="deadline-row"><span style="flex:1"><b>SnapBack mind map</b><div style="font-size:.78rem;color:var(--muted)">Draw it here. It stays in this app.</div></span><button class="btn ghost sm" data-action="help-goto" data-id="mindmaps">Open</button></div>`:''}${cat.tools.map(tool=>`<div class="deadline-row">
       <span style="flex:1"><b>${escapeHtml(tool.name)}</b><div style="font-size:.78rem;color:var(--muted)">${escapeHtml(tool.desc)}</div></span>
       <a href="${tool.url}" target="_blank" rel="noopener"><button class="btn ghost sm">Open &#8599;</button></a>
     </div>`).join('')}</div>`:''}
