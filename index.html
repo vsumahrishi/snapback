@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="350">
+<meta name="snapback-build" content="351">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -11805,47 +11805,42 @@ function viewCalendar(){
     const tday=todayStr();
     state.calRef=tday;
     state.selectedDay=tday;
-    state.calMode='week';
+    state.calMode='month';
     if(!state.schedOpen) state.schedOpen={};
     state.schedOpen.glance=true;
     calendarBrowsing=true;
   }
-  let mode=state.calMode||'week';
-  if(mode==='list') mode='week';
-  const look=state.calLook==='dots'?'dots':'times';
+  let mode=state.calMode||'month';
+  if(mode==='week') mode='list';
   const ref=new Date((state.calRef||todayStr())+'T00:00:00');
   let body='';
-  if(look==='dots'){
-    if(mode==='day') body=calAgendaHtml(state.selectedDay||toDateStr(ref));
-    else if(mode==='week') body=calDotsWeekHtml(ref);
-    else body=calDotsMonthHtml(ref);
-  }else if(mode==='day'){
+  if(mode==='day'){
     const ds=state.selectedDay||toDateStr(ref);
-    const d=new Date(ds+'T00:00:00');
-    const names=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    body=calTimeGridHtml([{ds:ds, label:names[d.getDay()]+' '+d.getDate()}]);
-  }else if(mode==='month'){
-    const year=ref.getFullYear(), month=ref.getMonth();
-    const first=new Date(year,month,1);
-    const startOffset=mondayIndex(first);
-    const gridStart=new Date(first); gridStart.setDate(first.getDate()-startOffset);
-    const cells=[];
-    for(let i=0;i<42;i++){
-      const d=new Date(gridStart); d.setDate(gridStart.getDate()+i);
-      const ds=toDateStr(d);
-      const items=itemsForDate(ds);
-      const otherMonth = d.getMonth()!==month;
-      const isToday = ds===todayStr();
-      const isSel = ds===state.selectedDay;
-      const lines=items.slice(0,3).map(function(it){
-        return '<div style="font-size:.62rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:3px solid '+it.color+';padding-left:3px;margin-top:2px">'+escapeHtml(it.label)+'</div>';
-      }).join('');
-      const more=items.length>3?'<div style="font-size:.62rem;color:var(--muted)">+'+(items.length-3)+'</div>':'';
-      cells.push('<div class="daycell '+(otherMonth?'otherMonth ':'')+(isToday?'today ':'')+(isSel?'selected':'')+'" data-day="'+ds+'"><div class="daynum">'+d.getDate()+'</div>'+lines+more+'</div>');
+    const items=itemsForDate(ds);
+    const untimed=items.filter(function(it){ return !it.time; });
+    const hours=[];
+    if(untimed.length) hours.push('<div style="margin-bottom:8px">'+untimed.map(function(it){ return calEventButton(it); }).join('')+'</div>');
+    for(let h=7;h<=21;h++){
+      const hh=String(h).padStart(2,'0')+':00';
+      const at=items.filter(function(it){ return (it.time||'').slice(0,2)===String(h).padStart(2,'0'); });
+      hours.push('<div style="display:flex;gap:8px;border-top:1px solid var(--line);padding:6px 0"><button type="button" class="btn ghost sm" data-action="cal-new" data-date="'+ds+'" data-time="'+hh+'" style="width:84px">'+hh+'</button><div style="flex:1">'+(at.map(function(it){ return calEventButton(it); }).join('')||'<span style="color:var(--muted);font-size:.8rem">Empty</span>')+'</div></div>');
     }
-    body='<div class="monthgrid" style="margin-bottom:4px">'+['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(function(d){ return '<div class="dowhead">'+d+'</div>'; }).join('')+'</div><div class="monthgrid">'+cells.join('')+'</div>';
+    body='<div style="font-weight:800;margin-bottom:8px">'+ds+'</div>'+hours.join('');
+  } else if(mode==='list'){
+    const dow=mondayIndex(ref);
+    const monday=new Date(ref); monday.setDate(ref.getDate()-dow);
+    const dayNames=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+    const sections=[];
+    for(let i=0;i<7;i++){
+      const d=new Date(monday); d.setDate(monday.getDate()+i);
+      const ds=toDateStr(d);
+      const items=itemsForDate(ds).slice().sort(function(a,b){ return (a.time||'').localeCompare(b.time||''); });
+      const isToday=ds===todayStr();
+      sections.push('<div style="margin-bottom:18px"><div style="background:var(--grey-soft);border-radius:10px;padding:8px 12px;font-weight:700;font-size:.95rem;margin-bottom:8px;'+(isToday?'border:2px solid var(--pine)':'')+'">'+dayNames[i]+(isToday?' · Today':'')+' <span style="font-weight:500;color:var(--muted);font-size:.82rem;margin-left:6px">'+d.toLocaleDateString(undefined,{month:'short',day:'numeric'})+'</span></div>'+items.map(function(it){ return calEventButton(it); }).join('')+'<button type="button" class="btn ghost sm" data-action="cal-new" data-date="'+ds+'" style="margin-top:6px">Add on this day</button></div>');
+    }
+    body=sections.join('');
   }else{
-    body=calTimeGridHtml(calWeekDays(ref));
+    body=calDotsMonthHtml(ref);
   }
   const selItems=itemsForDate(state.selectedDay);
   return `
@@ -11853,7 +11848,7 @@ function viewCalendar(){
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Week &amp; month at a glance</div>
     <h1>Your Schedule</h1>
-    <p>${look==='dots'?'Dots mark the days that have something. Tap a day and that day’s list opens.':'Times puts each item on the hour it belongs to. Tap an empty hour to add. Tap an item to change it.'}</p>
+    <p>Month shows a dot on each day that has something. Tap a day and that day’s list opens. Day and Week show the names.</p>
   </div>
   <div class="card" style="padding:14px 16px;margin-bottom:10px">
     <div style="font-weight:700;margin-bottom:6px">Find an event</div>
@@ -11864,15 +11859,13 @@ function viewCalendar(){
   ${schedBox('glance','Quick glance', `
   <div class="calnav">
       <button class="btn ghost sm" id="calPrev">&larr;</button>
-      <div style="font-weight:700">${mode==='day'?(state.selectedDay||state.calRef):(mode==='month'?ref.toLocaleDateString(undefined,{month:'long',year:'numeric'}):('Week of '+state.calRef))}</div>
+      <div style="font-weight:700">${mode==='day'?(state.selectedDay||state.calRef):(mode==='list'?('Week of '+state.calRef):ref.toLocaleDateString(undefined,{month:'long',year:'numeric'}))}</div>
       <button class="btn ghost sm" id="calNext">&rarr;</button>
       <button class="btn ghost sm" id="calToday">Today</button>
       <div class="spacer"></div>
       <button class="btn ${mode==='day'?'':'ghost'} sm" id="calModeDay">Day</button>
-      <button class="btn ${mode==='week'?'':'ghost'} sm" id="calModeWeek">Week</button>
-      <button class="btn ${mode==='month'?'':'ghost'} sm" id="calModeMonth">Month</button>
-      <button class="btn ${look==='times'?'':'ghost'} sm" id="calLookTimes">Times</button>
-      <button class="btn ${look==='dots'?'':'ghost'} sm" id="calLookDots">Dots</button>
+      <button class="btn ${mode==='list'?'':'ghost'} sm" id="calModeWeek">Week</button>
+      <button class="btn ${mode==='month'||mode==='dots'?'':'ghost'} sm" id="calModeMonth">Month</button>
     </div>
     ${body}
     <div class="legend">
@@ -12807,12 +12800,25 @@ function startHoldTalk(area, statusEl, kind){
   _talkKind = kind || '';
   _talkPartial = '';
   _talkTranscript = '';
+  _talkFatal = false;
+  _talkTries = 0;
   _talkOnText = function(text, fin, err){
     if(err){
-      if(!_talkHeld && (err==='aborted' || err===5 || err===7)) return;
-      if(statusEl) statusEl.textContent = (err==='not-allowed' || err===9)
-        ? 'Microphone is blocked. Allow it for this site, then click Hold and speak again.'
-        : 'Could not hear that. Click Hold and speak and try again, or type it.';
+      if(err==='no-speech' || err==='aborted' || err===5 || err===7) return;
+      if(err==='not-allowed' || err===9 || err==='service-not-allowed'){
+        _talkFatal = true;
+        if(statusEl) statusEl.textContent = 'Microphone is blocked. Click the lock icon beside the address, allow the microphone for this site, then click Hold and speak again.';
+        return;
+      }
+      if((err==='network' || err==='language-not-supported') && _talkTries<2 && _talkRec){
+        _talkTries++;
+        _talkRec.lang = 'en-US';
+        _talkRec.continuous = false;
+        try{ _talkRec.start(); if(statusEl) statusEl.textContent = 'Listening… speak now. Click Done speaking when you finish.'; }catch(e){}
+        return;
+      }
+      _talkFatal = true;
+      if(statusEl) statusEl.textContent = 'Speech did not start. Use Chrome or Edge, stay online, allow the microphone, then click Hold and speak once.';
       return;
     }
     if(!text) return;
@@ -12841,11 +12847,13 @@ function startHoldTalk(area, statusEl, kind){
     if(statusEl) statusEl.textContent = 'This browser cannot hear speech. Use Chrome or Edge, or type it instead.';
     return;
   }
-  try{ if(_talkRec){ _talkRec.onend=null; _talkRec.abort(); } }catch(e){}
+  try{ if(_talkRec){ _talkRec.onend=null; _talkRec.onerror=null; _talkRec.onresult=null; _talkRec.abort(); } }catch(e){}
   const rec = new SR();
-  rec.lang = navigator.language || 'en-US';
-  rec.continuous = true;
+  const lang = (navigator.language && String(navigator.language).indexOf('en')===0) ? navigator.language : 'en-US';
+  rec.lang = lang;
+  rec.continuous = false;
   rec.interimResults = true;
+  rec.maxAlternatives = 1;
   rec.onresult = function(ev){
     let interim = '';
     for(let i = ev.resultIndex; i < ev.results.length; i++){
@@ -12855,11 +12863,11 @@ function startHoldTalk(area, statusEl, kind){
     }
     if(interim) _talkOnText(interim, false, 0);
   };
-  rec.onerror = function(e){ if(_talkOnText) _talkOnText('', false, e && e.error); };
+  rec.onerror = function(e){ if(_talkOnText) _talkOnText('', false, (e && e.error) || ''); };
   rec.onend = function(){
     if(_talkPartial && _talkOnText) _talkOnText(_talkPartial, true, 0);
-    if(_talkClickMode && _talkHeld){
-      try{ rec.start(); }catch(e){}
+    if(_talkClickMode && _talkHeld && !_talkFatal){
+      setTimeout(function(){ try{ if(_talkHeld && !_talkFatal) rec.start(); }catch(e){} }, 300);
     }
   };
   _talkRec = rec;
@@ -12874,12 +12882,15 @@ function stopHoldTalk(area, statusEl){
   const was = _talkHeld;
   _talkHeld = false;
   _talkClickMode = false;
+  _talkFatal = true;
   const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
   if(plug && plug.stopListen){ try{ plug.stopListen(); }catch(e){} }
   try{ if(_talkRec){ _talkRec.onend=null; _talkRec.stop(); } }catch(e){}
   if(was) finishHeard(area, statusEl);
 }
 let _talkClickMode = false;
+let _talkFatal = false;
+let _talkTries = 0;
 function wireHoldTalk(btnId, areaId, statusId){
   const btn = document.getElementById(btnId);
   const area = document.getElementById(areaId);
@@ -12890,7 +12901,6 @@ function wireHoldTalk(btnId, areaId, statusId){
   btn.addEventListener('contextmenu', function(e){ e.preventDefault(); });
   const down = function(e){
     if(e.pointerType === 'mouse' && e.button !== 0) return;
-    e.preventDefault();
     if(btn.dataset.talkClick==='1'){
       btn.dataset.talkClick='';
       btn.dataset.justStopped='1';
@@ -17371,9 +17381,9 @@ function wireView(){
     const todayBtn=document.getElementById('calToday');
     if(todayBtn) todayBtn.addEventListener('click', ()=>{ calendarBrowsing=false; state.calRef=todayStr(); state.selectedDay=todayStr(); state.calNote=''; persistRender(); });
     const monthBtn=document.getElementById('calModeMonth');
-    if(monthBtn) monthBtn.addEventListener('click', ()=>{ state.calMode='month'; persistRender(); });
+    if(monthBtn) monthBtn.addEventListener('click', ()=>{ state.calMode='month'; state.calLook='dots'; persistRender(); });
     const weekBtn=document.getElementById('calModeWeek');
-    if(weekBtn) weekBtn.addEventListener('click', ()=>{ state.calMode='week'; persistRender(); });
+    if(weekBtn) weekBtn.addEventListener('click', ()=>{ state.calMode='list'; persistRender(); });
     const dayBtn=document.getElementById('calModeDay'); if(dayBtn) dayBtn.addEventListener('click', ()=>{ state.calMode='day'; if(!state.selectedDay) state.selectedDay=todayStr(); state.calRef=state.selectedDay; persistRender(); });
     const listBtn=document.getElementById('calModeList'); if(listBtn) listBtn.addEventListener('click', ()=>{ state.calMode='list'; persistRender(); });
     main.querySelectorAll('[data-action="cal-new"]').forEach(btn=>btn.addEventListener('click', (e)=>{
