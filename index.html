@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="344">
+<meta name="snapback-build" content="349">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -3526,7 +3526,11 @@ function addHabit(){
   const track=document.getElementById('newHabitTrack')?!!document.getElementById('newHabitTrack').checked:true;
   const time=(document.getElementById('newHabitTime')&&document.getElementById('newHabitTime').value)||'18:00';
   const dow=mondayIndex(new Date());
-  state.habitAddPopup={step:'pick', name:name, remind:remind, track:track, time:time, onceDate:todayStr(), from:todayStr(), to:'', days:[dow], err:''};
+  const voice=state.habitVoice||null;
+  state.habitVoice=null;
+  state.habitAddPopup={step:'pick', name:name, remind:remind, track:track, time:time, onceDate:(voice&&voice.date)||todayStr(), from:(voice&&voice.from)||todayStr(), to:(voice&&voice.to)||'', days:(voice&&voice.days&&voice.days.length)?voice.days:[dow], err:''};
+  if(voice&&voice.mode==='once') state.habitAddPopup.step='date';
+  else if(voice&&voice.mode==='repeat') state.habitAddPopup.step='repeat';
   renderModal();
 }
 function customHabitAdminHtml(){
@@ -5526,7 +5530,7 @@ function restoreMainFields(snap){
     if(!n) return;
     if(n.value!==f.value) n.value=f.value;
   });
-  const blocked=!!(state.appMsg||state.focusFinish||state.dayPop||state.wakeMathOpen||state.nudgePreview||state.pickTom||state.pickTimer||state.focusPodAsk||state.workSession||state.seriesAsk||state.appPrompt||state.quoteModalOpen||(state.tour&&state.tour.open));
+  const blocked=!!(state.appMsg||state.focusFinish||state.dayPop||state.wakeMathOpen||state.nudgePreview||state.pickTom||state.pickTimer||state.pickStill||state.focusPodAsk||state.workSession||state.seriesAsk||state.appPrompt||state.quoteModalOpen||(state.tour&&state.tour.open));
   if(blocked || !snap.focusId) return;
   const n=document.getElementById(snap.focusId);
   if(!n || n.disabled) return;
@@ -5782,9 +5786,39 @@ function renderModal(){
     return;
   }
 
+  // Still here — pick one open task and start it
+  if(state.pickStill){
+    const open=(state.tasks||[]).filter(function(t){ return !t.done && !t.backburner && !t.exerciseId; });
+    open.sort(function(a,b){ return carriedDays(b)-carriedDays(a); });
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:440px;text-align:left;max-height:90vh;overflow:auto">
+      <div class="qeyebrow">Still here</div>
+      <div style="font-weight:800;font-size:1.15rem;margin-bottom:8px">Pick one thing that is still open</div>
+      <p style="font-size:.9rem;color:var(--muted);margin:0 0 12px">Choose one. Then a few short questions, and one small way to start. Workouts are not on this list.</p>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${open.length?open.map(function(t){
+          const n=carriedDays(t);
+          const mark=n?('<span style="font-weight:700;color:var(--amber)"> · '+n+' day'+(n===1?'':'s')+'</span>'):'';
+          return '<button type="button" class="btn ghost" data-still-id="'+t.id+'" style="text-align:left">'+escapeHtml(t.title)+mark+'</button>';
+        }).join(''):'<div class="empty">Nothing is waiting. When you add a task, it will show up here.</div>'}
+      </div>
+      <button class="btn ghost sm" id="stillCancel" style="margin-top:12px;width:100%">Close</button>
+    </div></div>`;
+    root.querySelectorAll('[data-still-id]').forEach(function(btn){
+      btn.onclick=function(){
+        const id=btn.getAttribute('data-still-id');
+        state.pickStill=false;
+        state.techniqueTaskId=id;
+        openStartWizard();
+      };
+    });
+    const cancel=document.getElementById('stillCancel');
+    if(cancel) cancel.onclick=function(){ state.pickStill=false; persistRender(); };
+    return;
+  }
+
   // Pick Top of Mind / Timer task
   if(state.pickTom || state.pickTimer){
-    const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner);
+    const open=(state.tasks||[]).filter(t=>!t.done && !t.backburner && !t.exerciseId);
     const kind = state.pickTom ? 'tom' : 'timer';
     root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:420px;text-align:left">
       <div class="qeyebrow">${kind==='tom'?'Top of Mind':'Time on task'}</div>
@@ -6038,6 +6072,7 @@ function renderModal(){
     </div></div>`;
     document.getElementById('dayClose').onclick=closeDayPop;
     const cds=document.getElementById('calDraftSave'); if(cds) cds.onclick=saveCalDraftFromForm;
+    try{ wireHoldTalk('calHold','calDraftTitle','calVoiceStatus'); }catch(e){}
     const cdc=document.getElementById('calDraftCancel'); if(cdc) cdc.onclick=function(){
       state.calDraft=null;
       const left=itemsForDate(ds);
@@ -6080,7 +6115,7 @@ function renderModal(){
     const w = state.wizard;
     const task = w.taskId ? findTask(w.taskId) : null;
     if(w.step==='pick-task'){
-      const open = (state.tasks||[]).filter(x=>!x.done && !x.backburner);
+      const open = (state.tasks||[]).filter(x=>!x.done && !x.backburner && !x.exerciseId);
       root.innerHTML=`<div class="overlay" id="wizOverlay"><div class="quotecard" style="max-width:440px;text-align:left;max-height:90vh;overflow:auto">
         <div class="qeyebrow">Start Wizard</div>
         <div style="font-weight:800;font-size:1.15rem;margin-bottom:8px">What are we starting?</div>
@@ -6556,7 +6591,7 @@ function closePhoneBackLayer(){
   }
   if(state.taskMenuOpen){ try{ closeTaskMenu(); }catch(e){} return true; }
   if(state.editingTaskId){ state.editingTaskId=null; persistRender(); return true; }
-  if(state.pickTom || state.pickTimer || state.focusPodAsk){ state.pickTom=null; state.pickTimer=null; state.focusPodAsk=null; persistRender(); return true; }
+  if(state.pickTom || state.pickTimer || state.focusPodAsk || state.pickStill){ state.pickTom=null; state.pickTimer=null; state.focusPodAsk=null; state.pickStill=null; persistRender(); return true; }
   if(state.view==='challenges' && state.challengeId){ state.challengeId=null; persistRender(); return true; }
   return false;
 }
@@ -7984,7 +8019,7 @@ const SB_TOOLS = {
   bodyDouble: {title:'Body Doubling', desc:'A simple “work with structure” ritual when alone is hard.', ico:'👥', nav:'bodydouble'},
   eisenhower: {title:'This or That grid', desc:'Tap Urgent / Important on each task so it jumps to the right box (Do first / Schedule / Later).', ico:'▦', nav:'eisenhower'},
   mustFrog: {title:'The hard one first', desc:'Mark the task you are avoiding. It sits first on Today. Do that one, then the rest feels easier.', ico:'🐸', action:'hard-first'},
-  stillHere: {title:'Still here', desc:'If a task slips to another day, it keeps one mark and the number of days. Tap the mark if you cannot start.', ico:'⏳', action:'still-here'},
+  stillHere: {title:'Still here', desc:'Open tasks that are still waiting. Pick one, and SnapBack helps you start it.', ico:'⏳', action:'still-here'},
   journal: {title:'Journal stickies', desc:'Catch thoughts as notes. File, do, or drop them later.', ico:'📒', nav:'journal'},
   schedule: {title:'Your Schedule', desc:'See the week as time blocks, not an endless list.', ico:'📅', nav:'calendar'},
   calendar: {title:'Calendar', desc:'Add classes and appointments once; they show on your week.', ico:'🎓', nav:'semester'},
@@ -9440,6 +9475,7 @@ function tasksViewToolbar(){
 }
 
 function viewTasks(){
+  try{ syncExerciseLinks(); }catch(e){}
   if(state.tasksPanel === 'done') state.filter = 'done';
   else if(state.tasksPanel === 'open'){
     if(state.filter === 'done') state.filter = 'all';
@@ -9807,6 +9843,8 @@ function viewTasks(){
   ${tasksPanelOpen('add')?`<div class="card" style="margin-bottom:12px">
     <h3 style="margin:0 0 10px">New task</h3>
     <div class="field"><label>Title</label><input id="newTitle" placeholder="What needs doing?"></div>
+    <button type="button" class="btn" id="taskHold" data-voice="task" style="touch-action:none;user-select:none;margin-top:8px">Hold and speak</button>
+    <div id="taskVoiceStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0 0">Hold the button and say the whole task: what it is, the day, the time, and any choice such as priority or a nudge. Then check the form. Nothing is saved yet.</div>
     <div class="row" style="margin-top:10px">
       <div class="field"><label>Due date</label><input id="newDate" type="date" value="${todayStr()}"></div>
       <div class="field"><label>Time</label><input id="newTime" type="time"></div>
@@ -10112,8 +10150,8 @@ function itemsForDate(dateStr){
     if(show && Array.isArray(c.exdates) && c.exdates.indexOf(dateStr)>=0) show=false;
     if(show) items.push({type:'class', kind:'class', id:c.id, color:'var(--blue)', time:c.start, end:c.end||'', label:c.title+(c.room?' · '+c.room:''), meetingUrl:c.meetingUrl, seriesId:c.seriesId||'', source:c.source||''});
   });
-  state.tasks.filter(t=>t.date===dateStr).forEach(t=>items.push({type:'task', kind:'task', id:t.id, color: t.priority==='high'?'var(--brick)':t.priority==='medium'?'var(--amber)':'var(--pine)',time:t.time||'',label:t.title,meetingUrl:t.meetingUrl}));
-  state.tasks.filter(t=>t.startDate===dateStr && t.startDate!==t.date).forEach(t=>items.push({type:'taskstart', kind:'task', id:t.id, color:'var(--blue-soft)',time:t.startTime||'',label:t.title,meetingUrl:t.meetingUrl}));
+  state.tasks.filter(t=>t.date===dateStr && !t.exerciseId).forEach(t=>items.push({type:'task', kind:'task', id:t.id, color: t.priority==='high'?'var(--brick)':t.priority==='medium'?'var(--amber)':'var(--pine)',time:t.time||'',label:t.title,meetingUrl:t.meetingUrl}));
+  state.tasks.filter(t=>t.startDate===dateStr && t.startDate!==t.date && !t.exerciseId).forEach(t=>items.push({type:'taskstart', kind:'task', id:t.id, color:'var(--blue-soft)',time:t.startTime||'',label:t.title,meetingUrl:t.meetingUrl}));
   state.studyBlocks.filter(b=>b.date===dateStr).forEach(b=>items.push({type:'block', kind:'block', id:b.id, color:'var(--purple)', time:b.start, end:b.end||'', label:b.label, meetingUrl:b.meetingUrl, seriesId:b.seriesId||'', source:b.source||''}));
   (state.externalBusy||[]).forEach(ev=>{
     if(ev.date!==dateStr) return;
@@ -10121,6 +10159,10 @@ function itemsForDate(dateStr){
     items.push({type:'external', kind:'external', id:ev.id, color:'var(--blue)',time:ev.allDay?'':(ev.start||''),end:ev.allDay?'':(ev.end||''),label:(ev.title||'Busy'),meetingUrl:''});
   });
   if(state.nonNegotiable[dateStr]) items.push({type:'nn',color:'var(--gold)',time:'',label:'★ '+state.nonNegotiable[dateStr].text});
+  (state.exercisePlan||[]).forEach(function(r){
+    if(typeof exerciseOccursOn==='function' && !exerciseOccursOn(r, dateStr)) return;
+    items.push({type:'exercise', kind:'exercise', id:r.id, color:'var(--pine)', time:r.start||'', end:r.end||'', label:exerciseTaskTitle(r)});
+  });
   const seen={};
   const ranked=items.slice().sort(function(a,b){
     const ka=(meetingKey(a.label||'')||'')+'|'+String(a.time||'').slice(0,5);
@@ -10147,6 +10189,8 @@ function itemsForDate(dateStr){
     const k=normExTitle(it.label||'');
     if(!k || !planTitles[k]){ out.push(it); return; }
     if(best[k]==null){ best[k]=out.length; out.push(it); return; }
+    if(it.kind==='exercise' && out[best[k]].kind!=='exercise'){ out[best[k]]=it; return; }
+    if(out[best[k]].kind==='exercise') return;
     if(String(it.time||'')>=String(out[best[k]].time||'')) out[best[k]]=it;
   });
   return out.sort((a,b)=>(a.time||'').localeCompare(b.time||''));
@@ -11067,6 +11111,8 @@ function calDraftCard(){
   if(!d) return '';
   return `<div>
     <div class="field"><label>Name</label><input id="calDraftTitle" value="${escapeHtml(d.title||'')}" placeholder="Class, meeting, gym…"></div>
+    <button type="button" class="btn" id="calHold" data-voice="event" style="touch-action:none;user-select:none;margin-top:8px">Hold and speak</button>
+    <div id="calVoiceStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0 0">Hold the button and say the whole appointment: name, day, start, end, place, and whether it repeats. Then check the form. Nothing is saved yet.</div>
     <div class="row" style="margin-top:8px">
       <div class="field"><label>Date</label><input type="date" id="calDraftDate" value="${escapeHtml(d.date||todayStr())}"></div>
       <div class="field"><label>Start</label><input type="time" id="calDraftStart" value="${escapeHtml(d.start||'09:00')}"></div>
@@ -11512,6 +11558,8 @@ function viewNudge(){
     <div id="nudgeNowClock" style="font-size:2.1rem;font-weight:800;margin:2px 0 10px">${nowClock}</div>
     <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${escapeHtml(timeVal)}"></div>
     <div class="field" style="margin-top:8px"><label>Name (optional)</label><input id="wakeName" maxlength="80" placeholder="Example: Pack laptop charger" value="${escapeHtml((editing&&editing.name)||(draft&&draft.name)||'')}"></div>
+    <button type="button" class="btn" id="wakeHold" data-voice="nudge" style="touch-action:none;user-select:none;margin-top:8px">Hold and speak</button>
+    <div id="wakeVoiceStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0 0">Hold the button and say the whole Nudge: name, time, one time or repeat, the date or days, silent or regular, and math or no math. Then check the form. Nothing is saved yet.</div>
     <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">The clock above is the time now. The time you set is when this Nudge should ring.</p>
     <div style="margin-top:12px;font-weight:700">When</div>
     <label style="display:flex;align-items:center;margin-top:8px"><input type="radio" name="wakeWhen" value="once" ${savedRepeat?'':'checked'}> One time</label>
@@ -11624,7 +11672,98 @@ function scheduleMatchesHtml(q){
     </div>`;
   }).join('');
 }
+
+function calDurText(mins){
+  const h=Math.floor(mins/60), m=mins%60;
+  if(h && m) return h+'h '+m+'m';
+  if(h) return h+'h';
+  return m+'m';
+}
+function layoutCalDay(items, startMin, endMin){
+  const untimed=[], blocks=[];
+  (items||[]).forEach(function(it){
+    const s0=calMinutes(it.time);
+    if(s0==null){ untimed.push(it); return; }
+    let s=s0, e=calMinutes(it.end);
+    if(e==null || e<=s) e=s+60;
+    if(e<=startMin || s>=endMin) return;
+    if(s<startMin) s=startMin;
+    if(e>endMin) e=endMin;
+    blocks.push({it:it, s:s, e:e});
+  });
+  blocks.sort(function(a,b){ return a.s-b.s || a.e-b.e; });
+  const laneEnd=[];
+  blocks.forEach(function(b){
+    let lane=laneEnd.findIndex(function(end){ return end<=b.s; });
+    if(lane<0){ lane=laneEnd.length; laneEnd.push(b.e); }
+    else laneEnd[lane]=b.e;
+    b.lane=lane;
+  });
+  return {untimed:untimed, blocks:blocks, lanes:Math.max(1, laneEnd.length)};
+}
+function calBlockBtn(it, extraStyle){
+  const minsS=calMinutes(it.time), minsE=calMinutes(it.end);
+  let sub='';
+  if(minsS!=null){
+    const len=(minsE!=null && minsE>minsS) ? minsE-minsS : 60;
+    sub='<div style="font-weight:500;opacity:.8">'+escapeHtml(calDurText(len))+'</div>';
+  }
+  const style='position:absolute;overflow:hidden;text-align:left;padding:2px 4px;font-size:.7rem;line-height:1.15;z-index:2;cursor:pointer;background:#fff;border:1px solid var(--line);border-left:4px solid '+it.color+';border-radius:6px;'+extraStyle;
+  if(it.kind==='task' && it.id!=null){
+    return '<button type="button" data-action="open-task-menu" data-id="'+it.id+'" style="'+style+'"><b>'+escapeHtml(it.label)+'</b>'+sub+'</button>';
+  }
+  if(it.kind && it.id!=null){
+    return '<button type="button" data-action="cal-open" data-kind="'+it.kind+'" data-id="'+it.id+'" style="'+style+'"><b>'+escapeHtml(it.label)+'</b>'+sub+'</button>';
+  }
+  return '<div style="'+style+'"><b>'+escapeHtml(it.label)+'</b>'+sub+'</div>';
+}
+function calTimeGridHtml(days){
+  const startH=7, endH=22, px=days.length===1?52:42;
+  const startMin=startH*60, endMin=endH*60, height=(endH-startH)*px;
+  let gutter='';
+  for(let h=startH;h<endH;h++){
+    const label=(h<12?h+' am':h===12?'12 pm':(h-12)+' pm');
+    gutter+='<div style="height:'+px+'px;font-size:.65rem;color:var(--muted);line-height:1">'+label+'</div>';
+  }
+  const cols=days.map(function(day){
+    const items=itemsForDate(day.ds);
+    const lay=layoutCalDay(items, startMin, endMin);
+    let hours='';
+    for(let h=startH;h<endH;h++){
+      const top=(h-startH)*px;
+      const hh=String(h).padStart(2,'0')+':00';
+      hours+='<button type="button" data-action="cal-new" data-date="'+day.ds+'" data-time="'+hh+'" aria-label="Add at '+hh+'" style="position:absolute;left:0;right:0;top:'+top+'px;height:'+px+'px;border:none;border-top:1px solid var(--line);background:transparent;z-index:1;cursor:pointer;padding:0"></button>';
+    }
+    const blocks=lay.blocks.map(function(b){
+      const top=((b.s-startMin)/60)*px;
+      const hgt=Math.max(22, ((b.e-b.s)/60)*px-2);
+      const w=100/lay.lanes;
+      const left=b.lane*w;
+      return calBlockBtn(b.it, 'top:'+top+'px;height:'+hgt+'px;left:calc('+left+'% + 2px);width:calc('+w+'% - 4px);');
+    }).join('');
+    const loose=lay.untimed.slice(0,2).map(function(it){
+      return '<div style="font-size:.65rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+calEventButton(it)+'</div>';
+    }).join('');
+    const more=lay.untimed.length>2?'<div style="font-size:.62rem;color:var(--muted)">+'+(lay.untimed.length-2)+'</div>':'';
+    const today=day.ds===todayStr();
+    return '<div style="min-width:0;'+(today?'background:var(--pine-soft);border-radius:8px;':'')+'"><div style="height:22px;font-weight:700;font-size:.78rem;padding:2px;text-align:center;overflow:hidden">'+(today?'<span style="display:inline-block;padding:0 6px;border-radius:999px;background:var(--pine);color:#fff">'+escapeHtml(day.label)+'</span>':escapeHtml(day.label))+'</div><div style="height:36px;overflow:hidden;padding:0 2px">'+loose+more+'</div><div style="position:relative;height:'+height+'px">'+hours+blocks+'</div></div>';
+  }).join('');
+  return '<div style="display:flex;gap:4px;overflow-x:auto"><div style="width:46px;flex:none;padding-top:58px">'+gutter+'</div><div class="weekgrid" style="flex:1;min-width:'+(days.length*108)+'px">'+cols+'</div></div>';
+}
+function calWeekDays(ref){
+  const dow=mondayIndex(ref);
+  const monday=new Date(ref); monday.setDate(ref.getDate()-dow);
+  const names=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const days=[];
+  for(let i=0;i<7;i++){
+    const d=new Date(monday); d.setDate(monday.getDate()+i);
+    days.push({ds:toDateStr(d), label:names[i]+' '+d.getDate()});
+  }
+  return days;
+}
+
 function viewCalendar(){
+  try{ syncExerciseLinks(); }catch(e){}
   if(!state.calTwins || !state.calTwins.length){
     try{ queueTwinChoices(); }catch(e){}
   }
@@ -11632,47 +11771,20 @@ function viewCalendar(){
     const tday=todayStr();
     state.calRef=tday;
     state.selectedDay=tday;
-    state.calMode='month';
+    state.calMode='week';
     if(!state.schedOpen) state.schedOpen={};
     state.schedOpen.glance=true;
     calendarBrowsing=true;
   }
-  const mode=state.calMode||'month';
-  const ref=new Date(state.calRef+'T00:00:00');
+  let mode=state.calMode||'week';
+  if(mode==='list') mode='week';
+  const ref=new Date((state.calRef||todayStr())+'T00:00:00');
   let body='';
   if(mode==='day'){
     const ds=state.selectedDay||toDateStr(ref);
-    const items=itemsForDate(ds);
-    const untimed=items.filter(it=>!it.time);
-    const hours=[];
-    if(untimed.length) hours.push('<div style="margin-bottom:8px">'+untimed.map(it=>calEventButton(it)).join('')+'</div>');
-    for(let h=7;h<=21;h++){
-      const hh=String(h).padStart(2,'0')+':00';
-      const at=items.filter(it=>(it.time||'').slice(0,2)===String(h).padStart(2,'0'));
-      hours.push('<div style="display:flex;gap:8px;border-top:1px solid var(--line);padding:6px 0"><button type="button" class="btn ghost sm" data-action="cal-new" data-date="'+ds+'" data-time="'+hh+'" style="width:84px">'+hh+'</button><div style="flex:1">'+(at.map(it=>calEventButton(it)).join('')||'<span style="color:var(--muted);font-size:.8rem">Empty</span>')+'</div></div>');
-    }
-    body='<div style="font-weight:800;margin-bottom:8px">'+ds+'</div>'+hours.join('');
-  } else if(mode==='list'){
-    const dow=mondayIndex(ref);
-    const monday=new Date(ref); monday.setDate(ref.getDate()-dow);
-    const dayNames=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-    const sections=[];
-    for(let i=0;i<7;i++){
-      const d=new Date(monday); d.setDate(monday.getDate()+i);
-      const ds=toDateStr(d);
-      const items=itemsForDate(ds).slice().sort((a,b)=>(a.time||'').localeCompare(b.time||''));
-      const isToday=ds===todayStr();
-      sections.push(`
-        <div style="margin-bottom:18px">
-          <div style="background:var(--grey-soft);border-radius:10px;padding:8px 12px;font-weight:700;font-size:.95rem;margin-bottom:8px;${isToday?'border:2px solid var(--pine)':''}">
-            ${dayNames[i]}${isToday?' · Today':''}
-            <span style="font-weight:500;color:var(--muted);font-size:.82rem;margin-left:6px">${d.toLocaleDateString(undefined,{month:'short',day:'numeric'})}</span>
-          </div>
-          ${items.map(it=>calEventButton(it)).join('')}
-          <button type="button" class="btn ghost sm" data-action="cal-new" data-date="${ds}" style="margin-top:6px">Add on this day</button>
-        </div>`);
-    }
-    body=sections.join('');
+    const d=new Date(ds+'T00:00:00');
+    const names=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    body=calTimeGridHtml([{ds:ds, label:names[d.getDay()]+' '+d.getDate()}]);
   }else if(mode==='month'){
     const year=ref.getFullYear(), month=ref.getMonth();
     const first=new Date(year,month,1);
@@ -11686,30 +11798,15 @@ function viewCalendar(){
       const otherMonth = d.getMonth()!==month;
       const isToday = ds===todayStr();
       const isSel = ds===state.selectedDay;
-      cells.push(`<div class="daycell ${otherMonth?'otherMonth':''} ${isToday?'today':''} ${isSel?'selected':''}" data-day="${ds}">
-        <div class="daynum">${d.getDate()}</div>
-        <div class="daydots">${items.slice(0,4).map(it=>`<span class="dotcolor" style="background:${it.color}"></span>`).join('')}${items.length>4?`<span style="font-size:.62rem;color:var(--muted)">+${items.length-4}</span>`:''}</div>
-      </div>`);
+      const lines=items.slice(0,3).map(function(it){
+        return '<div style="font-size:.62rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:3px solid '+it.color+';padding-left:3px;margin-top:2px">'+escapeHtml(it.label)+'</div>';
+      }).join('');
+      const more=items.length>3?'<div style="font-size:.62rem;color:var(--muted)">+'+(items.length-3)+'</div>':'';
+      cells.push('<div class="daycell '+(otherMonth?'otherMonth ':'')+(isToday?'today ':'')+(isSel?'selected':'')+'" data-day="'+ds+'"><div class="daynum">'+d.getDate()+'</div>'+lines+more+'</div>');
     }
-    body=`<div class="dowhead"></div>` +
-      `<div class="monthgrid" style="margin-bottom:4px">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d=>`<div class="dowhead">${d}</div>`).join('')}</div>
-      <div class="monthgrid">${cells.join('')}</div>`;
+    body='<div class="monthgrid" style="margin-bottom:4px">'+['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(function(d){ return '<div class="dowhead">'+d+'</div>'; }).join('')+'</div><div class="monthgrid">'+cells.join('')+'</div>';
   }else{
-    const dow=mondayIndex(ref);
-    const monday=new Date(ref); monday.setDate(ref.getDate()-dow);
-    const cols=[];
-    for(let i=0;i<7;i++){
-      const d=new Date(monday); d.setDate(monday.getDate()+i);
-      const ds=toDateStr(d);
-      const items=itemsForDate(ds);
-      const isToday=ds===todayStr();
-      cols.push(`<div class="weekcol ${isToday?'today':''}" data-day="${ds}">
-        <h5>${d.toLocaleDateString(undefined,{weekday:'short'})} ${d.getDate()}</h5>
-        ${items.map(it=>calEventButton(it)).join('')}
-        <button type="button" class="btn ghost sm" data-action="cal-new" data-date="${ds}" style="margin-top:6px">Add</button>
-      </div>`);
-    }
-    body=`<div class="weekgrid">${cols.join('')}</div>`;
+    body=calTimeGridHtml(calWeekDays(ref));
   }
   const selItems=itemsForDate(state.selectedDay);
   return `
@@ -11717,7 +11814,7 @@ function viewCalendar(){
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Week &amp; month at a glance</div>
     <h1>Your Schedule</h1>
-    <p>Day, week, or month. Tap an empty day to add something. Tap an event to change or delete it.</p>
+    <p>Day, week, or month. A timed item fills the hours it lasts. Tap an empty hour to add. Tap an item to change it.</p>
   </div>
   <div class="card" style="padding:14px 16px;margin-bottom:10px">
     <div style="font-weight:700;margin-bottom:6px">Find an event</div>
@@ -11728,13 +11825,12 @@ function viewCalendar(){
   ${schedBox('glance','Quick glance', `
   <div class="calnav">
       <button class="btn ghost sm" id="calPrev">&larr;</button>
-      <div style="font-weight:700">${mode==='month'?ref.toLocaleDateString(undefined,{month:'long',year:'numeric'}):'Week of '+state.calRef}</div>
+      <div style="font-weight:700">${mode==='day'?(state.selectedDay||state.calRef):(mode==='month'?ref.toLocaleDateString(undefined,{month:'long',year:'numeric'}):('Week of '+state.calRef))}</div>
       <button class="btn ghost sm" id="calNext">&rarr;</button>
       <button class="btn ghost sm" id="calToday">Today</button>
       <div class="spacer"></div>
       <button class="btn ${mode==='day'?'':'ghost'} sm" id="calModeDay">Day</button>
-      <button class="btn ${mode==='list'?'':'ghost'} sm" id="calModeList">Week</button>
-      <button class="btn ${mode==='week'?'':'ghost'} sm" id="calModeWeek">Columns</button>
+      <button class="btn ${mode==='week'?'':'ghost'} sm" id="calModeWeek">Week</button>
       <button class="btn ${mode==='month'?'':'ghost'} sm" id="calModeMonth">Month</button>
     </div>
     ${body}
@@ -11749,7 +11845,7 @@ function viewCalendar(){
   `)}
   ${schedBox('event', (state.calDraft&&state.calDraft.id)?'Edit event':'New event', '<p style="margin:0 0 8px;color:var(--muted);font-size:.9rem">Tap a day in the month. Appointments open in a window. An empty day opens Add event.</p><button type="button" class="btn" id="calStartNew">Add an event</button>')}
   ${schedBox('quick','Quick add', `
-    <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Type a line, paste a timetable, or upload a screenshot. Edit the text, then choose Yes or Cancel. Nothing is added until you say Yes.</p>
+    <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Type one appointment per line, paste a screenshot, or hold the button and speak. The words land in the box. Edit them, then choose an appointment or a task. Nothing is added until you say Yes.</p>
     <div class="field"><label>These items are</label>
       <select id="ttRepeatMode"><option value="weekly">Every week</option><option value="once">One time only</option></select>
     </div>
@@ -11758,7 +11854,9 @@ function viewCalendar(){
       <button class="btn sm" id="ttOcrBtn" type="button">Read screenshot</button>
     </div>
     <div id="ttOcrStatus" style="font-size:.82rem;color:var(--muted);margin-bottom:8px"></div>
-    <textarea id="ttPaste" rows="4" placeholder="Example: Bio Mon 8:30, Gym Tue 3 to 5" style="width:100%"></textarea>
+    <button type="button" class="btn" id="ttHold" data-voice="quick" style="touch-action:none;user-select:none">Hold and speak</button>
+    <div id="ttVoiceStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0 8px">Hold the button and say every appointment, with the day and time. Let go. Check the list before you save.</div>
+    <textarea id="ttPaste" rows="4" placeholder="Dentist Mon 2pm&#10;Doctor Tue 4pm&#10;Or paste a screenshot here" style="width:100%"></textarea>
     <button class="btn" id="ttParseBtn" type="button" style="margin-top:10px">Check what I read</button>
     <div id="ttPreview" style="margin-top:12px"></div>
   `)}
@@ -12312,6 +12410,508 @@ async function ocrTimetableImage(file){
   }
   return text;
 }
+function wireScreenshotPaste(){
+  const area=document.getElementById('ttPaste');
+  if(!area || area.dataset.pasteImg) return;
+  area.dataset.pasteImg='1';
+  area.addEventListener('paste', function(e){
+    const cd=e.clipboardData;
+    if(!cd) return;
+    const items=cd.items;
+    if(items){
+      for(let i=0;i<items.length;i++){
+        const it=items[i];
+        if(it && it.type && it.type.indexOf('image')===0){
+          const file=it.getAsFile();
+          if(file){ e.preventDefault(); ocrTimetableImage(file); return; }
+        }
+      }
+    }
+    if(cd.files && cd.files[0] && String(cd.files[0].type||'').indexOf('image')===0){
+      e.preventDefault();
+      ocrTimetableImage(cd.files[0]);
+    }
+  });
+}
+
+
+function appendHeardText(area, text){
+  text = String(text||'').replace(/\s+/g,' ').trim();
+  if(!text || !area) return;
+  const single = String(area.tagName||'').toUpperCase()==='INPUT';
+  if(single){
+    const cur = String(area.value||'').trim();
+    let next = !cur ? text : ((text.indexOf(cur)===0 || cur.indexOf(text)===0) ? (text.length>=cur.length ? text : cur) : (cur+' '+text));
+    const max = Number(area.maxLength);
+    if(max>0 && next.length>max) next = next.slice(0, max);
+    area.value = next;
+    return;
+  }
+  const lines = (area.value||'').split('\n');
+  const last = (lines[lines.length-1]||'').trim();
+  if(last && (text===last || text.indexOf(last)===0 || last.indexOf(text)===0)){
+    lines[lines.length-1] = text.length >= last.length ? text : last;
+    area.value = lines.join('\n');
+    return;
+  }
+  area.value = area.value ? (area.value.replace(/\s+$/,'') + '\n' + text) : text;
+}
+let _talkHeld = false;
+let _talkRec = null;
+let _talkPartial = '';
+let _talkOnText = null;
+let _talkNativeOn = false;
+function ensureNativeHeard(){
+  const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+  if(!plug || !plug.addListener || _talkNativeOn) return;
+  _talkNativeOn = true;
+  try{
+    plug.addListener('heard', function(ev){
+      if(!_talkOnText) return;
+      if(ev && ev.error){ _talkOnText('', false, ev.error); return; }
+      if(ev && ev.text) _talkOnText(ev.text, !!ev.final, 0);
+    });
+  }catch(e){ _talkNativeOn = false; }
+}
+function spokenClockList(text){
+  let s = String(text||'').toLowerCase().replace(/\b(\d{1,2})[.](\d{2})\b/g,'$1:$2');
+  const out=[];
+  if(/\bnoon\b/.test(s)) out.push('12:00');
+  if(/\bmidnight\b/.test(s)) out.push('00:00');
+  const re=/\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?\b/g;
+  let m;
+  while((m=re.exec(s))){
+    let h=Number(m[1]);
+    const min=m[2]?Number(m[2]):0;
+    if(h>23 || min>59) continue;
+    const ap=(m[3]||'').replace(/\./g,'');
+    const before=s.slice(Math.max(0,m.index-14), m.index);
+    const looks=!!ap || !!m[2] || /(?:\bat|\bfrom|\buntil|\btill|\bto|\baround)\s*$/.test(before);
+    if(!looks) continue;
+    if(h>12 && !m[2] && !ap) continue;
+    if(ap.indexOf('p')===0 && h<12) h+=12;
+    if(ap.indexOf('a')===0 && h===12) h=0;
+    if(!ap && !m[2] && h>=1 && h<=7 && !/\b(morning|wake|breakfast)\b/.test(s)) h+=12;
+    else if(!ap && h<=7 && /\b(evening|tonight|night)\b/.test(s)) h+=12;
+    out.push(String(h).padStart(2,'0')+':'+String(min).padStart(2,'0'));
+  }
+  const seen={};
+  return out.filter(function(c){ if(seen[c]) return false; seen[c]=1; return true; });
+}
+function spokenDayHits(text){
+  const s=' '+String(text||'').toLowerCase()+' ';
+  if(/\b(every day|everyday|each day|daily)\b/.test(s)) return [0,1,2,3,4,5,6];
+  if(/\bweekdays?\b/.test(s)) return [0,1,2,3,4];
+  if(/\bweekends?\b/.test(s)) return [5,6];
+  const names=[['monday','mon',0],['tuesday','tue',1],['wednesday','wed',2],['thursday','thu',3],['friday','fri',4],['saturday','sat',5],['sunday','sun',6]];
+  const days=[];
+  names.forEach(function(d){
+    const re=new RegExp('\\b'+d[0]+'s?\\b|\\b'+d[1]+'s?\\b');
+    if(re.test(s) && days.indexOf(d[2])<0) days.push(d[2]);
+  });
+  return days;
+}
+function speechWantsRepeat(text){
+  return /\b(every|each|repeat|weekly|weekdays?|weekends?|daily)\b/i.test(String(text||''));
+}
+function spokenDate(text){
+  const s=String(text||'').toLowerCase();
+  const base=new Date(); base.setHours(12,0,0,0);
+  if(/\btomorrow\b/.test(s)){ const d=new Date(base); d.setDate(d.getDate()+1); return toDateStr(d); }
+  if(/\btoday\b/.test(s)) return toDateStr(base);
+  const months=['january','february','march','april','may','june','july','august','september','october','november','december'];
+  let m=s.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?\b/);
+  if(!m){
+    const m2=s.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\b/);
+    if(m2) m=[m2[0], m2[2], m2[1]];
+  }
+  if(m){
+    const month=months.indexOf(m[1]);
+    const day=Number(m[2]);
+    let year=base.getFullYear();
+    const d=new Date(year, month, day, 12);
+    if(d<base) d.setFullYear(year+1);
+    return toDateStr(d);
+  }
+  const ord=s.match(/\b(?:on\s+)?(?:the\s+)(\d{1,2})(?:st|nd|rd|th)\b/);
+  if(ord){
+    const day=Number(ord[1]);
+    const d=new Date(base.getFullYear(), base.getMonth(), day, 12);
+    if(d<base) d.setMonth(d.getMonth()+1);
+    return toDateStr(d);
+  }
+  if(!speechWantsRepeat(s)){
+    const days=spokenDayHits(s);
+    if(days.length===1){
+      const want=(days[0]+1)%7;
+      const d=new Date(base);
+      for(let i=0;i<8;i++){
+        if(d.getDay()===want) return toDateStr(d);
+        d.setDate(d.getDate()+1);
+      }
+    }
+  }
+  return '';
+}
+function addClockMinutes(hhmm, mins){
+  const bits=String(hhmm||'00:00').split(':');
+  let total=(Number(bits[0])||0)*60+(Number(bits[1])||0)+mins;
+  total=((total%1440)+1440)%1440;
+  return String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0');
+}
+function tidySpokenName(text){
+  let s=' '+String(text||'')+' ';
+  const cuts=[
+    /\b(remind me to|nudge me to|set a nudge(?: for| to)?|add a nudge(?: for| to)?|please|can you|i need to|i have to|i want to|add a task(?: to| for)?|new task|add an event(?: for)?|add a habit(?: to| for)?|new habit|the habit is|habit called|called|named|name is)\b/gi,
+    /\b(every day|everyday|each day|daily|weekdays?|weekends?|every|each|repeating|repeat|weekly|one time|just once|only once|this day only|just this day)\b/gi,
+    /\b(?:on\s+|next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thurs?|fri|sat|sun)s?\b/gi,
+    /\b(at\s+)?(noon|midnight)\b/gi,
+    /\b(today|tomorrow|next week)\b/gi,
+    /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?\b/gi,
+    /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/gi,
+    /\b(?:on\s+)?the\s+\d{1,2}(?:st|nd|rd|th)\b/gi,
+    /\b(?:at|from|until|till|between|around)\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?(?:\s*(?:to|until|till|-)\s*\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)?\b/gi,
+    /\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b/gi,
+    /\bfor (?:an hour|half an hour|\d+ hours?|\d+ minutes?)\b/gi,
+    /\b(no math|without (?:a )?math(?: problem)?|don'?t ask(?: me)? (?:a )?math(?: problem)?|with (?:a )?math(?: problem)?|ask (?:a )?math(?: problem)?)\b/gi,
+    /\b(silent notification|regular notification|make it silent|keep it silent|no sound|with sound|out loud)\b/gi,
+    /\b(chime|bell|beep|digital|radar|knock|wake burst)\b/gi,
+    /\b(high priority|medium priority|low priority)\b/gi,
+    /\b(do first|plan it|quick win|bite size|focus pod|focus plate|time blocking|body doubling|this or that)\b/gi,
+    /\b(nudge me(?: that morning| the day before| in the morning)?|the day before|that morning|no nudge|don'?t nudge)\b/gi,
+    /\b(ask me|remind me)\b/gi,
+    /\b(don'?t ask|no reminder|don'?t remind|don'?t track|not in stats|show in stats|track it)\b/gi,
+    /\b(?:it is |it's |type )?(?:personal task|for school|school task|for work|for home)\b/gi,
+    /\b(?:room|place)\s+[a-z0-9][a-z0-9 \-]{0,24}/gi,
+    /\b(?:until|till)\s+[a-z0-9 ]{0,30}/gi
+  ];
+  cuts.forEach(function(re){ s=s.replace(re,' '); });
+  s=s.replace(/[^a-z0-9' ]+/gi,' ');
+  s=s.replace(/\s+/g,' ').trim();
+  s=s.replace(/^(?:and|to|for|at|on|the|a|my|me|please)\b\s*/i,'').trim();
+  s=s.replace(/\s+\b(?:and|at|on|to|for|a)$/i,'').trim();
+  return s;
+}
+function planFromSpeech(kind, text){
+  const raw=String(text||'').replace(/\s+/g,' ').trim();
+  const low=raw.toLowerCase();
+  const until=raw.match(/\b(?:until|till)\s+(.+)$/i);
+  const body=until ? raw.slice(0, until.index) : raw;
+  const clocks=spokenClockList(raw);
+  const days=spokenDayHits(raw);
+  const date=spokenDate(body);
+  const repeat=speechWantsRepeat(raw);
+  const once=/\b(one time|just once|only once|just this day|this day only|does not repeat|doesn't repeat)\b/i.test(raw);
+  const plan={name:tidySpokenName(raw), clocks:clocks, days:days, date:date, repeat: repeat && !once, once: once || (!repeat && !!date)};
+  if(/\b(no math|without (?:a )?math|don'?t ask(?: me)? (?:a )?math)\b/i.test(low)) plan.math=false;
+  else if(/\b(with (?:a )?math|ask (?:a )?math|math problem)\b/i.test(low)) plan.math=true;
+  if(/\b(silent notification|make it silent|keep it silent|no sound)\b/i.test(low)) plan.alert='silent';
+  else if(/\b(regular notification|with sound|out loud)\b/i.test(low)) plan.alert='regular';
+  [['wake burst','knock'],['chime','chime'],['bell','bell'],['beep','beep'],['digital','digital'],['radar','radar'],['knock','knock']].forEach(function(pair){
+    if(!plan.sound && low.indexOf(pair[0])>=0) plan.sound=pair[1];
+  });
+  if(/\b(high priority|priority high)\b/.test(low)) plan.priority='high';
+  else if(/\b(low priority|priority low)\b/.test(low)) plan.priority='low';
+  else if(/\bmedium priority\b/.test(low)) plan.priority='medium';
+  if(/\bdo first\b/.test(low)) plan.eis='do';
+  else if(/\bplan it\b/.test(low)) plan.eis='schedule';
+  else if(/\bquick win\b/.test(low)) plan.eis='quick';
+  else if(/\blater\b/.test(low) && /\bneither\b/.test(low)) plan.eis='later';
+  if(/\bbite size\b/.test(low)) plan.technique='bitesize';
+  else if(/\b(focus pod|pomodoro)\b/.test(low)) plan.technique='timer';
+  else if(/\bfocus plate\b/.test(low)) plan.technique='rule135';
+  else if(/\b(this or that|eisenhower)\b/.test(low)) plan.technique='eisenhower';
+  else if(/\btime block/.test(low)) plan.technique='timeblocking';
+  else if(/\bbody doubl/.test(low)) plan.technique='bodydouble';
+  if(/\b(it is personal|it's personal|personal task|for home)\b/.test(low)) plan.context='personal';
+  else if(/\b(for school|school task|for work|work task)\b/.test(low)) plan.context='school';
+  if(/\b(no nudge|don'?t nudge|without a nudge)\b/.test(low)) plan.nudgeWhen='none';
+  else if(/\bday before\b/.test(low)) plan.nudgeWhen='daybefore';
+  else if(/\b(that morning|in the morning|nudge me)\b/.test(low)) plan.nudgeWhen='morning';
+  const nudgeAt=low.indexOf('nudge');
+  if(nudgeAt>=0){
+    const nc=spokenClockList(low.slice(nudgeAt));
+    if(nc[0]) plan.nudgeTime=nc[0];
+  }
+  if(/\b(don'?t ask|no reminder|don'?t remind)\b/.test(low)) plan.remind=false;
+  else if(/\b(ask me|remind me)\b/.test(low) && kind==='habit') plan.remind=true;
+  if(/\b(don'?t track|not in stats|hide from stats)\b/.test(low)) plan.track=false;
+  else if(/\b(track it|show in stats|in the stats)\b/.test(low)) plan.track=true;
+  if(/\b(no nudge|don'?t nudge)\b/.test(low)) plan.eventNudge=false;
+  else if(/\bnudge me\b/.test(low) && kind==='event') plan.eventNudge=true;
+  const place=raw.match(/\b(?:room|place)\s+([A-Za-z0-9][^,]{0,28})/i);
+  if(place) plan.room=place[1].replace(/\b(at|on|tomorrow|today|every|nudge|for)\b.*$/i,'').trim();
+  if(until) plan.until=spokenDate(until[1]);
+  if(/\bfor an hour\b/.test(low)) plan.dur=60;
+  else if(/\bfor half an hour\b/.test(low)) plan.dur=30;
+  else {
+    const hm=low.match(/\bfor (\d+) hours?\b/);
+    const mm=low.match(/\bfor (\d+) minutes?\b/);
+    if(hm) plan.dur=Number(hm[1])*60;
+    else if(mm) plan.dur=Number(mm[1]);
+  }
+  return plan;
+}
+function setFormValue(id, value){
+  if(value==null || value==='') return;
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.value=value;
+}
+function setFormCheck(id, on){
+  if(on==null) return;
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.checked=!!on;
+}
+function setFormRadio(name, value){
+  if(!value) return;
+  const el=document.querySelector('input[name="'+name+'"][value="'+value+'"]');
+  if(!el) return;
+  el.checked=true;
+  try{ el.dispatchEvent(new Event('change', {bubbles:true})); }catch(e){}
+}
+function setFormDays(prefix, days){
+  if(!days || !days.length) return;
+  for(let i=0;i<7;i++){
+    const el=document.getElementById(prefix+i);
+    if(el) el.checked=days.indexOf(i)>=0;
+  }
+}
+function applySpokenForm(kind, text, statusEl){
+  const plan=planFromSpeech(kind, text);
+  if(kind==='nudge'){
+    setFormValue('wakeName', plan.name);
+    setFormValue('wakeTime', plan.clocks[0]);
+    if(plan.repeat){
+      setFormRadio('wakeWhen','repeat');
+      if(plan.days.length) setFormDays('wakeDay', plan.days);
+    } else if(plan.once || plan.date){
+      setFormRadio('wakeWhen','once');
+      setFormValue('wakeOnceDate', plan.date || todayStr());
+    }
+    setFormCheck('wakeMathOn', plan.math);
+    if(plan.alert) setFormRadio('wakeAlert', plan.alert);
+    setFormValue('wakeSoundSelect', plan.sound);
+  } else if(kind==='task'){
+    setFormValue('newTitle', plan.name);
+    setFormValue('newDate', plan.date);
+    let taskClock=plan.clocks[0]||'';
+    if(plan.nudgeTime) taskClock=(plan.clocks.filter(function(c){ return c!==plan.nudgeTime; })[0])||'';
+    setFormValue('newTime', taskClock);
+    setFormValue('newContext', plan.context);
+    setFormValue('newTechnique', plan.technique);
+    setFormValue('newEisQuad', plan.eis);
+    setFormValue('newPriority', plan.priority);
+    setFormValue('newNudgeWhen', plan.nudgeWhen);
+    setFormValue('newNudgeTime', plan.nudgeTime);
+  } else if(kind==='event'){
+    setFormValue('calDraftTitle', plan.name);
+    if(plan.date) setFormValue('calDraftDate', plan.date);
+    else if(plan.repeat && plan.days.length && typeof nextDateForWeekday==='function') setFormValue('calDraftDate', nextDateForWeekday(plan.days[0]));
+    if(plan.clocks[0]){
+      setFormValue('calDraftStart', plan.clocks[0]);
+      const end=plan.clocks[1] || addClockMinutes(plan.clocks[0], plan.dur || 60);
+      setFormValue('calDraftEnd', end);
+    }
+    if(plan.repeat) setFormValue('calDraftRepeat','weekly');
+    else if(plan.once || plan.date) setFormValue('calDraftRepeat','once');
+    setFormValue('calDraftRoom', plan.room);
+    setFormCheck('calDraftNudge', plan.eventNudge);
+  } else if(kind==='habit'){
+    setFormValue('newHabitName', plan.name);
+    setFormValue('newHabitTime', plan.clocks[0]);
+    setFormCheck('newHabitRemind', plan.remind);
+    setFormCheck('newHabitTrack', plan.track);
+    if(plan.repeat) state.habitVoice={mode:'repeat', days:plan.days, from:plan.date||todayStr(), to:plan.until||''};
+    else if(plan.once || plan.date) state.habitVoice={mode:'once', date:plan.date||todayStr()};
+    else state.habitVoice=null;
+  }
+  if(statusEl) statusEl.textContent='Filled in from what you said. Check every choice, change anything wrong, then save. Nothing is saved yet.';
+}
+let _talkKind='';
+let _talkTranscript='';
+function noteHeard(text, fin){
+  text=String(text||'').replace(/\s+/g,' ').trim();
+  if(!text) return;
+  if(fin){
+    const prev=_talkTranscript.trim();
+    if(!prev) _talkTranscript=text;
+    else if(text.indexOf(prev)===0 || prev.indexOf(text)===0) _talkTranscript = text.length>=prev.length ? text : prev;
+    else if(!prev.endsWith(text)) _talkTranscript = prev+' '+text;
+    _talkPartial='';
+  } else _talkPartial=text;
+}
+function finishHeard(area, statusEl){
+  if(_talkPartial) noteHeard(_talkPartial, true);
+  const said=_talkTranscript.trim();
+  const kind=_talkKind;
+  if(!said){
+    if(statusEl) statusEl.textContent='No speech heard. Hold the button and say the whole thing.';
+    return;
+  }
+  if(kind==='quick' || kind==='journal' || !kind){
+    appendHeardText(area, said);
+    if(kind==='quick'){
+      const btn=document.getElementById('ttParseBtn');
+      if(btn) btn.click();
+      if(statusEl) statusEl.textContent='Check the list. Save as appointments or tasks only if every line looks right.';
+    } else if(statusEl) statusEl.textContent='The note is in the box. Edit it, then add it. Nothing is saved yet.';
+    return;
+  }
+  applySpokenForm(kind, said, statusEl);
+}
+function startHoldTalk(area, statusEl, kind){
+  _talkHeld = true;
+  _talkKind = kind || '';
+  _talkPartial = '';
+  _talkTranscript = '';
+  _talkOnText = function(text, fin, err){
+    if(err){
+      if(!_talkHeld && (err==='aborted' || err===5 || err===7)) return;
+      if(statusEl) statusEl.textContent = (err==='not-allowed' || err===9)
+        ? 'Microphone is blocked. Allow it for SnapBack, then hold the button again.'
+        : 'Could not hear that. Hold the button and speak, or type it.';
+      return;
+    }
+    if(!text) return;
+    if(fin){
+      noteHeard(text, true);
+      if(_talkKind && _talkKind!=='quick' && _talkKind!=='journal') applySpokenForm(_talkKind, _talkTranscript, statusEl);
+      else if(statusEl) statusEl.textContent = 'Got it. Edit it before you save.';
+    } else {
+      _talkPartial = text;
+      if(statusEl) statusEl.textContent = 'Hearing… ' + text;
+    }
+  };
+  const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()
+    && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm && window.Capacitor.Plugins.NudgeAlarm.startListen;
+  if(native){
+    ensureNativeHeard();
+    if(statusEl) statusEl.textContent = 'Listening… say the whole thing, then let go';
+    window.Capacitor.Plugins.NudgeAlarm.startListen().catch(function(e){
+      const msg = (e && (e.message || e.errorMessage)) || '';
+      if(statusEl) statusEl.textContent = msg || 'Allow the microphone, then hold the button again.';
+    });
+    return;
+  }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SR){
+    if(statusEl) statusEl.textContent = 'This browser cannot hear speech. Type it instead.';
+    return;
+  }
+  const begin = function(){
+    if(!_talkHeld) return;
+    try{ if(_talkRec) _talkRec.abort(); }catch(e){}
+    const rec = new SR();
+    rec.lang = navigator.language || 'en-US';
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = function(ev){
+      let interim = '';
+      for(let i = ev.resultIndex; i < ev.results.length; i++){
+        const bit = ev.results[i][0].transcript;
+        if(ev.results[i].isFinal) _talkOnText(bit, true, 0);
+        else interim += bit;
+      }
+      if(interim) _talkOnText(interim, false, 0);
+    };
+    rec.onerror = function(e){ if(_talkOnText) _talkOnText('', false, e && e.error); };
+    rec.onend = function(){
+      if(_talkPartial && _talkOnText) _talkOnText(_talkPartial, true, 0);
+    };
+    _talkRec = rec;
+    try{
+      rec.start();
+      if(statusEl) statusEl.textContent = 'Listening… say the whole thing, then let go';
+    }catch(err){
+      if(statusEl) statusEl.textContent = 'Could not start the microphone.';
+    }
+  };
+  if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
+    navigator.mediaDevices.getUserMedia({audio:true}).then(function(stream){
+      try{ stream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
+      begin();
+    }).catch(function(){ begin(); });
+  } else begin();
+}
+function stopHoldTalk(area, statusEl){
+  const was = _talkHeld;
+  _talkHeld = false;
+  const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+  if(plug && plug.stopListen){ try{ plug.stopListen(); }catch(e){} }
+  try{ if(_talkRec) _talkRec.stop(); }catch(e){}
+  if(was) finishHeard(area, statusEl);
+}
+function wireHoldTalk(btnId, areaId, statusId){
+  const btn = document.getElementById(btnId);
+  const area = document.getElementById(areaId);
+  const status = document.getElementById(statusId);
+  if(!btn || btn.dataset.holdWired) return;
+  btn.dataset.holdWired = '1';
+  const kind = btn.getAttribute('data-voice') || '';
+  btn.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+  const down = function(e){
+    if(e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    btn.style.background = 'var(--amber)';
+    btn.textContent = 'Listening…';
+    startHoldTalk(area, status, kind);
+  };
+  const up = function(e){
+    e.preventDefault();
+    btn.style.background = '';
+    btn.textContent = 'Hold and speak';
+    stopHoldTalk(area, status);
+  };
+  btn.addEventListener('pointerdown', down);
+  btn.addEventListener('pointerup', up);
+  btn.addEventListener('pointercancel', up);
+}
+function nextDateForWeekday(dayIdx){
+  const d = new Date();
+  d.setHours(12,0,0,0);
+  const jsDay = (Number(dayIdx)+1)%7;
+  for(let i=0;i<7;i++){
+    if(d.getDay()===jsDay) return toDateStr(d);
+    d.setDate(d.getDate()+1);
+  }
+  return todayStr();
+}
+function readTtPreview(box, base){
+  return (base||[]).map(function(p,i){
+    const titleEl=box.querySelector('.tt-edit-title[data-i="'+i+'"]');
+    const startEl=box.querySelector('.tt-edit-start[data-i="'+i+'"]');
+    const endEl=box.querySelector('.tt-edit-end[data-i="'+i+'"]');
+    const dateEl=box.querySelector('.tt-edit-date[data-i="'+i+'"]');
+    const dayEl=box.querySelector('.tt-edit-day[data-i="'+i+'"]');
+    const out=Object.assign({}, p);
+    if(titleEl) out.title=titleEl.value.trim()||out.title;
+    if(startEl&&startEl.value) out.start=startEl.value;
+    if(endEl&&endEl.value) out.end=endEl.value;
+    if(dateEl&&dateEl.value){ out.date=dateEl.value; out.oneOff=true; out.day=mondayIndex(new Date(dateEl.value+'T12:00:00')); }
+    if(dayEl) out.day=Number(dayEl.value);
+    return out;
+  }).filter(Boolean);
+}
+function saveParsedAsTasks(list){
+  if(!list || !list.length){ showAppMessage('Nothing to save', 'Check the words first.'); return; }
+  if(!Array.isArray(state.tasks)) state.tasks=[];
+  list.forEach(function(p){
+    const date = p.date || nextDateForWeekday(p.day);
+    state.tasks.unshift({
+      id:uid(), title:p.title||'Task', notes:'From Quick add', date:date, time:p.start||'',
+      priority:'medium', urgent:false, important:false, tier:'could', frog:false, context:'personal',
+      meetingUrl:'', reminderLeads:[], reminderTime:'', startDate:'', startTime:'', startReminderMinutes:[],
+      chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{}, strategic:{}, flip:{}, created:Date.now()
+    });
+  });
+  const paste=document.getElementById('ttPaste'); if(paste) paste.value='';
+  const prev=document.getElementById('ttPreview'); if(prev) prev.innerHTML='';
+  try{ saveState(); }catch(e){}
+  showAppMessage('Saved as tasks', list.length+' added. Open Tasks if you want to change one.');
+  persistRender();
+}
 
 function parseTimeRangeToken(str){
   const s = String(str||'').toLowerCase().trim();
@@ -12581,11 +13181,135 @@ function parseDatedOneOffs(raw){
   return results.length ? results : null;
 }
 
+function parseLooseAppointments(raw){
+  let src = String(raw||'').replace(/\u00a0/g,' ').replace(/\r/g,'');
+  if(!src.trim()) return null;
+  src = src.replace(/\b(\d{1,2})[.](\d{2})\b/g, '$1:$2');
+  const timeRe = /(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\s*(?:-|–|—|to)\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?|\b(\d{1,2})[:.](\d{2})\s*(am|pm)?|\b(\d{1,2})\s*(am|pm)\b/ig;
+  function dayHits(str){
+    const s=String(str||'').toLowerCase();
+    if(/\ball\s*days\b|\bevery\s*day\b|\bdaily\b/.test(s)) return [0,1,2,3,4,5,6];
+    if(/\bweekdays?\b/.test(s)) return [0,1,2,3,4];
+    const hits=[];
+    const re=/\b(mon(?:days?)?|tue(?:s(?:days?)?)?|wed(?:nesdays?)?|thu(?:r(?:s(?:days?)?)?|rsdays?)?|fri(?:days?)?|sat(?:urdays?)?|sun(?:days?)?)\b/g;
+    let m;
+    while((m=re.exec(s))){
+      const k=m[1];
+      const d=k.startsWith('mon')?0:k.startsWith('tue')?1:k.startsWith('wed')?2:k.startsWith('thu')?3:k.startsWith('fri')?4:k.startsWith('sat')?5:6;
+      if(hits.indexOf(d)<0) hits.push(d);
+    }
+    return hits;
+  }
+  function clock(h, min, ap, otherAp){
+    let hour=parseInt(h,10);
+    let mi=min!=null && min!=='' ? parseInt(min,10) : 0;
+    if(isNaN(hour)) return null;
+    if(isNaN(mi)) mi=0;
+    const a=String(ap||otherAp||'').toLowerCase();
+    if(a==='pm' && hour<12) hour+=12;
+    else if(a==='am' && hour===12) hour=0;
+    else if(!a && hour>=1 && hour<=6) hour+=12;
+    if(hour>23 || mi>59) return null;
+    return String(hour).padStart(2,'0')+':'+String(mi).padStart(2,'0');
+  }
+  function orderRange(start, end){
+    if(start && end && end<=start){
+      const eh=parseInt(end.slice(0,2),10);
+      if(eh<12) end=String(eh+12).padStart(2,'0')+end.slice(2);
+    }
+    return {start:start, end:end};
+  }
+  function rangeFrom(m){
+    if(m[1]){
+      const start=clock(m[1], m[2], m[3]);
+      const end=clock(m[4], m[5], m[6]||m[3]);
+      if(start && end) return orderRange(start, end);
+    }
+    if(m[7]){
+      const start=clock(m[7], m[8], m[9]);
+      if(!start) return null;
+      const hh=parseInt(start.slice(0,2),10);
+      return {start:start, end:orderRange(start, String((hh+1)%24).padStart(2,'0')+':'+start.slice(3)).end};
+    }
+    if(m[10]){
+      const start=clock(m[10], '00', m[11]);
+      if(!start) return null;
+      const hh=parseInt(start.slice(0,2),10);
+      const end=orderRange(start, String((hh+1)%24).padStart(2,'0')+':00').end;
+      return {start:start, end:end};
+    }
+    return null;
+  }
+  function cleanTitle(s){
+    return String(s||'')
+      .replace(/\b(mon(?:days?)?|tue(?:s(?:days?)?)?|wed(?:nesdays?)?|thu(?:r(?:s(?:days?)?)?|rsdays?)?|fri(?:days?)?|sat(?:urdays?)?|sun(?:days?)?)\b/gi,' ')
+      .replace(/\b(all\s*days?|every\s*day|daily|weekdays?|on|at|and|to|the)\b/gi,' ')
+      .replace(/\b\d{1,2}(?:st|nd|rd|th)\b/gi,' ')
+      .replace(/[.,;|/]+/g,' ')
+      .replace(/\s{2,}/g,' ')
+      .trim();
+  }
+  function dateIn(str){
+    const dayM=String(str||'').match(/\b(?:on\s+)?(?:the\s+)?(\d{1,2})(st|nd|rd|th)\b/i) || String(str||'').match(/\bon\s+(?:the\s+)?(\d{1,2})\b/i);
+    if(!dayM) return '';
+    const n=parseInt(dayM[1],10);
+    if(!(n>=1 && n<=31)) return '';
+    const now=new Date();
+    let y=now.getFullYear(), mo=now.getMonth();
+    let candidate=new Date(y, mo, n, 12, 0, 0);
+    const today0=new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if(candidate<today0){
+      mo+=1; if(mo>11){ mo=0; y+=1; }
+      candidate=new Date(y, mo, n, 12, 0, 0);
+    }
+    return toDateStr(candidate);
+  }
+  const pieces=[];
+  src.split(/\n+/).forEach(function(row){
+    row.split(/\s+\band\b\s+|\s+\/\s+|;(?!\d)|,(?=\s*[A-Za-z])/).forEach(function(p){
+      p=p.replace(/^\s*(?:[\d]+[.)]|[-*•·])\s*/,'').trim();
+      if(p) pieces.push(p);
+    });
+  });
+  const results=[];
+  pieces.forEach(function(piece){
+    const matches=[];
+    const re=new RegExp(timeRe.source, 'ig');
+    let m;
+    while((m=re.exec(piece))) matches.push({index:m.index, length:m[0].length, raw:m[0], groups:m});
+    if(!matches.length) return;
+    matches.forEach(function(hit, i){
+      const times=rangeFrom(hit.groups);
+      if(!times) return;
+      const leftStart=i===0?0:matches[i-1].index+matches[i-1].length;
+      const rightEnd=i+1<matches.length?matches[i+1].index:piece.length;
+      const slice=piece.slice(leftStart, rightEnd);
+      const left=cleanTitle(piece.slice(leftStart, hit.index));
+      const right=cleanTitle(piece.slice(hit.index+hit.length, rightEnd));
+      let title=(left && left.length>=2)?left:(right && right.length>=2?right:'');
+      if(!title) title='Appointment';
+      const when=dateIn(slice);
+      const days=dayHits(slice);
+      const useDays=days.length?days:(dayHits(piece).length?dayHits(piece):[0]);
+      if(when){
+        results.push({title:title, day:mondayIndex(new Date(when+'T12:00:00')), start:times.start, end:times.end, room:'', scope:'session', date:when, oneOff:true, ambiguous:false});
+        return;
+      }
+      useDays.forEach(function(d){
+        results.push({title:title, day:d, start:times.start, end:times.end, room:'', scope:'semester', ambiguous:false});
+      });
+    });
+  });
+  return results.length?results:null;
+}
+
 function parseTimetableText(raw){
   const original = String(raw||'');
-  // Excel grid if first lines contain 2+ time ranges (before Notion steals the text)
+  const loose = parseLooseAppointments(original);
   const grid = parseExcelGridTimetable(original);
-  if(grid && grid.length) return applySchoolHoursToResults(grid);
+  if(grid && grid.length && (!loose || grid.length >= loose.length)) return applySchoolHoursToResults(grid);
+  if(loose && loose.length) return applySchoolHoursToResults(loose);
+  // Excel grid if first lines contain 2+ time ranges (before Notion steals the text)
   const notion = parseNotionListTimetable(original);
   if(notion && notion.length) return applySchoolHoursToResults(notion);
 
@@ -12741,8 +13465,9 @@ function viewSemester(){
     <h3 style="margin:0 0 6px">Quick add (paste or type)</h3>
     <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">
       Put several things at once — ${isStudentMode()?'classes, gym, study, anything.':'meetings, gym, errands, anything.'}<br>
-      <b>Option 1:</b> Upload a screenshot of a schedule.<br>
-      <b>Option 2:</b> Paste from Excel/Notion, or type lines like <i>Bio Mon 8:30</i> or <i>Gym Tue 3 to 5</i>.<br>
+      <b>Option 1:</b> Hold and speak. The words appear in the box. Edit them before you save.<br>
+      <b>Option 2:</b> Paste a screenshot into the box, or attach a picture.<br>
+      <b>Option 3:</b> Type one item per line. Example: <i>Dentist Mon 2pm</i> then <i>Doctor Tue 4pm</i>.<br>
       Prefer one item with more detail? Use <b>Add to schedule</b> below.
     </p>
     <div class="row" style="margin-bottom:8px">
@@ -12758,7 +13483,9 @@ function viewSemester(){
       <button class="btn sm" id="ttOcrBtn" style="flex:0 0 auto">Read screenshot</button>
     </div>
     <div id="ttOcrStatus" style="font-size:.82rem;color:var(--muted);margin-bottom:8px"></div>
-    <textarea id="ttPaste" rows="4" placeholder="Text appears here after OCR, or paste Excel grid / type classes…" style="width:100%"></textarea>
+    <button type="button" class="btn" id="ttHold" data-voice="quick" style="touch-action:none;user-select:none">Hold and speak</button>
+    <div id="ttVoiceStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0 8px">Hold the button and say every appointment, with the day and time. Let go. Check the list before you save.</div>
+    <textarea id="ttPaste" rows="4" placeholder="One item per line, or paste a screenshot here" style="width:100%"></textarea>
     <button class="btn" id="ttParseBtn" style="margin-top:10px">Preview</button>
     <div id="ttPreview" style="margin-top:12px"></div>
   </div>
@@ -13656,9 +14383,11 @@ function viewJournal(){
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Capture it before it vanishes</div>
     <h1>Journal</h1>
-    <p>Quick thoughts. Later: File it, Do it, or Drop it.</p>
+    <p>Quick thoughts. Hold the button to speak, or type. Edit the words, then add the note. Later: File it, Do it, or Drop it.</p>
   </div>
   <div class="card">
+    <button type="button" class="btn" id="journalHold" data-voice="journal" style="touch-action:none;user-select:none">Hold and speak</button>
+    <div id="journalVoiceStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0 8px">Hold the button and say the whole note. Let go, edit it, then add it. Nothing is saved yet.</div>
     <textarea id="journalText" rows="3" placeholder="What's on your mind?" style="width:100%"></textarea>
     <button class="btn" id="journalSave" style="margin-top:10px">Add sticky note</button>
     <button class="btn ghost sm" id="journalAiBtn" style="margin-top:10px;margin-left:8px">✨ Ask AI to sort this thought</button>
@@ -14245,6 +14974,8 @@ function viewHabits(){
   `)}
   ${habitSec('add','Add a habit', `
     <div class="field"><label>Name</label><input id="newHabitName" placeholder="Example: Take medicine"></div>
+    <button type="button" class="btn" id="habitHold" data-voice="habit" style="touch-action:none;user-select:none;margin-top:8px">Hold and speak</button>
+    <div id="habitVoiceStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0 0">Hold the button and say the whole habit: name, time, whether to ask you, whether it goes in Stats, and one time or repeat. Then check the form. Nothing is saved yet.</div>
     <div class="field"><label>Ask me at</label><input type="time" id="newHabitTime" value="18:00"></div>
     <label style="display:block;margin:6px 0;font-size:.9rem"><input type="checkbox" id="newHabitRemind" checked> Ask me about this habit</label>
     <label style="display:block;margin:6px 0;font-size:.9rem"><input type="checkbox" id="newHabitTrack" checked> Show this in Stats</label>
@@ -14635,7 +15366,7 @@ function viewHelp(){
       <p>Plan → Schedule. Use Day, Week, Columns, or Month. Tap an event to edit it. Tap Add on a day, or a time in Day view, to create one.</p>
     </details>
     <details class="faqitem"><summary>${isStudentMode()?'Add many classes at once':'Add many commitments at once'}</summary>
-      <p>Plan → Schedule → Quick add. Type lines, paste a timetable, or upload a screenshot, then Read screenshot. Edit the text. Tap Check what I read, then Yes — save. Cancel adds nothing.</p>
+      <p>Plan → Schedule → Quick add. Type lines, paste a timetable, or upload a screenshot, then Read screenshot. Edit the text. Tap Check what I read, then Save as appointments or Save as tasks. Cancel adds nothing.</p>
     </details>
   `)}
   ${helpBox('parts','About each page', orgCards().map(c=>`<div class="techcard">
@@ -16187,7 +16918,7 @@ function wireView(){
       if(!p) return;
       if(p.action==='challenge-home'){ state.challengeId=null; persistRender(); return; }
       if(p.action==='hard-first'){ state.listMode='must-frog-pick'; state.filter='all'; navigateTo('tasks'); return; }
-      if(p.action==='still-here'){ state.listMode='slipped'; state.filter='all'; navigateTo('tasks'); return; }
+      if(p.action==='still-here'){ try{ syncExerciseLinks(); }catch(e){} state.pickStill=true; persistRender(); return; }
       if(p.action==='start-wizard') openStartWizard();
       else if(p.action==='due-wizard') openDueWizard();
       else if(p.action==='plan-ahead'){ state.view='planAhead'; persistRender(); }
@@ -16363,6 +17094,7 @@ function wireView(){
     });
 
     const addBtn=document.getElementById('addTaskBtn'); if(addBtn) addBtn.addEventListener('click', addTask);
+    try{ wireHoldTalk('taskHold','newTitle','taskVoiceStatus'); }catch(e){}
 
     const newDateEl=document.getElementById('newDate');
     function syncLeadOptions(){
@@ -16560,14 +17292,18 @@ function wireView(){
     if(prev) prev.addEventListener('click', ()=>{
       calendarBrowsing=true;
       const d=new Date(state.calRef+'T00:00:00');
-      if(state.calMode==='month') d.setMonth(d.getMonth()-1); else d.setDate(d.getDate()-7);
+      if(state.calMode==='month') d.setMonth(d.getMonth()-1);
+      else if(state.calMode==='day'){ d.setDate(d.getDate()-1); state.selectedDay=toDateStr(d); }
+      else d.setDate(d.getDate()-7);
       state.calRef=toDateStr(d); persistRender();
     });
     const next=document.getElementById('calNext');
     if(next) next.addEventListener('click', ()=>{
       calendarBrowsing=true;
       const d=new Date(state.calRef+'T00:00:00');
-      if(state.calMode==='month') d.setMonth(d.getMonth()+1); else d.setDate(d.getDate()+7);
+      if(state.calMode==='month') d.setMonth(d.getMonth()+1);
+      else if(state.calMode==='day'){ d.setDate(d.getDate()+1); state.selectedDay=toDateStr(d); }
+      else d.setDate(d.getDate()+7);
       state.calRef=toDateStr(d); persistRender();
     });
     const clearNote=document.getElementById('clearSchedNotice');
@@ -16583,11 +17319,23 @@ function wireView(){
     main.querySelectorAll('[data-action="cal-new"]').forEach(btn=>btn.addEventListener('click', (e)=>{
       e.stopPropagation();
       const date=btn.dataset.date||state.selectedDay||todayStr();
-      openCalDraft({date, start: btn.dataset.time||'09:00', end:'10:00', repeat:'once'});
+      const start=btn.dataset.time||'09:00';
+      let end='10:00';
+      const sm=calMinutes(start);
+      if(sm!=null){
+        const e=Math.min(sm+60, 23*60+59);
+        end=String(Math.floor(e/60)).padStart(2,'0')+':'+String(e%60).padStart(2,'0');
+      }
+      openCalDraft({date, start, end, repeat:'once'});
     }));
     main.querySelectorAll('[data-action="cal-open"]').forEach(btn=>btn.addEventListener('click', (e)=>{
       e.stopPropagation();
       const kind=btn.dataset.kind, id=btn.dataset.id;
+      if(kind==='exercise'){
+        beginExerciseEdit(id);
+        navigateTo('habits');
+        return;
+      }
       if(kind==='class'){
         const c=(state.classes||[]).find(x=>String(x.id)===String(id));
         if(!c) return;
@@ -16720,6 +17468,8 @@ function wireView(){
     }));
     const addClassBtn=document.getElementById('addClassBtn'); if(addClassBtn) addClassBtn.addEventListener('click', addClass);
     if(document.getElementById('addSchedBtn')) wireSchedForm();
+    try{ wireScreenshotPaste(); }catch(e){}
+    try{ wireHoldTalk('ttHold','ttPaste','ttVoiceStatus'); }catch(e){}
     const ttParseBtn=document.getElementById('ttParseBtn');
     if(ttParseBtn) ttParseBtn.addEventListener('click', ()=>{
       const raw=document.getElementById('ttPaste')?.value||'';
@@ -16753,7 +17503,8 @@ function wireView(){
             <button type="button" class="btn ghost sm tt-remove" data-i="${i}" style="margin-top:6px">Remove this</button>
           </div>`).join('')}
         <div class="row" style="margin-top:10px">
-          <button class="btn" id="ttConfirmBtn">Yes — save</button>
+          <button class="btn" id="ttConfirmBtn">Save as appointments</button>
+          <button class="btn ghost" id="ttTaskBtn">Save as tasks</button>
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
         </div>`;
       box.querySelectorAll('.tt-remove').forEach(btn=>{
@@ -16779,7 +17530,7 @@ function wireView(){
           const parsed=window._ttParsed;
           box.innerHTML=`<div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} item(s). Edit anything below, then save.</div>`+
             parsed.map((p,i)=>`<div class="card" style="margin-bottom:8px;padding:10px"><div class="field"><label>Name</label><input class="tt-edit-title" data-i="${i}" value="${escapeHtml(p.title)}"></div><div class="row" style="margin-top:6px">${p.oneOff||p.date?`<div class="field"><label>Date</label><input type="date" class="tt-edit-date" data-i="${i}" value="${p.date||''}"></div>`:`<div class="field"><label>Day</label><select class="tt-edit-day" data-i="${i}">${dayNames.map((d,di)=>`<option value="${di}" ${di===p.day?'selected':''}>${d}</option>`).join('')}</select></div>`}<div class="field"><label>Start</label><input type="time" class="tt-edit-start" data-i="${i}" value="${p.start}"></div><div class="field"><label>End</label><input type="time" class="tt-edit-end" data-i="${i}" value="${p.end}"></div></div><button type="button" class="btn ghost sm tt-remove" data-i="${i}" style="margin-top:6px">Remove this</button></div>`).join('')+
-            `<div class="row" style="margin-top:10px"><button class="btn" id="ttConfirmBtn">Yes — save</button><button class="btn ghost" id="ttCancelBtn">Cancel</button></div>`;
+            `<div class="row" style="margin-top:10px"><button class="btn" id="ttConfirmBtn">Save as appointments</button><button class="btn ghost" id="ttTaskBtn">Save as tasks</button><button class="btn ghost" id="ttCancelBtn">Cancel</button></div>`;
           // re-bind by simulating - user clicks Preview again if needed; simple: location reload form
           ttParseBtn.click();
         });
@@ -16847,6 +17598,11 @@ function wireView(){
         openConflictQueue(queue);
       });
       document.getElementById('ttCancelBtn').addEventListener('click', ()=>{ box.innerHTML=''; });
+      const ttTaskBtn=document.getElementById('ttTaskBtn');
+      if(ttTaskBtn) ttTaskBtn.addEventListener('click', ()=>{
+        const list=readTtPreview(box, (window._ttParsed || parsed).slice());
+        saveParsedAsTasks(list);
+      });
     });
     const classScopeSel=document.getElementById('classScope');
     if(classScopeSel) classScopeSel.addEventListener('change', ()=>{
@@ -16861,6 +17617,8 @@ function wireView(){
   }
 
   if(state.view==='semester'){
+    try{ wireScreenshotPaste(); }catch(e){}
+    try{ wireHoldTalk('ttHold','ttPaste','ttVoiceStatus'); }catch(e){}
     const addClassBtn=document.getElementById('addClassBtn'); if(addClassBtn) addClassBtn.addEventListener('click', addClass);
     if(document.getElementById('addSchedBtn')) wireSchedForm();
     const ttOcrBtn=document.getElementById('ttOcrBtn');
@@ -16921,7 +17679,8 @@ function wireView(){
             <button type="button" class="btn ghost sm tt-remove" data-i="${i}" style="margin-top:6px">Remove this</button>
           </div>`).join('')}
         <div class="row" style="margin-top:10px">
-          <button class="btn" id="ttConfirmBtn">Yes — save</button>
+          <button class="btn" id="ttConfirmBtn">Save as appointments</button>
+          <button class="btn ghost" id="ttTaskBtn">Save as tasks</button>
           <button class="btn ghost" id="ttCancelBtn">Cancel</button>
         </div>`;
       box.querySelectorAll('.tt-remove').forEach(btn=>{
@@ -16947,7 +17706,7 @@ function wireView(){
           const parsed=window._ttParsed;
           box.innerHTML=`<div style="font-weight:700;margin-bottom:8px">Found ${parsed.length} item(s). Edit anything below, then save.</div>`+
             parsed.map((p,i)=>`<div class="card" style="margin-bottom:8px;padding:10px"><div class="field"><label>Name</label><input class="tt-edit-title" data-i="${i}" value="${escapeHtml(p.title)}"></div><div class="row" style="margin-top:6px">${p.oneOff||p.date?`<div class="field"><label>Date</label><input type="date" class="tt-edit-date" data-i="${i}" value="${p.date||''}"></div>`:`<div class="field"><label>Day</label><select class="tt-edit-day" data-i="${i}">${dayNames.map((d,di)=>`<option value="${di}" ${di===p.day?'selected':''}>${d}</option>`).join('')}</select></div>`}<div class="field"><label>Start</label><input type="time" class="tt-edit-start" data-i="${i}" value="${p.start}"></div><div class="field"><label>End</label><input type="time" class="tt-edit-end" data-i="${i}" value="${p.end}"></div></div><button type="button" class="btn ghost sm tt-remove" data-i="${i}" style="margin-top:6px">Remove this</button></div>`).join('')+
-            `<div class="row" style="margin-top:10px"><button class="btn" id="ttConfirmBtn">Yes — save</button><button class="btn ghost" id="ttCancelBtn">Cancel</button></div>`;
+            `<div class="row" style="margin-top:10px"><button class="btn" id="ttConfirmBtn">Save as appointments</button><button class="btn ghost" id="ttTaskBtn">Save as tasks</button><button class="btn ghost" id="ttCancelBtn">Cancel</button></div>`;
           // re-bind by simulating - user clicks Preview again if needed; simple: location reload form
           ttParseBtn.click();
         });
@@ -17015,6 +17774,11 @@ function wireView(){
         openConflictQueue(queue);
       });
       document.getElementById('ttCancelBtn').addEventListener('click', ()=>{ box.innerHTML=''; });
+      const ttTaskBtn=document.getElementById('ttTaskBtn');
+      if(ttTaskBtn) ttTaskBtn.addEventListener('click', ()=>{
+        const list=readTtPreview(box, (window._ttParsed || parsed).slice());
+        saveParsedAsTasks(list);
+      });
     });
   }
 
@@ -17023,6 +17787,7 @@ function wireView(){
   }
 
   if(state.view==='journal'){
+    try{ wireHoldTalk('journalHold','journalText','journalVoiceStatus'); }catch(e){}
     const js=document.getElementById('journalSave'); if(js) js.addEventListener('click', addJournalEntry);
     const ja=document.getElementById('journalAiBtn');
     if(ja) ja.addEventListener('click', ()=>{
@@ -17036,6 +17801,7 @@ function wireView(){
   }
   if(state.view==='habits'){
     const addHabitBtn=document.getElementById('addHabitBtn'); if(addHabitBtn) addHabitBtn.addEventListener('click', addHabit);
+    try{ wireHoldTalk('habitHold','newHabitName','habitVoiceStatus'); }catch(e){}
     const screenSave=document.getElementById('screenSave'); if(screenSave) screenSave.addEventListener('click', saveScreenPlan);
     function stashWorkout(date){
       const row=readWorkoutRow(date);
@@ -17557,6 +18323,7 @@ function wireView(){
   }
 
   if(state.view==='nudge'){
+    try{ wireHoldTalk('wakeHold','wakeName','wakeVoiceStatus'); }catch(e){}
     try{
       const clock=document.getElementById('nudgeNowClock');
       if(clock){
