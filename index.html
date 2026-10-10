@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="341">
+<meta name="snapback-build" content="342">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -8334,7 +8334,6 @@ function viewChallenges(){
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">What feels hard right now?</div>
     <h1>Challenges</h1>
-    <p>Pick one struggle. SnapBack opens a short path of tools (Bite Size, Focus Plate, Journal, timer). You only need one path — not all of them.</p>
   </div>
   <div style="display:grid;gap:10px">
     ${CHALLENGES.map(c=>`
@@ -14115,16 +14114,18 @@ function workoutPlanHtml(){
       : `<button type="button" class="btn ghost sm" data-action="wp-edit" data-date="${ds}">Edit</button>`+(plan?` <button type="button" class="btn ghost sm" data-action="ex-clear" data-id="${escapeHtml(plan.id)}">Clear</button>`:'');
     return `<tr data-wp-row="${ds}" data-plan="${plan?escapeHtml(plan.id):''}" data-repeat="${plan&&!plan.onceDate?'1':'0'}" style="background:${bg}"><td style="padding:8px">${dayCell}</td><td style="padding:8px">${timeCell}</td><td style="padding:8px">${focusCell}</td><td style="padding:8px">${detailCell}</td><td style="padding:8px" data-wp-dur="${ds}">${escapeHtml(workoutDurText(start,end))}</td><td style="padding:8px;white-space:nowrap">${buttons}</td></tr>`;
   }).join('');
-  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 6px;flex-wrap:wrap">
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 8px">
       <span style="font-weight:800">Workout Plan</span>
-      <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-        <button type="button" class="btn ghost sm" data-action="workout-shift" data-dir="-1" aria-label="Previous">‹</button>
+      <span style="display:flex;gap:6px">
         <button type="button" class="${view==='week'?'btn sm':'btn ghost sm'}" data-action="workout-view" data-mode="week">Week</button>
         <button type="button" class="${view==='month'?'btn sm':'btn ghost sm'}" data-action="workout-view" data-mode="month">Month</button>
-        <button type="button" class="btn ghost sm" data-action="workout-shift" data-dir="1" aria-label="Next">›</button>
       </span>
     </div>
-    <p style="margin:0 0 10px;font-size:.85rem;color:var(--muted)">${escapeHtml(workoutRangeLabel())}</p>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 10px">
+      <button type="button" class="btn ghost sm" data-action="workout-shift" data-dir="-1" aria-label="Previous" style="min-width:52px;font-size:1.25rem;line-height:1">←</button>
+      <span style="font-weight:700;text-align:center;flex:1">${escapeHtml(workoutRangeLabel())}</span>
+      <button type="button" class="btn ghost sm" data-action="workout-shift" data-dir="1" aria-label="Next" style="min-width:52px;font-size:1.25rem;line-height:1">→</button>
+    </div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:separate;border-spacing:0;font-size:.86rem;border-radius:12px;overflow:hidden">
       <tr>
         <th style="background:#3b82f6;color:#fff;padding:8px">Day</th>
@@ -14794,7 +14795,7 @@ function viewSettings(){
       <button class="btn ghost sm" id="gotoHelpBtn" type="button">Help &amp; FAQ</button>
     </p>
     <details class="setgroup" id="settingsProfileDetails">
-      <summary>Your profile</summary>
+      <summary>Your Profile</summary>
       <div class="setgroup-body">
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px"></p>
       <div class="field"><label>I am…</label>
@@ -14839,17 +14840,6 @@ function viewSettings(){
       <button class="btn ghost sm" id="logoutBtn" style="margin-top:10px;margin-left:8px">Log out</button>
       </div>
     </details>
-
-    <details class="setgroup">
-      <summary>Web App Link</summary>
-        <p style="font-size:.8rem;color:var(--muted);margin:10px 0 8px">Open the same SnapBack on a laptop: tap <b>Copy link</b>, paste in any browser. (A shorter custom domain needs your own domain name later — the link still works as-is.)</p>
-      <div class="field"><label>Your web app link</label>
-        <input id="publicWebUrlInput" readonly value="${escapeHtml((state.settings&&state.settings.publicWebUrl)||DEFAULT_PUBLIC_WEB_URL||'')}" style="font-size:.85rem">
-      </div>
-      <button type="button" class="btn" id="copyPublicWebUrlBtn" style="margin-top:8px;width:100%">Copy link</button>
-      </div>
-    </details>
-
     <details class="setgroup">
       <summary>Account</summary>
       <div class="setgroup-body">
@@ -14870,36 +14860,54 @@ ${(state.settings&&state.settings.adminOpen)?`<details style="margin-top:12px" i
       </details>`:''}
       </div>
     </details>
-
-${(state.settings&&state.settings.adminOpen)?`    <details class="setgroup">
-      <summary>Import tasks (from other apps)</summary>
-      <div class="setgroup-body">
-        <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">
-          <b>What this does:</b> Adds tasks from a <b>CSV</b> file exported from Todoist, TickTick, Microsoft To Do, and similar apps.
-          This does <b>not</b> restore a full SnapBack backup.
-        </p>
-        <div class="field"><label>Choose CSV file</label>
-          <input type="file" id="taskCsvInput" accept=".csv,text/csv,text/plain" style="font-size:.85rem;width:100%">
-        </div>
-        <p style="font-size:.8rem;color:var(--muted);margin:10px 0 4px">Or paste CSV text (include the header row):</p>
-        <textarea id="taskCsvPaste" rows="4" placeholder="Content,Due Date,Priority,Description&#10;Finish lab report,2026-09-01,2,Chapter 4" style="width:100%"></textarea>
-        <button type="button" class="btn" id="taskCsvImportBtn" style="margin-top:12px;width:100%">Preview &amp; import CSV tasks</button>
-        <div id="taskCsvStatus" style="font-size:.85rem;margin-top:8px;color:var(--muted)"></div>
+    <details class="setgroup"><summary>Share an Update</summary><div style="margin-top:8px">
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Pick a range and what to include, then edit the preview if you want. Share buttons send <b>exactly</b> what is in the box.</p>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <button type="button" class="btn ghost sm" id="shareRangeToday">Today</button>
+        <div class="field" style="flex:1;min-width:120px"><label>From</label><input type="date" id="shareFrom" value=""></div>
+        <div class="field" style="flex:1;min-width:120px"><label>To</label><input type="date" id="shareTo" value=""></div>
       </div>
-    </details>
-
-`:''}
-
-    <details class="setgroup">
-      <summary>Terms of Use</summary>
-      <div class="setgroup-body">
-        <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Licence, privacy summary, and rules against republishing SnapBack as another product.</p>
-        <button type="button" class="btn" data-action="nav" data-view="terms" style="width:100%">Read Terms of Use</button>
+      <div style="display:flex;flex-direction:column;gap:8px;margin:10px 0;max-width:320px">
+        <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelDone" checked style="width:18px;height:18px;flex:0 0 auto"> <span>Completed tasks</span></label>
+        <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelOpen" checked style="width:18px;height:18px;flex:0 0 auto"> <span>Open tasks</span></label>
+        <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelClasses" style="width:18px;height:18px;flex:0 0 auto"> <span>Class load summary</span></label>
       </div>
-    </details>
-
+      <div class="field" style="margin-top:8px"><label>Preview (editable — your edits are kept when you share)</label><textarea id="sharePreview" rows="6" style="width:100%;font-size:.85rem"></textarea>
+        <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">Edit freely. WhatsApp / Email / Download / Copy use this text. “Regenerate from tasks” rebuilds from the date range above (asks first if you edited).</p></div>
+      <div class="field"><label>Person's WhatsApp number</label><input id="shareWaPhone" placeholder="e.g. 9198xxxxxxxx" value="${escapeHtml((state.profile&&state.profile.waPhone)||'')}"></div>
+      <div class="field"><label>Email (optional)</label><input id="shareEmail" type="email" placeholder="teacher@school.edu" value="${escapeHtml((state.profile&&state.profile.teacherEmail)||'')}"></div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+        <button type="button" class="btn" id="shareRefreshPreview">Regenerate from tasks</button>
+        <button type="button" class="btn" id="shareWaBtn">WhatsApp</button>
+        <button type="button" class="btn" id="shareEmailBtn">Email</button>
+        <button type="button" class="btn" id="shareDownloadBtn">Download</button>
+        <button type="button" class="btn" id="shareCopyBtn">Copy text</button>
+      </div>
+    </div>
+    </div></details></div>
+  <details class="setgroup"><summary>Permissions</summary>
+    <div class="setgroup-body">
+      <p style="font-weight:700;margin:0 0 6px">Notifications</p>
+      ${toggleRow('setDeadlineNotify','Task and class nudges', s.deadlineNotify!==false)}
+      <button type="button" class="btn sm" id="grantNotifyBtn" style="margin-top:8px">Grant permission</button>
+      <div id="notifyStatus" style="font-size:.85rem;margin-top:6px;color:var(--muted)">${escapeHtml(state.lastNotifyMsg||'')}</div>
+      <p style="font-size:.8rem;color:var(--muted);margin:8px 0 14px;font-style:italic">On Android: Settings → Apps → SnapBack → Notifications → allow all; Battery → Unrestricted.</p>
+      <p style="font-weight:700;margin:0 0 6px">Confetti</p>
+      ${toggleRow('setCelebrateOn','Confetti when a task is marked done', s.celebrateOnComplete !== false)}
+      ${toggleRow('setCelebrateSound','Confetti with a short beat', s.celebrateSound !== false)}
+      <p style="font-weight:700;margin:12px 0 6px">Display</p>
+      ${toggleRow('setDarkMode','Dark mode', !!s.darkMode)}
+      ${toggleRow('setQuoteOnLoad','Show one quote a day', s.quoteOnLoad !== false)}
+      <p style="font-weight:700;margin:12px 0 6px">Install the web app</p>
+      ${(typeof isNativeApp==='function' && isNativeApp()) ? `<p style="color:var(--muted);font-size:.85rem">You already have the phone app installed.</p>`
+        : isAppInstalled() ? `<p style="color:var(--muted);font-size:.85rem">Already installed on this device.</p>`
+        : deferredInstallPrompt ? `<button class="btn" id="settingsInstallBtn">Install SnapBack</button>`
+        : isIOSDevice ? `<p style="color:var(--muted);font-size:.85rem">Tap the Share icon in Safari, then Add to Home Screen.</p>`
+        : `<p style="color:var(--muted);font-size:.85rem">On a laptop browser, use Install if it is offered. The phone still needs the SnapBack app for alarms.</p>`}
+    </div>
+  </details>
     <details class="setgroup">
-      <summary>Backup & Restore</summary>
+      <summary>Back Up & Restore</summary>
       <div class="setgroup-body">
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px;line-height:1.45">
           Sign in with Google and your work is kept. You can also download a file copy below.
@@ -14925,29 +14933,15 @@ ${(state.settings&&state.settings.adminOpen)?`    <details class="setgroup">
         <p id="syncStatus" style="font-size:.8rem;color:var(--muted);margin:8px 0 0"></p>
       </div>
     </details>
-
-
-  <details class="setgroup"><summary>Permissions</summary>
-    <div class="setgroup-body">
-      <p style="font-weight:700;margin:0 0 6px">Notifications</p>
-      ${toggleRow('setDeadlineNotify','Task and class nudges', s.deadlineNotify!==false)}
-      <button type="button" class="btn sm" id="grantNotifyBtn" style="margin-top:8px">Grant permission</button>
-      <div id="notifyStatus" style="font-size:.85rem;margin-top:6px;color:var(--muted)">${escapeHtml(state.lastNotifyMsg||'')}</div>
-      <p style="font-size:.8rem;color:var(--muted);margin:8px 0 14px;font-style:italic">On Android: Settings → Apps → SnapBack → Notifications → allow all; Battery → Unrestricted.</p>
-      <p style="font-weight:700;margin:0 0 6px">Confetti</p>
-      ${toggleRow('setCelebrateOn','Confetti when a task is marked done', s.celebrateOnComplete !== false)}
-      ${toggleRow('setCelebrateSound','Confetti with a short beat', s.celebrateSound !== false)}
-      <p style="font-weight:700;margin:12px 0 6px">Display</p>
-      ${toggleRow('setDarkMode','Dark mode', !!s.darkMode)}
-      ${toggleRow('setQuoteOnLoad','Show one quote a day', s.quoteOnLoad !== false)}
-      <p style="font-weight:700;margin:12px 0 6px">Install the web app</p>
-      ${(typeof isNativeApp==='function' && isNativeApp()) ? `<p style="color:var(--muted);font-size:.85rem">You already have the phone app installed.</p>`
-        : isAppInstalled() ? `<p style="color:var(--muted);font-size:.85rem">Already installed on this device.</p>`
-        : deferredInstallPrompt ? `<button class="btn" id="settingsInstallBtn">Install SnapBack</button>`
-        : isIOSDevice ? `<p style="color:var(--muted);font-size:.85rem">Tap the Share icon in Safari, then Add to Home Screen.</p>`
-        : `<p style="color:var(--muted);font-size:.85rem">On a laptop browser, use Install if it is offered. The phone still needs the SnapBack app for alarms.</p>`}
-    </div>
-  </details>
+    <details class="setgroup">
+      <summary>Web App Link</summary>
+        <p style="font-size:.8rem;color:var(--muted);margin:10px 0 8px">Open the same SnapBack on a laptop: tap <b>Copy link</b>, paste in any browser. (A shorter custom domain needs your own domain name later — the link still works as-is.)</p>
+      <div class="field"><label>Your web app link</label>
+        <input id="publicWebUrlInput" readonly value="${escapeHtml((state.settings&&state.settings.publicWebUrl)||DEFAULT_PUBLIC_WEB_URL||'')}" style="font-size:.85rem">
+      </div>
+      <button type="button" class="btn" id="copyPublicWebUrlBtn" style="margin-top:8px;width:100%">Copy link</button>
+      </div>
+    </details>
     <details class="setgroup"><summary>Delete Data</summary><div style="margin-top:8px">
       <p style="color:var(--muted);font-size:.85rem;margin:0 0 12px">Clear everything, or only chosen items.</p>
       <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:360px">
@@ -14986,31 +14980,31 @@ ${(state.settings&&state.settings.adminOpen)?`    <details class="setgroup">
         <p style="font-size:.75rem;color:var(--muted);margin:8px 0 0">Goes to the SnapBack operator. Your tasks stay on your device unless you paste them into the note.</p>
       </div>
     </details>
-    <details class="setgroup"><summary>Share an Update</summary><div style="margin-top:8px">
-      <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Pick a range and what to include, then edit the preview if you want. Share buttons send <b>exactly</b> what is in the box.</p>
-      <div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:8px">
-        <button type="button" class="btn ghost sm" id="shareRangeToday">Today</button>
-        <div class="field" style="flex:1;min-width:120px"><label>From</label><input type="date" id="shareFrom" value=""></div>
-        <div class="field" style="flex:1;min-width:120px"><label>To</label><input type="date" id="shareTo" value=""></div>
+    <details class="setgroup">
+      <summary>Terms of Use</summary>
+      <div class="setgroup-body">
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Licence, privacy summary, and rules against republishing SnapBack as another product.</p>
+        <button type="button" class="btn" data-action="nav" data-view="terms" style="width:100%">Read Terms of Use</button>
       </div>
-      <div style="display:flex;flex-direction:column;gap:8px;margin:10px 0;max-width:320px">
-        <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelDone" checked style="width:18px;height:18px;flex:0 0 auto"> <span>Completed tasks</span></label>
-        <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelOpen" checked style="width:18px;height:18px;flex:0 0 auto"> <span>Open tasks</span></label>
-        <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelClasses" style="width:18px;height:18px;flex:0 0 auto"> <span>Class load summary</span></label>
+    </details>
+${(state.settings&&state.settings.adminOpen)?`    <details class="setgroup">
+      <summary>Import tasks (from other apps)</summary>
+      <div class="setgroup-body">
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">
+          <b>What this does:</b> Adds tasks from a <b>CSV</b> file exported from Todoist, TickTick, Microsoft To Do, and similar apps.
+          This does <b>not</b> restore a full SnapBack backup.
+        </p>
+        <div class="field"><label>Choose CSV file</label>
+          <input type="file" id="taskCsvInput" accept=".csv,text/csv,text/plain" style="font-size:.85rem;width:100%">
+        </div>
+        <p style="font-size:.8rem;color:var(--muted);margin:10px 0 4px">Or paste CSV text (include the header row):</p>
+        <textarea id="taskCsvPaste" rows="4" placeholder="Content,Due Date,Priority,Description&#10;Finish lab report,2026-09-01,2,Chapter 4" style="width:100%"></textarea>
+        <button type="button" class="btn" id="taskCsvImportBtn" style="margin-top:12px;width:100%">Preview &amp; import CSV tasks</button>
+        <div id="taskCsvStatus" style="font-size:.85rem;margin-top:8px;color:var(--muted)"></div>
       </div>
-      <div class="field" style="margin-top:8px"><label>Preview (editable — your edits are kept when you share)</label><textarea id="sharePreview" rows="6" style="width:100%;font-size:.85rem"></textarea>
-        <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">Edit freely. WhatsApp / Email / Download / Copy use this text. “Regenerate from tasks” rebuilds from the date range above (asks first if you edited).</p></div>
-      <div class="field"><label>Person's WhatsApp number</label><input id="shareWaPhone" placeholder="e.g. 9198xxxxxxxx" value="${escapeHtml((state.profile&&state.profile.waPhone)||'')}"></div>
-      <div class="field"><label>Email (optional)</label><input id="shareEmail" type="email" placeholder="teacher@school.edu" value="${escapeHtml((state.profile&&state.profile.teacherEmail)||'')}"></div>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
-        <button type="button" class="btn" id="shareRefreshPreview">Regenerate from tasks</button>
-        <button type="button" class="btn" id="shareWaBtn">WhatsApp</button>
-        <button type="button" class="btn" id="shareEmailBtn">Email</button>
-        <button type="button" class="btn" id="shareDownloadBtn">Download</button>
-        <button type="button" class="btn" id="shareCopyBtn">Copy text</button>
-      </div>
-    </div>
-    </div></details></div>
+    </details>
+
+`:''}
     <div class="savedmsg" id="savedMsg"></div>
   </div>`;
   } catch(err){
