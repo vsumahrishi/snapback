@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="340">
+<meta name="snapback-build" content="341">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -13972,18 +13972,30 @@ function workoutDurText(start, end){
 }
 function workoutDates(){
   const today=todayStr();
+  const anchor=(state.workoutAnchor||today).slice(0,10);
   if((state.workoutView||'week')!=='month'){
-    const dow=mondayIndex(new Date(today+'T12:00:00'));
-    const monday=icsAddDays(today, -dow);
+    const dow=mondayIndex(new Date(anchor+'T12:00:00'));
+    const monday=icsAddDays(anchor, -dow);
     const out=[];
     for(let i=0;i<7;i++) out.push(icsAddDays(monday, i));
     return out;
   }
-  const y=Number(today.slice(0,4)), m=Number(today.slice(5,7));
+  const y=Number(anchor.slice(0,4)), m=Number(anchor.slice(5,7));
   const n=new Date(y, m, 0).getDate();
   const out=[];
-  for(let i=1;i<=n;i++) out.push(today.slice(0,7)+'-'+String(i).padStart(2,'0'));
+  const ym=anchor.slice(0,7);
+  for(let i=1;i<=n;i++) out.push(ym+'-'+String(i).padStart(2,'0'));
   return out;
+}
+function workoutRangeLabel(){
+  const dates=workoutDates();
+  if(!dates.length) return '';
+  if((state.workoutView||'week')==='month'){
+    const d=new Date(dates[0]+'T12:00:00');
+    const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+    return months[d.getMonth()]+' '+d.getFullYear();
+  }
+  return workoutDateLabel(dates[0])+' – '+workoutDateLabel(dates[dates.length-1]);
 }
 function planOnDate(dateStr){
   const hits=(state.exercisePlan||[]).filter(function(r){ return exerciseOccursOn(r, dateStr); });
@@ -14099,17 +14111,20 @@ function workoutPlanHtml(){
       dayCell=`<div style="font-weight:700">${escapeHtml(names[dow]||'')}</div><div style="font-weight:500;font-size:.75rem;color:#334155">${escapeHtml(workoutDateLabel(ds))}</div>`;
     }
     const buttons=editing
-      ? `<button type="button" class="btn sm" data-action="wp-save" data-date="${ds}">Save</button>`
+      ? `<button type="button" class="btn sm" data-action="wp-save" data-date="${ds}">Save</button> <button type="button" class="btn ghost sm" data-action="wp-cancel" data-date="${ds}">Cancel</button>`
       : `<button type="button" class="btn ghost sm" data-action="wp-edit" data-date="${ds}">Edit</button>`+(plan?` <button type="button" class="btn ghost sm" data-action="ex-clear" data-id="${escapeHtml(plan.id)}">Clear</button>`:'');
     return `<tr data-wp-row="${ds}" data-plan="${plan?escapeHtml(plan.id):''}" data-repeat="${plan&&!plan.onceDate?'1':'0'}" style="background:${bg}"><td style="padding:8px">${dayCell}</td><td style="padding:8px">${timeCell}</td><td style="padding:8px">${focusCell}</td><td style="padding:8px">${detailCell}</td><td style="padding:8px" data-wp-dur="${ds}">${escapeHtml(workoutDurText(start,end))}</td><td style="padding:8px;white-space:nowrap">${buttons}</td></tr>`;
   }).join('');
-  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 10px">
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 6px;flex-wrap:wrap">
       <span style="font-weight:800">Workout Plan</span>
-      <span style="display:flex;gap:6px">
+      <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <button type="button" class="btn ghost sm" data-action="workout-shift" data-dir="-1" aria-label="Previous">‹</button>
         <button type="button" class="${view==='week'?'btn sm':'btn ghost sm'}" data-action="workout-view" data-mode="week">Week</button>
         <button type="button" class="${view==='month'?'btn sm':'btn ghost sm'}" data-action="workout-view" data-mode="month">Month</button>
+        <button type="button" class="btn ghost sm" data-action="workout-shift" data-dir="1" aria-label="Next">›</button>
       </span>
     </div>
+    <p style="margin:0 0 10px;font-size:.85rem;color:var(--muted)">${escapeHtml(workoutRangeLabel())}</p>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:separate;border-spacing:0;font-size:.86rem;border-radius:12px;overflow:hidden">
       <tr>
         <th style="background:#3b82f6;color:#fff;padding:8px">Day</th>
@@ -16984,13 +16999,44 @@ function wireView(){
         persistRender();
       });
     });
+    main.querySelectorAll('[data-action="workout-shift"]').forEach(function(el){
+      el.addEventListener('click', function(){
+        const dir=Number(el.getAttribute('data-dir'))||0;
+        const today=todayStr();
+        const view=(state.workoutView||'week')==='month'?'month':'week';
+        let anchor=(state.workoutAnchor||today).slice(0,10);
+        if(view==='month'){
+          const base=new Date(anchor.slice(0,7)+'-01T12:00:00');
+          base.setMonth(base.getMonth()+dir);
+          state.workoutAnchor=toDateStr(base);
+        } else {
+          const dow=mondayIndex(new Date(anchor+'T12:00:00'));
+          const monday=icsAddDays(anchor, -dow);
+          state.workoutAnchor=icsAddDays(monday, dir*7);
+        }
+        state.workoutEdit='';
+        state.workoutDraft=null;
+        state.workoutTimeOpen='';
+        state.workoutFocusOpen='';
+        persistRender();
+      });
+    });
+    main.querySelectorAll('[data-action="wp-cancel"]').forEach(function(el){
+      el.addEventListener('click', function(){
+        state.workoutEdit='';
+        state.workoutDraft=null;
+        state.workoutTimeOpen='';
+        state.workoutFocusOpen='';
+        persistRender();
+      });
+    });
     main.querySelectorAll('[data-action="wp-edit"]').forEach(function(el){
       el.addEventListener('click', function(){
         const date=el.getAttribute('data-date');
         const plan=planOnDate(date);
         state.workoutEdit=date;
-        state.workoutTimeOpen='';
-        state.workoutFocusOpen='';
+        state.workoutTimeOpen=date;
+        state.workoutFocusOpen=date;
         state.workoutDraft={
           date:date,
           day: plan?Number(plan.day):mondayIndex(new Date(date+'T12:00:00')),
@@ -17027,8 +17073,11 @@ function wireView(){
       el.addEventListener('click', function(){
         const date=el.getAttribute('data-date');
         const row=readWorkoutRow(date);
-        if(!row || row.day==null || isNaN(row.day)){ showAppMessage('Choose a day','Pick the day in that row.'); return; }
-        if(!row.start || !row.end){ showAppMessage('Set the time','Tap Time, then choose From and To.'); return; }
+        const typed=row && (row.start || row.end || row.focus || String(row.details||'').trim());
+        if(!typed){
+          showAppMessage('Nothing to save','Change one field, or tap Cancel.');
+          return;
+        }
         state.workoutAsk=row;
         renderModal();
       });
