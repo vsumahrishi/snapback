@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="362">
+<meta name="snapback-build" content="363">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -5703,7 +5703,7 @@ function renderModal(){
     const total=n+(w.pending.length-1);
     const kind=w.kind||'event';
     const noun=kind==='task'?'Task':(kind==='nudge'?'Nudge':'Appointment');
-    const date=p.date || (p.day!=null && typeof nextDateForWeekday==='function' ? nextDateForWeekday(p.day) : todayStr());
+    const date=p.date || (p.heard ? '' : (p.day!=null && typeof nextDateForWeekday==='function' ? nextDateForWeekday(p.day) : todayStr()));
     const timeRow=kind==='event'
       ? `<div class="row" style="margin-top:8px"><div class="field"><label>Start</label><input id="wizStart" type="time" value="${escapeHtml(p.start||'')}"></div><div class="field"><label>End</label><input id="wizEnd" type="time" value="${escapeHtml(p.end||'')}"></div></div>`
       : `<div class="field" style="margin-top:8px"><label>Time</label><input id="wizStart" type="time" value="${escapeHtml(p.start||'')}"></div>`;
@@ -12855,7 +12855,7 @@ function tidySpokenName(text){
   s=s.replace(/[^a-z0-9' ]+/gi,' ');
   s=s.replace(/\s+/g,' ').trim();
   s=s.replace(/^(?:and|to|for|at|on|the|a|my|me|please)\b\s*/i,'').trim();
-  s=s.replace(/\s+\b(?:and|at|on|to|for|a)$/i,'').trim();
+  s=s.replace(/\s+\b(?:and|at|on|to|for|a|by)$/i,'').trim();
   return s;
 }
 function speechNumbers(text){
@@ -12882,35 +12882,77 @@ function clockSpans(text){
   }
   return spans;
 }
+function splitAfterDates(bit){
+  if(spokenClockList(bit).length) return [bit];
+  const re=/\b(today|tomorrow|tonight|monday|tuesday|wednesday|thursday|thrusday|friday|saturday|sunday|\d{1,2}(?:st|nd|rd|th))\b/ig;
+  const cuts=[];
+  let m;
+  while((m=re.exec(bit))){
+    const after=bit.slice(m.index+m[0].length);
+    if(!after.trim()) continue;
+    if(/^\s*(?:morning|afternoon|evening|night|eve\w*|at|around|and|or)\b/i.test(after)) continue;
+    cuts.push(m.index+m[0].length);
+  }
+  if(!cuts.length) return [bit];
+  const parts=[];
+  let from=0;
+  cuts.forEach(function(at){
+    const piece=bit.slice(from, at).trim();
+    if(piece) parts.push(piece);
+    from=at;
+  });
+  const tail=bit.slice(from).trim();
+  if(tail) parts.push(tail);
+  return parts;
+}
+function splitActionClauses(bit){
+  if(spokenClockList(bit).length) return [bit];
+  return String(bit||'').split(/\s+(?=(?:write|talk|call|email|meet|send|finish|read|submit|ask|book|visit|message|pay|buy|review|complete|study|prepare|discuss)\b)/i).map(function(p){ return p.trim(); }).filter(Boolean);
+}
+function isSpokenContinuation(bit){
+  return /^(?:and|or|on|at|the|\d{1,2}(?:st|nd|rd|th)|monday|tuesday|wednesday|thursday|thrusday|friday|saturday|sunday|tomorrow|today)\b/i.test(String(bit||'').trim());
+}
 function splitSpokenItems(text){
   const norm=normalizeSpokenClockText(text);
-  const bits=norm.split(/\s*(?:\.\s+|;\s+|\n+|\s+(?:and then|then|also)\s+|\s+\band\b\s+|,\s*)/i);
+  const bits=[];
+  norm.split(/\s*(?:\.\s+|;\s+|\n+)\s*/).forEach(function(sentence){
+    splitAfterDates(sentence).forEach(function(dated){
+      splitActionClauses(dated).forEach(function(action){
+        action.split(/\s*(?:and then|then|also)\s+|\s+\band\b\s+|,\s*/i).forEach(function(p){
+          p=p.trim();
+          if(p) bits.push(p);
+        });
+      });
+    });
+  });
   const out=[];
   let hold='';
   function take(bit){
     bit=String(bit||'').trim();
     if(!bit) return;
     const spans=clockSpans(bit);
-    if(spans.length<2){
-      if(!spokenClockList(bit).length){ hold=hold ? (hold+' '+bit) : bit; return; }
-      if(hold){ bit=hold+' '+bit; hold=''; }
-      out.push(bit);
+    if(spans.length>=2){
+      if(hold){ out.push(hold); hold=''; }
+      spans.forEach(function(at, i){
+        const from=i===0?0:at;
+        const to=i+1<spans.length?spans[i+1]:bit.length;
+        const piece=bit.slice(from, to).trim();
+        if(piece) out.push(piece);
+      });
       return;
     }
-    spans.forEach(function(at, i){
-      const from=i===0?0:at;
-      const to=i+1<spans.length?spans[i+1]:bit.length;
-      let piece=bit.slice(from, to).trim();
-      if(!piece) return;
-      if(i===0 && hold){ piece=hold+' '+piece; hold=''; }
-      out.push(piece);
-    });
+    if(!spokenClockList(bit).length){
+      if(hold && isSpokenContinuation(bit)){ hold=hold+' '+bit; return; }
+      if(hold) out.push(hold);
+      hold=bit;
+      return;
+    }
+    if(hold && (isSpokenContinuation(bit) || !spokenDateList(hold).length)){ bit=hold+' '+bit; hold=''; }
+    else if(hold){ out.push(hold); hold=''; }
+    out.push(bit);
   }
   bits.forEach(take);
-  if(hold){
-    if(out.length) out[out.length-1]=out[out.length-1]+' '+hold;
-    else out.push(hold);
-  }
+  if(hold && (spokenDateList(hold).length || spokenClockList(hold).length || hold.split(/\s+/).length>=3)) out.push(hold);
   return out.length?out:[norm];
 }
 function spokenDateList(text){
@@ -12950,12 +12992,12 @@ function spokenAppointments(text){
   let lastTitle='';
   lines.forEach(function(line){
     const clocks=spokenClockList(line);
-    if(!clocks.length) return;
     const dates=spokenDateList(line);
+    if(!clocks.length && !dates.length && line.split(/\s+/).length<3) return;
     let title=niceSpokenTitle(line);
     if(title==='Appointment' && lastTitle) title=lastTitle;
     else if(title!=='Appointment') lastTitle=title;
-    const start=clocks[0];
+    const start=clocks[0]||'';
     const useDates=dates.length?dates:[''];
     useDates.forEach(function(date){
       let heard=line;
@@ -12970,7 +13012,7 @@ function spokenAppointments(text){
         heard=title+' at '+clock+' on the '+day+suf;
       }
       if(title && title!=='Appointment' && heard.toLowerCase().indexOf(title.toLowerCase())<0) heard=title+' '+heard;
-      const item={title:title, start:start, end:addClockMinutes(start, 60), heard:heard, room:'', oneOff:true, ambiguous:false, scope:'session'};
+      const item={title:title, start:start, end:start?addClockMinutes(start, 60):'', heard:heard, room:'', oneOff:true, ambiguous:false, scope:'session'};
       if(date){
         item.date=date;
         item.day=(new Date(date+'T12:00:00').getDay()+6)%7;
