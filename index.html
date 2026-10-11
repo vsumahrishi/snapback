@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="364">
+<meta name="snapback-build" content="366">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -9626,16 +9626,15 @@ function taskCard(t){
       ${typeof isOverdue==='function' && isOverdue(t)?' · overdue':''}
     </div>
     ${t.notes?`<div style="font-size:.85rem;color:var(--muted);margin-bottom:10px">${escapeHtml((t.notes||'').slice(0,160))}</div>`:''}
-    <div style="display:flex;flex-wrap:wrap;gap:8px">
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-        <button type="button" class="btn sm" data-action="task-start" data-id="${t.id}">Start</button>
-        <button type="button" class="btn sm" data-action="task-complete" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">Completed</button>
-        <button type="button" class="btn ghost sm" data-action="hard-one" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">${t.frog?'🐸 Hard one':'Hard one'}</button>
-        <button type="button" class="btn ghost sm" data-action="slip-help" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">Can’t start</button>
-        <button type="button" class="btn ghost sm" data-action="start-task-edit" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">Edit</button>
-      </div>
-      <button type="button" class="btn ghost sm" data-action="quick-done" data-id="${t.id}" style="padding:6px 12px;min-height:32px;line-height:1.2">${t.done?'Undo done':'Done'}</button>
-      <button type="button" class="btn ghost sm" data-action="task-menu" style="padding:6px 12px;min-height:32px;line-height:1.2" data-id="${t.id}">More</button>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:4px">
+      <button type="button" class="btn sm" data-action="task-start" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">Start</button>
+      <button type="button" class="btn sm" data-action="task-complete" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">Completed</button>
+      <button type="button" class="btn ghost sm" data-action="hard-one" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">${t.frog?'🐸 Hard one':'Hard one'}</button>
+      <button type="button" class="btn ghost sm" data-action="slip-help" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">Can’t start</button>
+      <button type="button" class="btn ghost sm" data-action="start-task-edit" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">Edit</button>
+      <button type="button" class="btn ghost sm" data-action="quick-done" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">${t.done?'Undo done':'Done'}</button>
+      <button type="button" class="btn ghost sm" data-action="delete-task" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">Delete</button>
+      <button type="button" class="btn ghost sm" data-action="task-menu" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">More</button>
     </div>
   </li>`;
 }
@@ -12763,25 +12762,44 @@ function spokenDayHits(text){
 function speechWantsRepeat(text){
   return /\b(every|each|repeat|weekly|weekdays?|weekends?|daily)\b/i.test(String(text||''));
 }
+const MONTH_ALIASES=[['january',0],['jan',0],['february',1],['feb',1],['march',2],['mar',2],['april',3],['apr',3],['may',4],['june',5],['jun',5],['july',6],['jul',6],['august',7],['aug',7],['september',8],['sept',8],['sep',8],['october',9],['oct',9],['november',10],['nov',10],['december',11],['dec',11]];
+function monthIndex(word){
+  const w=String(word||'').toLowerCase().replace(/\./g,'');
+  for(let i=0;i<MONTH_ALIASES.length;i++) if(MONTH_ALIASES[i][0]===w) return MONTH_ALIASES[i][1];
+  return -1;
+}
+function monthPattern(){
+  return MONTH_ALIASES.map(function(a){ return a[0]; }).sort(function(a,b){ return b.length-a.length; }).join('|');
+}
+function addMonthDate(base, month, day, push){
+  if(month<0 || day<1 || day>31) return;
+  const d=new Date(base.getFullYear(), month, day, 12);
+  if(d<base) d.setFullYear(base.getFullYear()+1);
+  push(d);
+}
+function collectMonthDates(text, base, push){
+  const names=monthPattern();
+  const s=String(text||'');
+  let m;
+  const re1=new RegExp('\\b('+names+')\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b','ig');
+  while((m=re1.exec(s))) addMonthDate(base, monthIndex(m[1]), Number(m[2]), push);
+  const re2=new RegExp('\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?('+names+')\\.?\\b','ig');
+  while((m=re2.exec(s))) addMonthDate(base, monthIndex(m[2]), Number(m[1]), push);
+}
+function ordinalHasMonth(s, index, len){
+  const names=monthPattern();
+  const before=s.slice(Math.max(0, index-24), index);
+  const after=s.slice(index+len, index+len+24);
+  return new RegExp('(?:'+names+')\\.?\\s*$','i').test(before) || new RegExp('^\\s*(?:of\\s+)?(?:'+names+')\\b','i').test(after);
+}
 function spokenDate(text){
   const s=String(text||'').toLowerCase();
   const base=new Date(); base.setHours(12,0,0,0);
   if(/\btomorrow\b/.test(s)){ const d=new Date(base); d.setDate(d.getDate()+1); return toDateStr(d); }
   if(/\b(?:today|tonight|this eve\w*|this morning|this afternoon)\b/.test(s)) return toDateStr(base);
-  const months=['january','february','march','april','may','june','july','august','september','october','november','december'];
-  let m=s.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?\b/);
-  if(!m){
-    const m2=s.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\b/);
-    if(m2) m=[m2[0], m2[2], m2[1]];
-  }
-  if(m){
-    const month=months.indexOf(m[1]);
-    const day=Number(m[2]);
-    let year=base.getFullYear();
-    const d=new Date(year, month, day, 12);
-    if(d<base) d.setFullYear(year+1);
-    return toDateStr(d);
-  }
+  const found=[];
+  collectMonthDates(s, base, function(d){ found.push(toDateStr(d)); });
+  if(found.length) return found[0];
   const ord=s.match(/\b(?:on\s+)?(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)\b/);
   if(ord){
     const day=Number(ord[1]);
@@ -12842,8 +12860,8 @@ function tidySpokenName(text){
     /\b(?:on\s+|next\s+)?(?:monday|tuesday|wednesday|thursday|thrusday|friday|saturday|sunday|mon|tues?|wed|wensday|thurs?|fri|sat|sun)s?\b/gi,
     /\b(at\s+)?(noon|midnight)\b/gi,
     /\b(today|tomorrow|tonight|next week|this eve[a-z]*|this morning|this afternoon)\b/gi,
-    /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?\b/gi,
-    /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/gi,
+    /\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept(?:ember)?|sep|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?\b/gi,
+    /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept(?:ember)?|sep|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\b/gi,
     /\b(?:on\s+)?(?:the\s+)?\d{1,2}(?:st|nd|rd|th)\b/gi,
     /\b(?:at|from|until|till|between|around)\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?(?:\s*(?:to|until|till|-)\s*\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)?\b/gi,
     /\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b/gi,
@@ -12901,7 +12919,8 @@ function splitAfterDates(bit){
   while((m=re.exec(bit))){
     const after=bit.slice(m.index+m[0].length);
     if(!after.trim()) continue;
-    if(/^\s*(?:morning|afternoon|evening|night|eve\w*|at|around|and|or)\b/i.test(after)) continue;
+    if(/^\s*(?:morning|afternoon|evening|night|eve\w*|at|around|and|or|to|for|with|about|the|a)\b/i.test(after)) continue;
+    if(!/^\s*(?:write|talk|call|email|meet|send|finish|read|submit|ask|book|visit|message|pay|buy|review|complete|study|prepare|discuss)\b/i.test(after)) continue;
     cuts.push(m.index+m[0].length);
   }
   if(!cuts.length) return [bit];
@@ -12923,17 +12942,23 @@ function splitActionClauses(bit){
 function isSpokenContinuation(bit){
   return /^(?:and|or|on|at|the|\d{1,2}(?:st|nd|rd|th)|monday|tuesday|wednesday|thursday|thrusday|friday|saturday|sunday|tomorrow|today)\b/i.test(String(bit||'').trim());
 }
+function clocksAreOneRange(bit){
+  return /\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\s+(?:to|until|till|-)\s+\d{1,2}(?::\d{2})?/i.test(String(bit||''));
+}
+function isTimeOnly(bit){
+  if(!spokenClockList(bit).length) return false;
+  const name=tidySpokenName(bit);
+  return !name;
+}
 function splitSpokenItems(text){
   const norm=normalizeSpokenClockText(text);
   const bits=[];
   norm.split(/\s*(?:\.\s+|;\s+|\n+)\s*/).forEach(function(sentence){
     splitAfterDates(sentence).forEach(function(dated){
-      splitActionClauses(dated).forEach(function(action){
-        action.split(/\s*(?:and then|then|also)\s+|\s+\band\b\s+|,\s*/i).forEach(function(p){
-          p=p.trim();
-          if(p) bits.push(p);
-        });
-      });
+      const parts=dated.split(/\s*(?:and then|then|also)\s+|\s+\band\b\s+|,\s*/i).map(function(p){ return p.trim(); }).filter(Boolean);
+      const rich=parts.filter(function(p){ return spokenClockList(p).length || spokenDateList(p).length; });
+      if(parts.length>1 && rich.length>=2) parts.forEach(function(p){ bits.push(p); });
+      else if(dated.trim()) bits.push(dated.trim());
     });
   });
   const out=[];
@@ -12942,7 +12967,7 @@ function splitSpokenItems(text){
     bit=String(bit||'').trim();
     if(!bit) return;
     const spans=clockSpans(bit);
-    if(spans.length>=2){
+    if(spans.length>=2 && !clocksAreOneRange(bit)){
       if(hold){ out.push(hold); hold=''; }
       spans.forEach(function(at, i){
         const from=i===0?0:at;
@@ -12958,7 +12983,7 @@ function splitSpokenItems(text){
       hold=bit;
       return;
     }
-    if(hold && (isSpokenContinuation(bit) || !spokenDateList(hold).length)){ bit=hold+' '+bit; hold=''; }
+    if(hold && (isSpokenContinuation(bit) || isTimeOnly(bit) || !spokenDateList(hold).length)){ bit=hold+' '+bit; hold=''; }
     else if(hold){ out.push(hold); hold=''; }
     out.push(bit);
   }
@@ -12976,11 +13001,13 @@ function spokenDateList(text){
   }
   if(/\btomorrow\b/.test(s)){ const d=new Date(base); d.setDate(d.getDate()+1); push(d); }
   if(/\b(?:today|tonight|this eve\w*|this morning|this afternoon)\b/.test(s)) push(base);
+  collectMonthDates(s, base, push);
   const re=/\b(\d{1,2})(?:st|nd|rd|th)\b/g;
   let m;
   while((m=re.exec(s))){
     const day=Number(m[1]);
     if(day<1 || day>31) continue;
+    if(ordinalHasMonth(s, m.index, m[0].length)) continue;
     const d=new Date(base.getFullYear(), base.getMonth(), day, 12);
     if((base-d)/86400000>7) d.setMonth(d.getMonth()+1);
     push(d);
@@ -13023,7 +13050,7 @@ function spokenAppointments(text){
         heard=title+' at '+clock+' on the '+day+suf;
       }
       if(title && title!=='Appointment' && heard.toLowerCase().indexOf(title.toLowerCase())<0) heard=title+' '+heard;
-      const item={title:title, start:start, end:start?addClockMinutes(start, 60):'', heard:heard, room:'', oneOff:true, ambiguous:false, scope:'session'};
+      const item={title:title, start:start, end:(clocks.length>1 && clocksAreOneRange(line) ? clocks[1] : (start?addClockMinutes(start, 60):'')), heard:heard, room:'', oneOff:true, ambiguous:false, scope:'session'};
       if(date){
         item.date=date;
         item.day=(new Date(date+'T12:00:00').getDay()+6)%7;
@@ -16949,6 +16976,11 @@ function wireView(){
       state.editingTaskId=null;
       showAppMessage('Saved', t.title+(t.date?' · '+t.date:''));
       persistRender();
+    });
+    else if(action==='delete-task') el.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      const t=findTask(id); if(!t) return;
+      showAppMessage('Delete this task?', t.title, { ok:'Delete', cancel:'Cancel', onOk:function(){ deleteTask(id); } });
     });
     else if(action==='task-menu') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
