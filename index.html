@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="354">
+<meta name="snapback-build" content="356">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -12563,7 +12563,7 @@ function spokenDate(text){
     if(d<base) d.setFullYear(year+1);
     return toDateStr(d);
   }
-  const ord=s.match(/\b(?:on\s+)?(?:the\s+)(\d{1,2})(?:st|nd|rd|th)\b/);
+  const ord=s.match(/\b(?:on\s+)?(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)\b/);
   if(ord){
     const day=Number(ord[1]);
     const d=new Date(base.getFullYear(), base.getMonth(), day, 12);
@@ -12622,8 +12622,27 @@ function tidySpokenName(text){
   s=s.replace(/\s+\b(?:and|at|on|to|for|a)$/i,'').trim();
   return s;
 }
+function speechNumbers(text){
+  const ones={zero:0,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12};
+  let s=String(text||'');
+  s=s.replace(/\bhalf past ([a-z]+)\b/gi, function(_, w){ const n=ones[w.toLowerCase()]; return n==null?_: (n+':30'); });
+  s=s.replace(/\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(a\.?m\.?|p\.?m\.?)\b/gi, function(_, w, ap){ const n=ones[w.toLowerCase()]; return n==null?_: (n+' '+ap); });
+  s=s.replace(/\b(at|from|until|till|around)\s+(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/gi, function(_, prep, w){ const n=ones[w.toLowerCase()]; return n==null?_: (prep+' '+n); });
+  return s;
+}
+function splitSpokenItems(text){
+  const bits=String(text||'').split(/\s+(?:and then|then|also)\s+/i);
+  const out=[];
+  bits.forEach(function(bit){
+    const parts=bit.split(/\s+\band\b\s+/i);
+    if(parts.length>=2 && spokenClockList(parts[0]).length && spokenClockList(parts[1]).length){
+      parts.forEach(function(p){ if(p.trim()) out.push(p.trim()); });
+    } else if(bit.trim()) out.push(bit.trim());
+  });
+  return out;
+}
 function planFromSpeech(kind, text){
-  const raw=String(text||'').replace(/\s+/g,' ').trim();
+  const raw=speechNumbers(String(text||'')).replace(/\s+/g,' ').trim();
   const low=raw.toLowerCase();
   const until=raw.match(/\b(?:until|till)\s+(.+)$/i);
   const body=until ? raw.slice(0, until.index) : raw;
@@ -12720,6 +12739,7 @@ function applySpokenForm(kind, text, statusEl){
       setFormRadio('wakeWhen','once');
       setFormValue('wakeOnceDate', plan.date || todayStr());
     }
+    try{ captureNudgeDraft(); }catch(e){}
     setFormCheck('wakeMathOn', plan.math);
     if(plan.alert) setFormRadio('wakeAlert', plan.alert);
     setFormValue('wakeSoundSelect', plan.sound);
@@ -12781,7 +12801,8 @@ function finishHeard(area, statusEl){
     return;
   }
   if(kind==='quick' || kind==='journal' || !kind){
-    appendHeardText(area, said);
+    const lines = kind==='quick' ? splitSpokenItems(speechNumbers(said)) : [said];
+    lines.forEach(function(line){ appendHeardText(area, line); });
     if(kind==='quick'){
       const btn=document.getElementById('ttParseBtn');
       if(btn) btn.click();
@@ -12836,52 +12857,43 @@ function loadWhisper(statusEl){
     });
   return window._snapWhisperPromise;
 }
+function releaseMic(){
+  try{ if(_talkRec){ _talkRec.onend=null; _talkRec.onerror=null; _talkRec.onresult=null; _talkRec.abort(); } }catch(e){}
+  _talkRec=null;
+  try{ if(_micRecorder && _micRecorder.state!=='inactive') _micRecorder.stop(); }catch(e){}
+  _micRecorder=null;
+  if(_micStream){ try{ _micStream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){} _micStream=null; }
+}
 function startBrowserMic(statusEl){
+  releaseMic();
   _micChunks=[];
-  const pending=navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true}}).then(function(stream){
+  const grab=function(n){
+    return navigator.mediaDevices.getUserMedia({audio:true}).catch(function(){
+      if(n>=1) throw new Error('mic');
+      return new Promise(function(res){ setTimeout(res, 700); }).then(function(){ return grab(n+1); });
+    });
+  };
+  const pending=grab(0).then(function(stream){
     _micStream=stream;
     let rec;
-    try{ rec=new MediaRecorder(stream, {mimeType:'audio/webm'}); }
+    try{ rec=new MediaRecorder(stream); }
     catch(e){ rec=new MediaRecorder(stream); }
     rec.ondataavailable=function(ev){ if(ev.data && ev.data.size) _micChunks.push(ev.data); };
-    rec.start(200);
+    rec.start();
     _micRecorder=rec;
     loadWhisper(statusEl).catch(function(){});
-    if(statusEl && !(_talkTranscript||_talkPartial)) statusEl.textContent='Listening… speak now. Click Done speaking when you finish.';
+    if(statusEl) statusEl.textContent='Listening… speak now. Click Done speaking when you finish.';
   });
   _micStartPromise=pending;
   return pending;
-}
-function startWebSpeechQuiet(statusEl){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR) return;
-  try{ if(_talkRec){ _talkRec.onend=null; _talkRec.onerror=null; _talkRec.abort(); } }catch(e){}
-  const rec=new SR();
-  rec.lang=(navigator.language && String(navigator.language).indexOf('en')===0) ? navigator.language : 'en-US';
-  rec.continuous=true;
-  rec.interimResults=true;
-  rec.onresult=function(ev){
-    let interim='';
-    for(let i=ev.resultIndex;i<ev.results.length;i++){
-      const bit=ev.results[i][0].transcript;
-      if(ev.results[i].isFinal) noteHeard(bit, true);
-      else interim+=bit;
-    }
-    if(interim){
-      _talkPartial=interim;
-      if(statusEl) statusEl.textContent='Hearing… '+((_talkTranscript+' '+interim).replace(/\s+/g,' ').trim());
-    }
-  };
-  rec.onerror=function(){};
-  rec.onend=function(){ if(_talkHeld){ try{ rec.start(); }catch(e){} } };
-  _talkRec=rec;
-  try{ rec.start(); }catch(e){}
 }
 function stopBrowserMic(){
   return new Promise(function(resolve){
     const rec=_micRecorder;
     _micRecorder=null;
     const finish=function(blob){
+      if(finish.done) return;
+      finish.done=true;
       if(_micStream){ try{ _micStream.getTracks().forEach(function(t){ t.stop(); }); }catch(e){} _micStream=null; }
       resolve(blob||null);
     };
@@ -12892,63 +12904,52 @@ function stopBrowserMic(){
       finish(blob);
     };
     try{ rec.stop(); }catch(e){ finish(null); }
+    setTimeout(function(){
+      if(finish.done) return;
+      const blob=_micChunks.length ? new Blob(_micChunks, {type:'audio/webm'}) : null;
+      finish(blob);
+    }, 1500);
   });
 }
 function transcribeBlob(blob, statusEl){
-  if(!blob || blob.size<800) return Promise.resolve('');
+  if(!blob || blob.size<400) return Promise.resolve('');
   if(statusEl) statusEl.textContent='Turning that into text…';
-  return loadWhisper(statusEl).then(function(pipe){
-    return blob.arrayBuffer().then(function(buf){
-      const ctx=new AudioContext();
-      return ctx.decodeAudioData(buf.slice(0)).then(function(audio){
-        const ch=audio.getChannelData(0);
-        const samples=resampleTo16k(ch, audio.sampleRate);
-        try{ ctx.close(); }catch(e){}
-        return pipe(samples, {language:'english', task:'transcribe'});
+  const run=function(retry){
+    return loadWhisper(statusEl).then(function(pipe){
+      return blob.arrayBuffer().then(function(buf){
+        const ctx=new AudioContext();
+        return ctx.decodeAudioData(buf.slice(0)).then(function(audio){
+          const samples=resampleTo16k(audio.getChannelData(0), audio.sampleRate);
+          try{ ctx.close(); }catch(e){}
+          return pipe(samples, { sampling_rate:16000 });
+        });
       });
+    }).then(function(out){
+      let text=String((out && out.text) || '').replace(/\s+/g,' ').trim();
+      text=text.replace(/^(thanks for watching|thank you|you)\.?$/i,'').trim();
+      return text;
+    }).catch(function(){
+      window._snapWhisper=null;
+      window._snapWhisperPromise=null;
+      if(!retry) return run(true);
+      throw new Error('transcribe');
     });
-  }).then(function(out){
-    let text=String((out && out.text) || '').replace(/\s+/g,' ').trim();
-    text=text.replace(/^(thanks for watching|thank you|you)\.?$/i,'').trim();
-    return text;
-  });
+  };
+  return Promise.race([
+    run(false),
+    new Promise(function(_, reject){ setTimeout(function(){ reject(new Error('slow')); }, 20000); })
+  ]);
 }
 function startHoldTalk(area, statusEl, kind){
+  if(_talkBusy){
+    if(statusEl) statusEl.textContent='Still turning the last recording into text…';
+    return;
+  }
   _talkHeld = true;
   _talkKind = kind || '';
   _talkPartial = '';
   _talkTranscript = '';
   _talkFatal = false;
-  _talkTries = 0;
-  _talkOnText = function(text, fin, err){
-    if(err){
-      if(err==='no-speech' || err==='aborted' || err===5 || err===7) return;
-      if(err==='not-allowed' || err===9 || err==='service-not-allowed'){
-        _talkFatal = true;
-        if(statusEl) statusEl.textContent = 'Microphone is blocked. Click the lock icon beside the address, allow the microphone for this site, then click Hold and speak again.';
-        return;
-      }
-      if((err==='network' || err==='language-not-supported') && _talkTries<2 && _talkRec){
-        _talkTries++;
-        _talkRec.lang = 'en-US';
-        _talkRec.continuous = false;
-        try{ _talkRec.start(); if(statusEl) statusEl.textContent = 'Listening… speak now. Click Done speaking when you finish.'; }catch(e){}
-        return;
-      }
-      _talkFatal = true;
-      if(statusEl) statusEl.textContent = 'Speech did not start. Use Chrome or Edge, stay online, allow the microphone, then click Hold and speak once.';
-      return;
-    }
-    if(!text) return;
-    if(fin){
-      noteHeard(text, true);
-      if(_talkKind && _talkKind!=='quick' && _talkKind!=='journal') applySpokenForm(_talkKind, _talkTranscript, statusEl);
-      else if(statusEl) statusEl.textContent = 'Hearing… ' + _talkTranscript;
-    } else {
-      _talkPartial = text;
-      if(statusEl) statusEl.textContent = 'Hearing… ' + text;
-    }
-  };
   const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()
     && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm && window.Capacitor.Plugins.NudgeAlarm.startListen;
   if(native){
@@ -12966,15 +12967,14 @@ function startHoldTalk(area, statusEl, kind){
   }
   startBrowserMic(statusEl).catch(function(){
     _talkFatal=true;
+    releaseMic();
     if(statusEl) statusEl.textContent='Allow the microphone for this site, then click Hold and speak again.';
   });
-  try{ startWebSpeechQuiet(statusEl); }catch(e){}
 }
 function stopHoldTalk(area, statusEl){
   const was = _talkHeld;
   _talkHeld = false;
   _talkClickMode = false;
-  _talkFatal = true;
   const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
   const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() && plug && plug.stopListen;
   if(native){
@@ -12983,86 +12983,94 @@ function stopHoldTalk(area, statusEl){
     return;
   }
   if(!was) return;
-  try{ if(_talkRec){ _talkRec.onend=null; _talkRec.onerror=null; _talkRec.stop(); } }catch(e){}
-  const heard=(_talkTranscript||'').trim() || (_talkPartial||'').trim();
-  if(heard){
-    _talkTranscript=heard;
-    _talkPartial='';
-    _talkFatal=false;
-    stopBrowserMic();
-    finishHeard(area, statusEl);
-    return;
-  }
+  _talkBusy=true;
   if(statusEl) statusEl.textContent='Turning that into text…';
-  Promise.resolve(_micStartPromise).then(function(){
+  Promise.resolve(_micStartPromise).catch(function(){ return null; }).then(function(){
     return stopBrowserMic();
   }).then(function(blob){
     return transcribeBlob(blob, statusEl);
   }).then(function(text){
+    _talkBusy=false;
+    releaseMic();
     if(text){
       _talkTranscript=text;
       _talkPartial='';
-      _talkFatal=false;
       finishHeard(area, statusEl);
     } else if(statusEl){
       statusEl.textContent='No words came through. Click Hold and speak and try again.';
     }
   }).catch(function(){
-    if(statusEl) statusEl.textContent='Could not turn that into text. Stay online the first time so the speech model can download, then try again.';
+    _talkBusy=false;
+    releaseMic();
+    window._snapWhisper=null;
+    window._snapWhisperPromise=null;
+    if(statusEl) statusEl.textContent='That recording did not become text. Click Hold and speak and try once more.';
   });
 }
 let _talkClickMode = false;
 let _talkFatal = false;
 let _talkTries = 0;
+let _talkBusy = false;
 let _micChunks = [];
 let _micStream = null;
 let _micRecorder = null;
-function wireHoldTalk(btnId, areaId, statusId){
-  const btn = document.getElementById(btnId);
-  const area = document.getElementById(areaId);
-  const status = document.getElementById(statusId);
-  if(!btn || btn.dataset.holdWired) return;
-  btn.dataset.holdWired = '1';
-  const kind = btn.getAttribute('data-voice') || '';
-  btn.addEventListener('contextmenu', function(e){ e.preventDefault(); });
-  const down = function(e){
-    if(e.pointerType === 'mouse' && e.button !== 0) return;
+let _micStartPromise = null;
+function ensureVoiceClicks(){
+  if(window._voiceClicks) return;
+  window._voiceClicks=true;
+  document.addEventListener('pointerdown', function(e){
+    const btn=e.target && e.target.closest && e.target.closest('[data-voice]');
+    if(!btn) return;
+    if(e.pointerType==='mouse' && e.button!==0) return;
+    const area=document.getElementById(btn.getAttribute('data-area')||'');
+    const status=document.getElementById(btn.getAttribute('data-status')||'');
+    const kind=btn.getAttribute('data-voice')||'';
     if(btn.dataset.talkClick==='1'){
       btn.dataset.talkClick='';
       btn.dataset.justStopped='1';
-      _talkClickMode = false;
-      btn.style.background = '';
-      btn.textContent = 'Hold and speak';
+      btn.style.background='';
+      btn.textContent='Hold and speak';
+      window._talkBtn=null;
       stopHoldTalk(area, status);
+      return;
+    }
+    if(_talkBusy){
+      if(status) status.textContent='Still turning the last recording into text…';
       return;
     }
     btn.dataset.justStopped='';
     btn.dataset.downAt=String(Date.now());
-    _talkClickMode = true;
-    btn.style.background = 'var(--amber)';
-    btn.textContent = 'Listening…';
+    window._talkBtn=btn;
+    btn.style.background='var(--amber)';
+    btn.textContent='Listening…';
     startHoldTalk(area, status, kind);
-  };
-  const up = function(e){
-    e.preventDefault();
+  });
+  document.addEventListener('pointerup', function(){
+    const btn=window._talkBtn;
+    if(!btn) return;
     if(btn.dataset.justStopped==='1'){ btn.dataset.justStopped=''; return; }
-    const held = Date.now() - Number(btn.dataset.downAt||0);
-    if(held < 450){
+    const held=Date.now()-Number(btn.dataset.downAt||0);
+    const status=document.getElementById(btn.getAttribute('data-status')||'');
+    if(held<450){
       btn.dataset.talkClick='1';
-      _talkClickMode = true;
-      btn.textContent = 'Done speaking';
-      if(status) status.textContent = 'Listening… click Done speaking when you finish.';
+      btn.textContent='Done speaking';
+      if(status) status.textContent='Listening… click Done speaking when you finish.';
       return;
     }
-    _talkClickMode = false;
     btn.dataset.talkClick='';
-    btn.style.background = '';
-    btn.textContent = 'Hold and speak';
+    btn.style.background='';
+    btn.textContent='Hold and speak';
+    const area=document.getElementById(btn.getAttribute('data-area')||'');
+    window._talkBtn=null;
     stopHoldTalk(area, status);
-  };
-  btn.addEventListener('pointerdown', down);
-  btn.addEventListener('pointerup', up);
-  btn.addEventListener('pointercancel', up);
+  });
+}
+function wireHoldTalk(btnId, areaId, statusId){
+  const btn=document.getElementById(btnId);
+  if(!btn) return;
+  btn.setAttribute('data-area', areaId);
+  btn.setAttribute('data-status', statusId);
+  ensureVoiceClicks();
 }
 function nextDateForWeekday(dayIdx){
   const d = new Date();
@@ -13381,6 +13389,7 @@ function parseLooseAppointments(raw){
   let src = String(raw||'').replace(/\u00a0/g,' ').replace(/\r/g,'');
   if(!src.trim()) return null;
   src = src.replace(/\b(\d{1,2})[.](\d{2})\b/g, '$1:$2');
+  src = src.replace(/\b(at|from|until|till|around)\s+(\d{1,2})(?!:)\b/gi, '$1 $2:00');
   const timeRe = /(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\s*(?:-|–|—|to)\s*(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?|\b(\d{1,2})[:.](\d{2})\s*(am|pm)?|\b(\d{1,2})\s*(am|pm)\b/ig;
   function dayHits(str){
     const s=String(str||'').toLowerCase();
@@ -13484,12 +13493,16 @@ function parseLooseAppointments(raw){
       const right=cleanTitle(piece.slice(hit.index+hit.length, rightEnd));
       let title=(left && left.length>=2)?left:(right && right.length>=2?right:'');
       if(!title) title='Appointment';
-      const when=dateIn(slice);
+      const when=spokenDate(slice) || dateIn(slice);
       const days=dayHits(slice);
       const useDays=days.length?days:(dayHits(piece).length?dayHits(piece):[0]);
-      if(when){
-        results.push({title:title, day:mondayIndex(new Date(when+'T12:00:00')), start:times.start, end:times.end, room:'', scope:'session', date:when, oneOff:true, ambiguous:false});
-        return;
+      const oneDay=!/\bevery\b/i.test(piece) && days.length===1;
+      if(when || oneDay){
+        const date=when || spokenDate(piece);
+        if(date){
+          results.push({title:title, day:mondayIndex(new Date(date+'T12:00:00')), start:times.start, end:times.end, room:'', scope:'session', date:date, oneOff:true, ambiguous:false});
+          return;
+        }
       }
       useDays.forEach(function(d){
         results.push({title:title, day:d, start:times.start, end:times.end, room:'', scope:'semester', ambiguous:false});
