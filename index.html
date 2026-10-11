@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="367">
+<meta name="snapback-build" content="369">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -3995,7 +3995,7 @@ function checkHabitNudges(now){
       const hh=habitClock(slot);
       if(!hh) return;
       const t=hm(hh);
-      if(now>=t && now<t+40*60*1000) once('water:'+today+':'+idx, 'Did you drink water?', {kind:'yesno', log:'water', date:today, text:'Did you drink water?'});
+      if(now>=t && now<t+40*60*1000) once('water:'+today+':'+idx, 'Did you Hydrate?', {kind:'yesno', log:'water', date:today, text:'Did you Hydrate?'});
     });
   }
   if(state.habitNudges.exercise!==false){
@@ -4550,7 +4550,7 @@ function habitPopupItems(){
         const hh=habitClock(slot);
         if(!hh) return;
         const wkey='water:'+dateStr+':'+idx;
-        pushItem(wkey, atClock(dateStr, hh), 'Did you drink water?', {kind:'habit', mode:'ask', askKind:'yesno', log:'water', hkey:wkey, date:dateStr, text:'Did you drink water?'});
+        pushItem(wkey, atClock(dateStr, hh), 'Did you Hydrate?', {kind:'habit', mode:'ask', askKind:'yesno', log:'water', hkey:wkey, date:dateStr, text:'Did you Hydrate?'});
       });
     }
     if(state.habitNudges.screen!==false && state.screenPlan && !habitAnswered('screen', dateStr)){
@@ -4597,13 +4597,12 @@ async function scheduleHabitPopups(){
   if(!LocalNotifications || !LocalNotifications.schedule) return;
   try{
     await LocalNotifications.createChannel({
-      id:'snapback_habit_v2',
+      id:'snapback_habit_quiet',
       name:'SnapBack checks',
-      description:'A check with a short sound. Not the math alarm.',
-      importance:5,
+      description:'A quiet popup for sleep, meals, water, and movement. Not an alarm.',
+      importance:4,
       visibility:1,
-      vibration:true,
-      sound:'default'
+      vibration:false
     });
   }catch(e){}
   const items=habitPopupItems();
@@ -4649,8 +4648,8 @@ async function scheduleHabitPopups(){
           title: 'SnapBack',
           body: it.text,
           schedule: { at: it.when, allowWhileIdle: true },
-          channelId: 'snapback_habit_v2',
-          sound: 'default',
+          channelId: 'snapback_habit_quiet',
+          sound: '',
           group: 'sb-'+notifIdFromKey('habit:'+it.key),
           groupSummary: false,
           extra: extra,
@@ -5143,6 +5142,12 @@ function rebuildAllReminderSounds(){
       add('block:'+b.id, (b.label||'Appointment')+' in '+mins+' min', new Date(startAt.getTime()-mins*60000));
     });
   }
+  (state.tasks||[]).filter(function(t){ return !t.done && t.remindOn && t.reminderTime; }).forEach(function(t){
+    const parts=String(t.reminderTime).split(':').map(Number);
+    const d=new Date(t.remindOn+'T00:00:00');
+    d.setHours(parts[0]||8, parts[1]||0, 0, 0);
+    add('task:'+t.id+':on', t.title, d);
+  });
   (state.tasks||[]).filter(function(t){ return !t.done && t.date && (t.reminderLeads||[]).length; }).forEach(function(t){
     const rt=t.reminderTime||t.time||'08:00';
     (t.reminderLeads||[]).forEach(function(daysBefore){
@@ -5153,9 +5158,6 @@ function rebuildAllReminderSounds(){
       add('task:'+t.id+':'+daysBefore, t.title, d);
     });
   });
-  try{
-    habitPopupItems().forEach(function(it){ add('habit:'+it.key, it.text, it.when); });
-  }catch(e){}
   items.sort(function(a,b){ return a.at-b.at; });
   plug.replacePings({ items: JSON.stringify(items.slice(0, 48)) }).catch(function(){});
 }
@@ -5200,6 +5202,17 @@ async function syncNativeClassReminders(){
       });
     });
   }
+  (state.tasks||[]).filter(t=>!t.done && t.remindOn && t.reminderTime).forEach(t=>{
+    const parts=String(t.reminderTime).split(':').map(Number);
+    const d=new Date(t.remindOn+'T00:00:00');
+    d.setHours(parts[0]||8, parts[1]||0, 0, 0);
+    scheduleNativeNotification({
+      key:'wake-task-'+t.id+'-on',
+      title:'SnapBack',
+      body:t.title,
+      when:d
+    });
+  });
   (state.tasks||[]).filter(t=>!t.done && t.date && (t.reminderLeads||[]).length).forEach(t=>{
     const leads=t.reminderLeads;
     const rt=t.reminderTime||t.time||'08:00';
@@ -5250,6 +5263,12 @@ function checkNotifications(){
     }catch(e){}
   }
 
+  state.tasks.filter(t=>!t.done && t.remindOn && t.reminderTime).forEach(t=>{
+    const parts=String(t.reminderTime).split(':').map(Number);
+    const d=new Date(t.remindOn+'T00:00:00');
+    d.setHours(parts[0]||8, parts[1]||0, 0, 0);
+    if(now>=d.getTime()) ringOnce(t.id+':remind:'+t.remindOn+':'+t.reminderTime, t.title, d.getTime());
+  });
   state.tasks.filter(t=>!t.done && t.date && (t.reminderLeads||[]).length).forEach(t=>{
     const dueDate=new Date(t.date+'T00:00:00');
     (t.reminderLeads||[]).forEach(th=>{
@@ -6349,21 +6368,18 @@ function renderModal(){
             <p style="font-size:.8rem;color:var(--muted);margin:6px 0 0">Scroll for all options. You can leave without choosing one.</p>
           </div>
           <div style="padding:12px 18px;overflow-y:auto;flex:1 1 auto;-webkit-overflow-scrolling:touch">
+            <div id="tmExtra"></div>
             <div style="display:flex;flex-direction:column;gap:8px">
               <button class="btn" id="tmDone">${t.done?'Mark as not done':'Mark as done'}</button>
-              <button class="btn ghost" id="tmResched">Reschedule…</button>
-              <button class="btn ghost" id="tmRemind">Remind me…</button>
-              <button class="btn ghost" id="tmAskAi">✨ Ask AI — I am stuck</button>
-              <button class="btn ghost" id="tmPin">📌 Top of Mind</button>
-              <button class="btn ghost" id="tmBurn">${t.backburner?'↩️ Bring back from Backburner':'🔥 Send to Backburner'}</button>
-              <button class="btn ghost" id="tmContext">${t.context==='personal'?('🎓 Mark as '+L('newTaskSchool')):('🏠 Mark as '+L('personal'))}</button>
-              <button class="btn ghost" id="tmTier">${t.tier==='must'?'⬇️ Move to Could-do':'⬆️ Move to Must-do (Should do)'}</button>
-              <button class="btn ghost" id="tmFrog">${t.frog?'🐸 Unmark frog':'🐸 Mark as Frog (do this first)'}</button>
+              <button class="btn ghost" id="tmRemind">Remind me</button>
+              <button class="btn ghost" id="tmAskAi">Ask AI — I am stuck</button>
+              <button class="btn ghost" id="tmPin">Top of Mind</button>
+              <button class="btn ghost" id="tmBurn">${t.backburner?'Bring back from Backburner':'Send to Backburner'}</button>
+              <button class="btn ghost" id="tmContext">${t.context==='personal'?('Mark as '+L('newTaskSchool')):('Mark as '+L('personal'))}</button>
+              <button class="btn ghost" id="tmTier">${t.tier==='must'?'Move to Could-do':'Move to Must-do'}</button>
               <button class="btn ghost" id="tmFocus">Start Focus Pod</button>
-              <button class="btn ghost" id="tmEdit">✏️ Edit title / date / notes</button>
               <button class="btn danger ghost" id="tmDelete">Delete task</button>
             </div>
-            <div id="tmExtra" style="margin-top:12px"></div>
           </div>
           <div style="padding:12px 18px 16px;border-top:1px solid var(--line);flex:0 0 auto;background:var(--panel)">
             <button class="btn" id="tmClose" style="width:100%">Cancel — close</button>
@@ -6393,31 +6409,8 @@ function renderModal(){
         showAppMessage(t.tier==='must'?'Must-do':'Could-do', t.tier==='must'?'Shows under Must do on Home.':'Shows under Could do on Home.');
         persistRender();
       };
-      const tmFrog=document.getElementById('tmFrog');
-      if(tmFrog) tmFrog.onclick=()=>{ t.frog=!t.frog; closeTaskMenu(); showAppMessage(t.frog?'Frog set':'Frog cleared', t.frog?'This task shows first on Today as “eat the frog”.':'Removed frog mark.'); };
-      document.getElementById('tmEdit').onclick=()=>{
-        closeTaskMenu();
-        state.editingTaskId=t.id;
-        navigateTo('tasks');
-        persistRender();
-      };
       document.getElementById('tmDelete').onclick=()=>{
         showAppMessage('Delete this task?', 'You can Undo for a few seconds after.', { ok:'Delete', cancel:'Cancel', onOk:()=>{ deleteTask(t.id); closeTaskMenu(); } });
-      };
-      document.getElementById('tmResched').onclick=()=>{
-        const box=document.getElementById('tmExtra');
-        box.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:12px">
-          <div class="field"><label>Date</label><input type="date" id="tmNewDate" value="${t.date||''}" min="2000-01-01" max="2100-12-31"></div>
-          <div class="field" style="margin-top:8px"><label>Time</label><input type="time" id="tmNewTime" value="${t.time||''}"></div>
-          <button type="button" class="btn sm" id="tmSaveDate" style="margin-top:10px">Save</button>
-        </div>`;
-        document.getElementById('tmSaveDate').onclick=()=>{
-          let v=document.getElementById('tmNewDate').value||'';
-          if(v){ const y=parseInt(v.slice(0,4),10); if(!y||y<2020||y>2035){ showAppMessage('Check the year','Use 2020–2035.'); return; } }
-          t.date=v; t.time=document.getElementById('tmNewTime').value||'';
-          closeTaskMenu();
-          showAppMessage('Saved', t.date?('Due '+t.date):'No date');
-        };
       };
       const tmPin=document.getElementById('tmPin');
       if(tmPin) tmPin.onclick=()=>{ state.topOfMindId=t.id; state.taskMenuOpen=false; persistRender(); };
@@ -6437,24 +6430,26 @@ function renderModal(){
       };
       document.getElementById('tmRemind').onclick=()=>{
         const box=document.getElementById('tmExtra');
-        const cur = (t.reminderLeads||[]).indexOf(1)>=0 ? 'daybefore' : ((t.reminderLeads||[]).indexOf(0)>=0 ? 'morning' : 'none');
-        box.innerHTML=`<div class="field"><label>Nudge me</label>
-          <select id="tmNudgeWhen">
-            <option value="none" ${cur==='none'?'selected':''}>Not at all</option>
-            <option value="morning" ${cur==='morning'?'selected':''}>That morning</option>
-            <option value="daybefore" ${cur==='daybefore'?'selected':''}>The day before</option>
-          </select>
-        </div>
-        <div class="field" style="margin-top:8px"><label>Time</label><input type="time" id="tmRemTime" value="${t.reminderTime||t.time||'08:00'}"></div>
-        <button class="btn sm" id="tmSaveRem" style="margin-top:8px">Save Nudge</button>`;
+        const date = t.remindOn || t.date || todayStr();
+        const time = t.reminderTime || t.time || '08:00';
+        box.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:12px">
+          <div style="font-weight:700;margin-bottom:8px">Remind me</div>
+          <div class="field"><label>Date</label><input type="date" id="tmRemDate" value="${date}"></div>
+          <div class="field" style="margin-top:8px"><label>Time</label><input type="time" id="tmRemTime" value="${time}"></div>
+          <button type="button" class="btn" id="tmSaveRem" style="margin-top:12px;width:100%">Save reminder</button>
+        </div>`;
+        const extra=document.getElementById('tmExtra');
+        if(extra && extra.scrollIntoView) extra.scrollIntoView({block:'nearest'});
         document.getElementById('tmSaveRem').onclick=()=>{
-          const when=document.getElementById('tmNudgeWhen').value;
-          t.nudgeWhen=when;
-          t.reminderTime=document.getElementById('tmRemTime').value || t.time || '08:00';
-          t.reminderLeads = when==='morning' ? [0] : (when==='daybefore' ? [1] : []);
+          const d=document.getElementById('tmRemDate').value;
+          const tm=document.getElementById('tmRemTime').value;
+          if(!d || !tm){ showAppMessage('Add a date and a time','A reminder needs both.'); return; }
+          t.remindOn=d;
+          t.reminderTime=tm;
+          t.nudgeWhen='at';
           closeTaskMenu();
           try{ syncNativeClassReminders(); }catch(e){}
-          showAppMessage('Saved', when==='none' ? 'No Nudge on this task.' : 'Nudge saved for this task.');
+          showAppMessage('Reminder set', 'SnapBack will remind you on '+d+' at '+tm+'.');
         };
       };
       return;
@@ -6628,6 +6623,16 @@ function closeTaskMenu(){
   persistRender();
 }
 
+function scrollAppToTop(){
+  const go=function(){
+    try{ window.scrollTo(0,0); }catch(e){}
+    try{ document.documentElement.scrollTop=0; document.body.scrollTop=0; }catch(e){}
+    try{ const main=document.querySelector('.main'); if(main) main.scrollTop=0; }catch(e){}
+  };
+  go();
+  setTimeout(go, 60);
+  setTimeout(go, 280);
+}
 function navigateTo(view){
   // Do NOT reset listMode here — Grab Bag / One-at-a-time / Tile Wall depend on it
   if(!state.navHistory) state.navHistory=[];
@@ -6660,6 +6665,7 @@ function navigateTo(view){
   }catch(e){}
   persistRender();
   setTimeout(()=>{ const l=document.getElementById('viewLoader'); if(l) l.classList.remove('on'); }, 280);
+  scrollAppToTop();
 }
 function goBack(){
   if(state.view==='tasks' && state.listMode && state.listMode!=='all'){
