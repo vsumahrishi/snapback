@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="363">
+<meta name="snapback-build" content="364">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -9713,6 +9713,17 @@ function viewTasks(){
   const cf = state.contextFilter || 'all';
   if(cf==='school') list=list.filter(t=>(t.context||'school')!=='personal');
   if(cf==='personal') list=list.filter(t=>(t.context||'school')==='personal');
+  if(f!=='done'){
+    list.sort(function(a,b){
+      const da=a.date||'9999-99-99';
+      const db=b.date||'9999-99-99';
+      if(da!==db) return da<db?-1:1;
+      const ta=a.time||'99:99';
+      const tb=b.time||'99:99';
+      if(ta!==tb) return ta<tb?-1:1;
+      return (a.created||0)-(b.created||0);
+    });
+  }
   // List overwhelm modes — must run BEFORE building items
   // Completed view must never use spotlight/jar/one (those keep only open tasks → empty list)
   let mode = state.listMode || 'all'; if(mode==='batch') mode='spotlight';
@@ -13314,7 +13325,7 @@ function transcribeBlob(blob, statusEl){
         return ctx.decodeAudioData(buf.slice(0)).then(function(audio){
           const samples=resampleTo16k(audio.getChannelData(0), audio.sampleRate);
           try{ ctx.close(); }catch(e){}
-          return pipe(samples, { sampling_rate:16000 });
+          return pipe(samples, { sampling_rate:16000, chunk_length_s:20, stride_length_s:5 });
         });
       });
     }).then(function(out){
@@ -13330,7 +13341,7 @@ function transcribeBlob(blob, statusEl){
   };
   return Promise.race([
     run(false),
-    new Promise(function(_, reject){ setTimeout(function(){ reject(new Error('slow')); }, 20000); })
+    new Promise(function(_, reject){ setTimeout(function(){ reject(new Error('slow')); }, 90000); })
   ]);
 }
 function startHoldTalk(area, statusEl, kind){
