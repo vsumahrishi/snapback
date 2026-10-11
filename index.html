@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="369">
+<meta name="snapback-build" content="370">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -6365,7 +6365,7 @@ function renderModal(){
           <div style="padding:16px 18px 10px;border-bottom:1px solid var(--line);flex:0 0 auto">
             <div class="qeyebrow" style="margin:0">More actions</div>
             <div style="font-weight:700;font-size:1rem;margin-top:4px">${escapeHtml(t.title)}</div>
-            <p style="font-size:.8rem;color:var(--muted);margin:6px 0 0">Scroll for all options. You can leave without choosing one.</p>
+            <p style="font-size:.85rem;margin:6px 0 0">${t.date?escapeHtml(t.date):'No date'}${t.time?' · '+escapeHtml(t.time):''}</p>
           </div>
           <div style="padding:12px 18px;overflow-y:auto;flex:1 1 auto;-webkit-overflow-scrolling:touch">
             <div id="tmExtra"></div>
@@ -6431,7 +6431,8 @@ function renderModal(){
       document.getElementById('tmRemind').onclick=()=>{
         const box=document.getElementById('tmExtra');
         const date = t.remindOn || t.date || todayStr();
-        const time = t.reminderTime || t.time || '08:00';
+        const followed = !t.reminderTime || String(t.reminderTime).slice(0,5)===String(t.time||'').slice(0,5);
+        const time = followed ? (t.time || '08:00') : t.reminderTime;
         box.innerHTML=`<div style="border-top:1px solid var(--line);padding-top:12px">
           <div style="font-weight:700;margin-bottom:8px">Remind me</div>
           <div class="field"><label>Date</label><input type="date" id="tmRemDate" value="${date}"></div>
@@ -17023,7 +17024,14 @@ function wireView(){
       noteDateMove(t, date||'');
       t.date=date||'';
       if(document.getElementById('editFrog-'+id)?.checked){ (state.tasks||[]).forEach(function(x){ if(String(x.id)!==String(t.id)) x.frog=false; }); }
-      t.time=document.getElementById('editTime-'+id)?.value||'';
+      const prevTime=String(t.time||'').slice(0,5);
+      const nextTime=document.getElementById('editTime-'+id)?.value||'';
+      t.time=nextTime;
+      if(!t.reminderTime || String(t.reminderTime).slice(0,5)===prevTime) t.reminderTime=nextTime;
+      if(t.studyBlockId){
+        const block=(state.studyBlocks||[]).find(function(b){ return String(b.id)===String(t.studyBlockId); });
+        if(block && (!block.start || String(block.start).slice(0,5)===prevTime)) block.start=nextTime;
+      }
       t.priority=document.getElementById('editPri-'+id)?.value||t.priority;
       t.notes=document.getElementById('editNotes-'+id)?.value||'';
       t.frog=!!document.getElementById('editFrog-'+id)?.checked;
