@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="366">
+<meta name="snapback-build" content="367">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -12700,6 +12700,11 @@ let _talkRec = null;
 let _talkPartial = '';
 let _talkOnText = null;
 let _talkNativeOn = false;
+let _talkWaitFinal = false;
+let _talkFinishTimer = null;
+let _talkArea = null;
+let _talkStatus = null;
+let _talkBrowserFallback = false;
 function ensureNativeHeard(){
   const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
   if(!plug || !plug.addListener || _talkNativeOn) return;
@@ -12711,6 +12716,31 @@ function ensureNativeHeard(){
       if(ev && ev.text) _talkOnText(ev.text, !!ev.final, 0);
     });
   }catch(e){ _talkNativeOn = false; }
+}
+function armNativeHeard(area, statusEl){
+  _talkArea = area;
+  _talkStatus = statusEl;
+  _talkOnText = function(text, fin, err){
+    if(err){
+      if(_talkWaitFinal){
+        _talkWaitFinal = false;
+        if(_talkFinishTimer){ clearTimeout(_talkFinishTimer); _talkFinishTimer = null; }
+        if(_talkPartial || _talkTranscript) finishHeard(_talkArea, _talkStatus);
+        else if(_talkStatus) _talkStatus.textContent = Number(err)===9
+          ? 'Allow the microphone for SnapBack, then hold the button again.'
+          : 'The phone did not catch that. Hold the button and speak again.';
+      }
+      return;
+    }
+    if(text) noteHeard(text, !!fin);
+    const shown = _talkTranscript || _talkPartial;
+    if(_talkStatus && shown) _talkStatus.textContent = 'Heard: '+shown;
+    if(fin && _talkWaitFinal){
+      _talkWaitFinal = false;
+      if(_talkFinishTimer){ clearTimeout(_talkFinishTimer); _talkFinishTimer = null; }
+      finishHeard(_talkArea, _talkStatus);
+    }
+  };
 }
 function spokenClockList(text){
   let s = normalizeSpokenClockText(text).toLowerCase();
@@ -13381,13 +13411,22 @@ function startHoldTalk(area, statusEl, kind){
   _talkPartial = '';
   _talkTranscript = '';
   _talkFatal = false;
+  _talkBrowserFallback = false;
   const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()
     && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm && window.Capacitor.Plugins.NudgeAlarm.startListen;
   if(native){
     ensureNativeHeard();
+    armNativeHeard(area, statusEl);
     if(statusEl) statusEl.textContent = 'Listening… speak, then click Done speaking';
     window.Capacitor.Plugins.NudgeAlarm.startListen().catch(function(e){
       const msg = (e && (e.message || e.errorMessage)) || '';
+      if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && typeof MediaRecorder!=='undefined'){
+        _talkBrowserFallback = true;
+        startBrowserMic(statusEl).catch(function(){
+          if(statusEl) statusEl.textContent = msg || 'Allow the microphone, then click Hold and speak again.';
+        });
+        return;
+      }
       if(statusEl) statusEl.textContent = msg || 'Allow the microphone, then click Hold and speak again.';
     });
     return;
@@ -13408,9 +13447,18 @@ function stopHoldTalk(area, statusEl){
   _talkClickMode = false;
   const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
   const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() && plug && plug.stopListen;
-  if(native){
+  if(native && !_talkBrowserFallback){
+    if(!was) return;
+    _talkWaitFinal = true;
+    if(statusEl) statusEl.textContent = 'Turning that into text…';
     try{ plug.stopListen(); }catch(e){}
-    if(was) finishHeard(area, statusEl);
+    if(_talkFinishTimer) clearTimeout(_talkFinishTimer);
+    _talkFinishTimer = setTimeout(function(){
+      _talkFinishTimer = null;
+      if(!_talkWaitFinal) return;
+      _talkWaitFinal = false;
+      finishHeard(area, statusEl);
+    }, 3000);
     return;
   }
   if(!was) return;
