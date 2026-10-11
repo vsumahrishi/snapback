@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="361">
+<meta name="snapback-build" content="362">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -5711,27 +5711,59 @@ function renderModal(){
     root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:440px;text-align:left;position:relative">
       <button type="button" id="wizX" style="position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.2rem">✕</button>
       <div style="font-weight:800;font-size:1.05rem;margin:8px 28px 8px 0">${noun} ${n} of ${total}</div>
-      <p style="margin:0 0 8px">Edit anything that is wrong, then confirm.</p>
-      <div class="field"><label>Name</label><input id="wizTitle" value="${escapeHtml(p.title||'')}"></div>
+      <div class="field"><label>What I heard. Edit this and the name, time, and date update.</label><textarea id="wizHeard" rows="2" style="width:100%">${escapeHtml(p.heard||p.title||'')}</textarea></div>
+      <div class="field" style="margin-top:8px"><label>Name</label><input id="wizTitle" value="${escapeHtml(p.title||'')}"></div>
       <div class="field" style="margin-top:8px"><label>Date</label><input id="wizDate" type="date" value="${escapeHtml(date)}"></div>
       ${timeRow}
       ${mathRow}
-      <button class="btn" id="wizOk" type="button" style="margin-top:12px">Confirm this one</button>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn" id="wizOk" type="button">Confirm this one</button>
+        <button class="btn ghost" id="wizDel" type="button">Delete this</button>
+      </div>
     </div></div>`;
     document.getElementById('wizX').onclick=close;
+    function fillFromHeard(){
+      const raw=(document.getElementById('wizHeard')||{}).value||'';
+      const items=spokenAppointments(raw);
+      if(!items.length) return [];
+      const first=items[0];
+      const title=document.getElementById('wizTitle');
+      const dateEl=document.getElementById('wizDate');
+      const startEl=document.getElementById('wizStart');
+      const endEl=document.getElementById('wizEnd');
+      if(title) title.value=first.title||'';
+      if(dateEl && first.date) dateEl.value=first.date;
+      if(startEl && first.start) startEl.value=first.start;
+      if(endEl && first.end) endEl.value=first.end;
+      return items;
+    }
+    const heardEl=document.getElementById('wizHeard');
+    if(heardEl) heardEl.addEventListener('input', fillFromHeard);
+    document.getElementById('wizDel').onclick=function(){
+      w.pending=w.pending.slice(1);
+      if(!w.pending.length && !(w.done&&w.done.length)){ state.apptWizard=null; try{ renderModal(); }catch(e){} return; }
+      w.phase=w.pending.length?'one':'miss';
+      renderModal();
+    };
     document.getElementById('wizOk').onclick=function(){
+      const raw=(document.getElementById('wizHeard')||{}).value||'';
+      const parsed=spokenAppointments(raw);
       const title=document.getElementById('wizTitle');
       const dateEl=document.getElementById('wizDate');
       const startEl=document.getElementById('wizStart');
       const endEl=document.getElementById('wizEnd');
       const mathEl=document.getElementById('wizMath');
-      if(title) p.title=title.value.trim()||p.title;
-      if(dateEl&&dateEl.value){ p.date=dateEl.value; p.oneOff=true; }
-      if(startEl&&startEl.value) p.start=startEl.value;
-      if(endEl&&endEl.value) p.end=endEl.value;
-      if(mathEl) p.math=mathEl.checked;
-      w.done=(w.done||[]).concat([p]);
-      w.pending=w.pending.slice(1);
+      const first=(parsed&&parsed[0])?parsed[0]:p;
+      if(title) first.title=title.value.trim()||first.title;
+      if(dateEl&&dateEl.value){ first.date=dateEl.value; first.oneOff=true; }
+      if(startEl&&startEl.value) first.start=startEl.value;
+      if(endEl&&endEl.value) first.end=endEl.value;
+      if(mathEl) first.math=mathEl.checked;
+      first.heard=raw||first.heard;
+      const changed=raw.trim()!==String(p.heard||'').trim();
+      const rest=changed ? (parsed||[]).slice(1) : [];
+      w.done=(w.done||[]).concat([first]);
+      w.pending=rest.concat(w.pending.slice(1));
       w.phase=w.pending.length?'one':'miss';
       renderModal();
     };
@@ -12676,10 +12708,12 @@ function spokenClockList(text){
   if(/\bnoon\b/.test(s)) out.push('12:00');
   if(/\bmidnight\b/.test(s)) out.push('00:00');
   const morning=/\b(morning|breakfast)\b/.test(s);
-  const late=/\b(afternoon|evening|tonight|night|lunch|dinner)\b/.test(s);
+  const late=/\b(afternoon|evening|tonight|night|lunch|dinner)\b/.test(s) || /\bthis eve/.test(s);
   const re=/\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?\b/g;
   let m;
   while((m=re.exec(s))){
+    const ord=s.slice(m.index+m[1].length, m.index+m[1].length+4);
+    if(/^(st|nd|rd|th)\b/i.test(ord)) continue;
     let h=Number(m[1]);
     const min=m[2]?Number(m[2]):0;
     if(h>23 || min>59) continue;
@@ -12722,7 +12756,7 @@ function spokenDate(text){
   const s=String(text||'').toLowerCase();
   const base=new Date(); base.setHours(12,0,0,0);
   if(/\btomorrow\b/.test(s)){ const d=new Date(base); d.setDate(d.getDate()+1); return toDateStr(d); }
-  if(/\b(today|tonight|this evening|this morning|this afternoon)\b/.test(s)) return toDateStr(base);
+  if(/\b(?:today|tonight|this eve\w*|this morning|this afternoon)\b/.test(s)) return toDateStr(base);
   const months=['january','february','march','april','may','june','july','august','september','october','november','december'];
   let m=s.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?\b/);
   if(!m){
@@ -12767,6 +12801,11 @@ function addClockMinutes(hhmm, mins){
 }
 function normalizeSpokenClockText(text){
   let s=speechNumbers(String(text||''));
+  s=s.replace(/\bat\s+(\d{1,2})(?:st|nd|rd|th)\s+(\d{1,2})(?:st|nd|rd|th)\b/gi, function(_, h, m){
+    const hh=Number(h), mm=Number(m);
+    if(hh<1 || hh>12 || mm>59) return _;
+    return hh+':'+String(mm).padStart(2,'0');
+  });
   s=s.replace(/\b(\d{1,2})\s*(?:o'clock|o clock|oclock)\b/gi,'$1:00');
   s=s.replace(/\b(\d{1,2})[.](\d{2})\b/g,'$1:$2');
   s=s.replace(/\b(\d{3,4})\b/g, function(all){
@@ -12791,12 +12830,13 @@ function tidySpokenName(text){
     /\b(every day|everyday|each day|daily|weekdays?|weekends?|every|each|repeating|repeat|weekly|one time|just once|only once|this day only|just this day)\b/gi,
     /\b(?:on\s+|next\s+)?(?:monday|tuesday|wednesday|thursday|thrusday|friday|saturday|sunday|mon|tues?|wed|wensday|thurs?|fri|sat|sun)s?\b/gi,
     /\b(at\s+)?(noon|midnight)\b/gi,
-    /\b(today|tomorrow|tonight|next week|this evening|this morning|this afternoon)\b/gi,
+    /\b(today|tomorrow|tonight|next week|this eve[a-z]*|this morning|this afternoon)\b/gi,
     /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?\b/gi,
     /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/gi,
-    /\b(?:on\s+)?the\s+\d{1,2}(?:st|nd|rd|th)\b/gi,
+    /\b(?:on\s+)?(?:the\s+)?\d{1,2}(?:st|nd|rd|th)\b/gi,
     /\b(?:at|from|until|till|between|around)\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?(?:\s*(?:to|until|till|-)\s*\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)?\b/gi,
-    /\b\d{1,2}:\d{2}\s*(?:a\.?m\.?|p\.?m\.?)?\b/gi,
+    /\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b/gi,
+    /\b\d{1,2}:\d{2}\b/gi,
     /\b(?:morning|afternoon|evening)\b/gi,
     /\bfor (?:an hour|half an hour|\d+ hours?|\d+ minutes?)\b/gi,
     /\b(no math|without (?:a )?math(?: problem)?|don'?t ask(?: me)? (?:a )?math(?: problem)?|with (?:a )?math(?: problem)?|ask (?:a )?math(?: problem)?)\b/gi,
@@ -12826,44 +12866,117 @@ function speechNumbers(text){
   s=s.replace(/\b(at|from|until|till|around)\s+(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/gi, function(_, prep, w){ const n=ones[w.toLowerCase()]; return n==null?_: (prep+' '+n); });
   return s;
 }
+function clockSpans(text){
+  const s=String(text||'');
+  const re=/\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?\b/g;
+  const spans=[];
+  let m;
+  while((m=re.exec(s))){
+    const ord=s.slice(m.index+m[1].length, m.index+m[1].length+4);
+    if(/^(st|nd|rd|th)\b/i.test(ord)) continue;
+    const ap=(m[3]||'').replace(/\./g,'');
+    const before=s.slice(Math.max(0,m.index-16), m.index).toLowerCase();
+    const looks=!!ap || !!m[2] || /(?:\bat|\bfrom|\buntil|\btill|\bto|\baround)\s*$/.test(before);
+    if(!looks) continue;
+    spans.push(m.index);
+  }
+  return spans;
+}
 function splitSpokenItems(text){
   const norm=normalizeSpokenClockText(text);
   const bits=norm.split(/\s*(?:\.\s+|;\s+|\n+|\s+(?:and then|then|also)\s+|\s+\band\b\s+|,\s*)/i);
   const out=[];
   let hold='';
-  bits.forEach(function(bit){
+  function take(bit){
     bit=String(bit||'').trim();
     if(!bit) return;
-    if(!spokenClockList(bit).length){
-      hold=hold ? (hold+' '+bit) : bit;
+    const spans=clockSpans(bit);
+    if(spans.length<2){
+      if(!spokenClockList(bit).length){ hold=hold ? (hold+' '+bit) : bit; return; }
+      if(hold){ bit=hold+' '+bit; hold=''; }
+      out.push(bit);
       return;
     }
-    if(hold){ bit=hold+' '+bit; hold=''; }
-    out.push(bit);
-  });
+    spans.forEach(function(at, i){
+      const from=i===0?0:at;
+      const to=i+1<spans.length?spans[i+1]:bit.length;
+      let piece=bit.slice(from, to).trim();
+      if(!piece) return;
+      if(i===0 && hold){ piece=hold+' '+piece; hold=''; }
+      out.push(piece);
+    });
+  }
+  bits.forEach(take);
   if(hold){
     if(out.length) out[out.length-1]=out[out.length-1]+' '+hold;
     else out.push(hold);
   }
   return out.length?out:[norm];
 }
+function spokenDateList(text){
+  const s=String(text||'').toLowerCase();
+  const base=new Date(); base.setHours(12,0,0,0);
+  const out=[];
+  function push(d){
+    const v=toDateStr(d);
+    if(v && out.indexOf(v)<0) out.push(v);
+  }
+  if(/\btomorrow\b/.test(s)){ const d=new Date(base); d.setDate(d.getDate()+1); push(d); }
+  if(/\b(?:today|tonight|this eve\w*|this morning|this afternoon)\b/.test(s)) push(base);
+  const re=/\b(\d{1,2})(?:st|nd|rd|th)\b/g;
+  let m;
+  while((m=re.exec(s))){
+    const day=Number(m[1]);
+    if(day<1 || day>31) continue;
+    const d=new Date(base.getFullYear(), base.getMonth(), day, 12);
+    if((base-d)/86400000>7) d.setMonth(d.getMonth()+1);
+    push(d);
+  }
+  if(!out.length && !speechWantsRepeat(s)){
+    const one=spokenDate(s);
+    if(one) out.push(one);
+  }
+  return out;
+}
+function niceSpokenTitle(text){
+  let s=tidySpokenName(text);
+  s=String(s||'').replace(/\bthis\b/ig,'').replace(/\beven\b/ig,'').replace(/\s+/g,' ').trim();
+  if(!s || /^\d+$/.test(s)) s='Appointment';
+  return s.replace(/(^|\s)([a-z])/g, function(_, sp, c){ return sp+c.toUpperCase(); });
+}
 function spokenAppointments(text){
   const lines=splitSpokenItems(text);
   const items=[];
+  let lastTitle='';
   lines.forEach(function(line){
     const clocks=spokenClockList(line);
     if(!clocks.length) return;
-    const date=spokenDate(line);
-    let title=tidySpokenName(line);
-    title=String(title||'').replace(/\bthis\b/ig,'').replace(/\s+/g,' ').trim();
-    if(!title) title='Appointment';
+    const dates=spokenDateList(line);
+    let title=niceSpokenTitle(line);
+    if(title==='Appointment' && lastTitle) title=lastTitle;
+    else if(title!=='Appointment') lastTitle=title;
     const start=clocks[0];
-    const item={title:title, start:start, end:addClockMinutes(start, 60), room:'', oneOff:true, ambiguous:false, scope:'session'};
-    if(date){
-      item.date=date;
-      item.day=(new Date(date+'T12:00:00').getDay()+6)%7;
-    }
-    items.push(item);
+    const useDates=dates.length?dates:[''];
+    useDates.forEach(function(date){
+      let heard=line;
+      if(useDates.length>1 && date){
+        const day=Number(String(date).slice(8));
+        const suf=(day%10===1&&day!==11)?'st':(day%10===2&&day!==12)?'nd':(day%10===3&&day!==13)?'rd':'th';
+        const hh=parseInt(String(start).slice(0,2),10)||0;
+        const mi=String(start).slice(3);
+        const ap=hh>=12?'pm':'am';
+        const h12=((hh+11)%12)+1;
+        const clock=mi==='00'?(h12+' '+ap):(h12+':'+mi+' '+ap);
+        heard=title+' at '+clock+' on the '+day+suf;
+      }
+      if(title && title!=='Appointment' && heard.toLowerCase().indexOf(title.toLowerCase())<0) heard=title+' '+heard;
+      const item={title:title, start:start, end:addClockMinutes(start, 60), heard:heard, room:'', oneOff:true, ambiguous:false, scope:'session'};
+      if(date){
+        item.date=date;
+        item.day=(new Date(date+'T12:00:00').getDay()+6)%7;
+      }
+      items.push(item);
+    });
   });
   return items;
 }
