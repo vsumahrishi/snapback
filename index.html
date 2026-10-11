@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="358">
+<meta name="snapback-build" content="360">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -5637,11 +5637,11 @@ function renderModal(){
     if(w.phase==='miss'){
       root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:420px;text-align:left;position:relative">
         <button type="button" id="wizX" style="position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.2rem">✕</button>
-        <div style="font-weight:800;font-size:1.05rem;margin:8px 28px 8px 0">Did I miss anything?</div>
-        <p style="margin:0 0 12px">Say yes if there is another appointment. Say no if that was all.</p>
+        <div style="font-weight:800;font-size:1.05rem;margin:8px 28px 8px 0">Are you done?</div>
+        <p style="margin:0 0 12px">Yes saves these. No lets you add another.</p>
         <div style="display:flex;gap:8px">
-          <button class="btn" id="wizYes" type="button">Yes</button>
-          <button class="btn ghost" id="wizNo" type="button">No</button>
+          <button class="btn" id="wizNo" type="button">Yes, save them</button>
+          <button class="btn ghost" id="wizYes" type="button">No, there's another</button>
         </div>
       </div></div>`;
       document.getElementById('wizX').onclick=close;
@@ -5692,7 +5692,7 @@ function renderModal(){
         <div class="field"><label>Start</label><input id="wizStart" type="time" value="${escapeHtml(p.start||'')}"></div>
         <div class="field"><label>End</label><input id="wizEnd" type="time" value="${escapeHtml(p.end||'')}"></div>
       </div>
-      <button class="btn" id="wizOk" type="button" style="margin-top:12px">Confirm</button>
+      <button class="btn" id="wizOk" type="button" style="margin-top:12px">Confirm this one</button>
     </div></div>`;
     document.getElementById('wizX').onclick=close;
     document.getElementById('wizOk').onclick=function(){
@@ -12555,10 +12555,19 @@ async function ocrTimetableImage(file){
       const hh=parseInt(h,10); if(hh>23) return m; return hh+':'+min;
     })
     .replace(/(\d{1,2})[\.,](\d{2})/g, '$1:$2')
+    .replace(/^[\[\]]+\s*1(\d{1,2}:\d{2})/gm, '$1')
+    .replace(/^[\[\]]+\s*/gm, '')
     .replace(/[ \t]+/g, ' ')
     .replace(/ *\n */g, '\n')
     .trim();
   if(area) area.value = text;
+  const parsed = (typeof parseTimetableText==='function') ? parseTimetableText(text) : null;
+  if(parsed && parsed.length){
+    state.apptWizard={pending:parsed, done:[], phase:'one'};
+    if(status) status.textContent='Found '+parsed.length+'. Check the first one. Change anything wrong, then confirm. Nothing is saved yet.';
+    try{ renderModal(); }catch(e){}
+    return text;
+  }
   const hasDay = /\b(mon|tue|wed|thu|fri|sat|sun)/i.test(text);
   const hasTime = /\d{1,2}\s*[:.]\s*\d{2}/.test(text);
   if(status){
@@ -12687,7 +12696,7 @@ function spokenDate(text){
   const s=String(text||'').toLowerCase();
   const base=new Date(); base.setHours(12,0,0,0);
   if(/\btomorrow\b/.test(s)){ const d=new Date(base); d.setDate(d.getDate()+1); return toDateStr(d); }
-  if(/\btoday\b/.test(s)) return toDateStr(base);
+  if(/\b(today|tonight|this evening|this morning|this afternoon)\b/.test(s)) return toDateStr(base);
   const months=['january','february','march','april','may','june','july','august','september','october','november','december'];
   let m=s.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?\b/);
   if(!m){
@@ -12756,7 +12765,7 @@ function tidySpokenName(text){
     /\b(every day|everyday|each day|daily|weekdays?|weekends?|every|each|repeating|repeat|weekly|one time|just once|only once|this day only|just this day)\b/gi,
     /\b(?:on\s+|next\s+)?(?:monday|tuesday|wednesday|thursday|thrusday|friday|saturday|sunday|mon|tues?|wed|wensday|thurs?|fri|sat|sun)s?\b/gi,
     /\b(at\s+)?(noon|midnight)\b/gi,
-    /\b(today|tomorrow|next week)\b/gi,
+    /\b(today|tomorrow|tonight|next week|this evening|this morning|this afternoon)\b/gi,
     /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?\b/gi,
     /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/gi,
     /\b(?:on\s+)?the\s+\d{1,2}(?:st|nd|rd|th)\b/gi,
@@ -12793,15 +12802,44 @@ function speechNumbers(text){
 }
 function splitSpokenItems(text){
   const norm=normalizeSpokenClockText(text);
-  const bits=norm.split(/\s*(?:\.\s+|;\s+|\n+|\s+(?:and then|then|also)\s+)/i);
+  const bits=norm.split(/\s*(?:\.\s+|;\s+|\n+|\s+(?:and then|then|also)\s+|\s+\band\b\s+|,\s*)/i);
   const out=[];
+  let hold='';
   bits.forEach(function(bit){
-    const parts=bit.split(/\s+\band\b\s+/i);
-    if(parts.length>=2 && spokenClockList(parts[0]).length && spokenClockList(parts[1]).length){
-      parts.forEach(function(p){ if(p.trim()) out.push(p.trim()); });
-    } else if(bit.trim()) out.push(bit.trim());
+    bit=String(bit||'').trim();
+    if(!bit) return;
+    if(!spokenClockList(bit).length){
+      hold=hold ? (hold+' '+bit) : bit;
+      return;
+    }
+    if(hold){ bit=hold+' '+bit; hold=''; }
+    out.push(bit);
   });
-  return out;
+  if(hold){
+    if(out.length) out[out.length-1]=out[out.length-1]+' '+hold;
+    else out.push(hold);
+  }
+  return out.length?out:[norm];
+}
+function spokenAppointments(text){
+  const lines=splitSpokenItems(text);
+  const items=[];
+  lines.forEach(function(line){
+    const clocks=spokenClockList(line);
+    if(!clocks.length) return;
+    const date=spokenDate(line);
+    let title=tidySpokenName(line);
+    title=String(title||'').replace(/\bthis\b/ig,'').replace(/\s+/g,' ').trim();
+    if(!title) title='Appointment';
+    const start=clocks[0];
+    const item={title:title, start:start, end:addClockMinutes(start, 60), room:'', oneOff:true, ambiguous:false, scope:'session'};
+    if(date){
+      item.date=date;
+      item.day=(new Date(date+'T12:00:00').getDay()+6)%7;
+    }
+    items.push(item);
+  });
+  return items;
 }
 function planFromSpeech(kind, text){
   const raw=normalizeSpokenClockText(text).replace(/\s+/g,' ').trim();
@@ -12962,17 +13000,17 @@ function finishHeard(area, statusEl){
     if(statusEl) statusEl.textContent='No speech heard. Hold the button and say the whole thing.';
     return;
   }
-  if(kind==='quick' || kind==='journal' || !kind){
-    const lines = kind==='quick' ? splitSpokenItems(speechNumbers(said)) : [said];
-    if(kind==='quick'){
-      const parsed=parseTimetableText(lines.join('\n'));
+  if(kind==='quick' || kind==='event' || kind==='journal' || !kind){
+    if(kind==='quick' || kind==='event'){
+      const parsed=spokenAppointments(said);
       if(parsed && parsed.length){
         state.apptWizard={pending:parsed, done:[], phase:'one'};
-        if(statusEl) statusEl.textContent='Check the first one. Nothing is saved yet.';
+        if(statusEl) statusEl.textContent='Check the first one, then confirm. Nothing is saved yet.';
         try{ renderModal(); }catch(e){}
         return;
       }
     }
+    const lines = kind==='quick' ? splitSpokenItems(speechNumbers(said)) : [said];
     lines.forEach(function(line){ appendHeardText(area, line); });
     if(kind==='quick'){
       const btn=document.getElementById('ttParseBtn');
@@ -13702,14 +13740,166 @@ function parseLooseAppointments(raw){
   return results.length?results:null;
 }
 
+function parseCalendarBlocks(raw){
+  const months={january:0,february:1,march:2,april:3,may:4,june:5,july:6,august:7,september:8,october:9,november:10,december:11};
+  let src=String(raw||'').replace(/\u00a0/g,' ').replace(/\r/g,'');
+  src=src.replace(/^#{1,6}\s*/gm,'');
+  src=src.replace(/^\s*[-*+•]\s*\[[ xX]?\]\s*/gm,'');
+  src=src.replace(/^\s*[-*+•]\s+/gm,'');
+  src=src.replace(/\b(\d{1,2})[.](\d{2})\b/g,'$1:$2');
+  src=src.replace(/(^|[^\d:])(\d{1,2})\s*(a\.?m\.?|p\.?m\.?)\b/gi,'$1$2:00 $3');
+  const lines=src.split('\n').map(function(l){
+    let s=l.replace(/\s+/g,' ').trim();
+    const glued=s.match(/^[\[\]]+\s*1(\d{1,2}:\d{2})\b(.*)$/);
+    if(glued && Number(glued[1].split(':')[0])<=23) s=glued[1]+glued[2];
+    s=s.replace(/^[\[\]]+\s*/,'').trim();
+    return s;
+  }).filter(Boolean);
+  if(lines.length<2) return null;
+  const dayWord='(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues|tue|wed|thurs|thur|thu|fri|sat|sun)';
+  const monthWord='(january|february|march|april|may|june|july|august|september|october|november|december)';
+  let year=(new Date()).getFullYear();
+  let month=(new Date()).getMonth();
+  let day=-1;
+  let date='';
+  let pending=null;
+  const results=[];
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function ymd(y,m,d){ return y+'-'+pad(m+1)+'-'+pad(d); }
+  function monIndex(y,m,d){ return (new Date(y,m,d,12).getDay()+6)%7; }
+  function clock(h, min, ap, otherAp){
+    let hour=parseInt(h,10);
+    const mi=min!=null && min!=='' ? parseInt(min,10) : 0;
+    const a=String(ap||otherAp||'').toLowerCase().replace(/\./g,'');
+    if(a.indexOf('p')===0 && hour<12) hour+=12;
+    else if(a.indexOf('a')===0 && hour===12) hour=0;
+    else if(!a && hour>=1 && hour<=6) hour+=12;
+    if(hour>23 || mi>59) return null;
+    return pad(hour)+':'+pad(mi);
+  }
+  function timeOf(line){
+    let m=line.match(/(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)?\s*(?:-|–|—|to)\s*(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)?/i);
+    if(m){
+      const start=clock(m[1], m[2], m[3], m[6]);
+      const end=clock(m[4], m[5], m[6]||m[3], m[3]);
+      if(start && end) return {start:start, end:end, index:m.index, length:m[0].length, only:line.replace(m[0],'').trim().length<2};
+    }
+    m=line.match(/(\d{1,2}):(\d{2})\s*(a\.?m\.?|p\.?m\.?)?/i);
+    if(m){
+      const start=clock(m[1], m[2], m[3]);
+      if(!start) return null;
+      const hh=parseInt(start.slice(0,2),10);
+      return {start:start, end:pad((hh+1)%24)+':'+start.slice(3), index:m.index, length:m[0].length, only:line.replace(m[0],'').trim().length<2};
+    }
+    return null;
+  }
+  function header(line){
+    let m=line.match(new RegExp('^('+dayWord+')\\b[, ]+'+monthWord+'\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:[, ]+(\\d{4}))?$','i'));
+    if(m){
+      const mo=months[m[2].toLowerCase()];
+      const dd=Number(m[3]);
+      const yy=m[4]?Number(m[4]):year;
+      return {day:dayNameToIndex(m[1]), date:ymd(yy, mo, dd)};
+    }
+    m=line.match(new RegExp('^('+dayWord+')\\b[, ]+(\\d{1,2})(?:st|nd|rd|th)?\\s+'+monthWord+'(?:[, ]+(\\d{4}))?$','i'));
+    if(m){
+      const mo=months[m[3].toLowerCase()];
+      const dd=Number(m[2]);
+      const yy=m[4]?Number(m[4]):year;
+      return {day:dayNameToIndex(m[1]), date:ymd(yy, mo, dd)};
+    }
+    m=line.match(new RegExp('^('+dayWord+')\\b[, ]+(\\d{1,2})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{2,4})$','i'));
+    if(m){
+      let dd=Number(m[2]), mo=Number(m[3])-1, yy=Number(m[4]);
+      if(yy<100) yy+=2000;
+      const want=dayNameToIndex(m[1]);
+      if(monIndex(yy, mo, dd)!==want && monIndex(yy, dd, mo)===want){ const t=dd; dd=mo+1; mo=t-1; }
+      if(mo>=0 && mo<=11 && dd>=1 && dd<=31) return {day:want, date:ymd(yy, mo, dd)};
+    }
+    m=line.match(new RegExp('^(\\d{1,2})\\s+('+dayWord+')$','i'));
+    if(m){
+      const dd=Number(m[1]);
+      const want=dayNameToIndex(m[2]);
+      if(dd>=1 && dd<=31) return {day:want, date:ymd(year, month, dd)};
+    }
+    m=line.match(new RegExp('^('+dayWord+')s?$','i'));
+    if(m) return {day:dayNameToIndex(m[1]), date:''};
+    m=line.match(new RegExp('^'+monthWord+'\\s+(\\d{4})$','i'));
+    if(m){ month=months[m[1].toLowerCase()]; year=Number(m[2]); return {monthOnly:true}; }
+    return null;
+  }
+  function add(title, tm){
+    title=String(title||'').replace(/\[[ xX]?\]/g,'').replace(/^[\s:\-–—]+|[\s:\-–—]+$/g,'').replace(/\s+/g,' ').trim();
+    if(!title || /^appointment$/i.test(title)) title='Appointment';
+    const item={title:title, day:day>=0?day:0, start:tm.start, end:tm.end, room:'', scope:date?'session':'semester'};
+    if(date){ item.date=date; item.oneOff=true; }
+    results.push(item);
+  }
+  lines.forEach(function(line){
+    if((line.match(/\d{1,2}:\d{2}\s*(?:a\.?m\.?|p\.?m\.?)?\s*(?:-|–|—|to)\s*\d{1,2}:\d{2}/gi)||[]).length>=2) return;
+    const h=header(line);
+    if(h){
+      if(h.monthOnly){ pending=null; return; }
+      if(pending){ add('Appointment', pending); pending=null; }
+      day=h.day;
+      date=h.date||'';
+      return;
+    }
+    const tm=timeOf(line);
+    if(!tm){
+      if(pending){ add(line, pending); pending=null; }
+      return;
+    }
+    if(tm.only){
+      if(pending) add('Appointment', pending);
+      pending=tm;
+      return;
+    }
+    if(pending) add('Appointment', pending);
+    pending=null;
+    const title=(line.slice(0, tm.index)+' '+line.slice(tm.index+tm.length)).replace(new RegExp('\\b'+dayWord+'\\b','i'),' ');
+    add(title, tm);
+  });
+  if(pending) add('Appointment', pending);
+  const named=results.filter(function(p){ return p.title && p.title!=='Appointment'; });
+  if(named.length<1) return null;
+  return results;
+}
 function parseTimetableText(raw){
   const original = String(raw||'');
+  function scoreRead(arr){
+    if(!arr || !arr.length) return -1;
+    const named=arr.filter(function(p){ return p.title && !/^(appointment|class|\[ ?\])$/i.test(p.title); }).length;
+    const days={};
+    arr.forEach(function(p){ days[p.date||('d'+p.day)]=1; });
+    return named*10 + Object.keys(days).length + arr.length;
+  }
+  function realNames(arr){
+    return (arr||[]).filter(function(p){
+      const t=String(p&&p.title||'').trim();
+      if(!t || /^(appointment|class)$/i.test(t)) return false;
+      if(/^\d/.test(t)) return false;
+      if(/^(am|pm|a\.m\.|p\.m\.)$/i.test(t)) return false;
+      return true;
+    }).length;
+  }
+  function spread(arr){
+    const s={};
+    (arr||[]).forEach(function(p){ s[p.date||('d'+p.day)]=1; });
+    return Object.keys(s).length;
+  }
+  const blocks=parseCalendarBlocks(original);
   const loose = parseLooseAppointments(original);
   const grid = parseExcelGridTimetable(original);
-  if(grid && grid.length && (!loose || grid.length >= loose.length)) return applySchoolHoursToResults(grid);
-  if(loose && loose.length) return applySchoolHoursToResults(loose);
-  // Excel grid if first lines contain 2+ time ranges (before Notion steals the text)
   const notion = parseNotionListTimetable(original);
+  const bN=realNames(blocks), gN=realNames(grid), lN=realNames(loose), nN=realNames(notion);
+  let best=null;
+  if(grid && gN && grid.length>=(blocks?blocks.length:0) && gN>=bN) best=grid;
+  else if(blocks && bN>=2 && (spread(blocks)>=2 || blocks.some(function(p){ return p.date; }))) best=blocks;
+  else if(notion && nN>=lN && nN>=bN) best=notion;
+  else if(loose && lN) best=loose;
+  else best=blocks||grid||notion||loose;
+  if(best && best.length) return applySchoolHoursToResults(best);
   if(notion && notion.length) return applySchoolHoursToResults(notion);
 
   // Free-text path
