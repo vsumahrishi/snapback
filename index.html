@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="360">
+<meta name="snapback-build" content="361">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -5605,10 +5605,24 @@ function renderMain(){
   }
 }
 function saveWizardAppointments(list){
+  const kind=(state.apptWizard && state.apptWizard.kind) || 'event';
   const added=[];
   (list||[]).forEach(function(p){
     if(!p || !p.title) return;
     const date=p.date || (p.day!=null && typeof nextDateForWeekday==='function' ? nextDateForWeekday(p.day) : todayStr());
+    if(kind==='task'){
+      if(!Array.isArray(state.tasks)) state.tasks=[];
+      const ctx=(document.getElementById('newContext')&&document.getElementById('newContext').value)||'other';
+      state.tasks.unshift({id:uid(), title:p.title, notes:'', date:date||'', time:p.start||'', priority:'medium', urgent:false, important:false, eisSet:false, tier:'could', frog:false, context:ctx, technique:'', meetingUrl:'', nudgeWhen:'none', reminderLeads:[], reminderTime:p.start||'', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{avoid:p.title}, strategic:{what:p.title}, flip:{}, created:Date.now()});
+      added.push(p);
+      return;
+    }
+    if(kind==='nudge'){
+      if(typeof ensureNudges==='function') ensureNudges();
+      state.nudges.push({id:uid(), enabled:true, name:p.title, time:p.start||'09:00', onceDate:date||todayStr(), days:[], sound:'chime', math:!!p.math, alert:'regular', snoozesMax:2, snoozesLeft:2, created:Date.now()});
+      added.push(p);
+      return;
+    }
     if(typeof warnIfConflicts==='function' && !warnIfConflicts({dateStr:date, start:p.start, end:p.end})) return;
     const item={id:uid(), label:p.title, date:date, start:p.start, end:p.end, meetingUrl:'', room:p.room||'', kind:'other', alarmMinutes:15};
     if(!state.studyBlocks) state.studyBlocks=[];
@@ -5616,9 +5630,14 @@ function saveWizardAppointments(list){
     added.push(item);
   });
   state.apptWizard=null;
-  if(added.length && typeof pushUndo==='function') pushUndo({type:'bulk-add-blocks', items:added, label:added.length+' appointments saved — Undo'});
+  if(added.length && kind==='event' && typeof pushUndo==='function') pushUndo({type:'bulk-add-blocks', items:added, label:added.length+' appointments saved — Undo'});
   try{ saveState(); }catch(e){}
-  if(added.length) showAppMessage('Saved', added.length+' appointment'+(added.length===1?'':'s')+' added.');
+  if(kind==='nudge'){
+    try{ scheduleWakeAlarms(); }catch(e){}
+    try{ if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms(); }catch(e){}
+  }
+  const word=kind==='task'?'task':(kind==='nudge'?'nudge':'appointment');
+  if(added.length) showAppMessage('Saved', added.length+' '+word+(added.length===1?'':'s')+' added.');
   try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
 }
 function renderModal(){
@@ -5665,13 +5684,14 @@ function renderModal(){
       try{ wireHoldTalk('wizHold','wizMore','wizStatus'); }catch(e){}
       document.getElementById('wizAdd').onclick=function(){
         const raw=(document.getElementById('wizMore')||{}).value||'';
-        const more=parseTimetableText(splitSpokenItems(raw).join('\n'))||[];
-        if(!more.length){
+        const more=spokenAppointments(raw);
+        const extra=more.length ? more : (parseTimetableText(splitSpokenItems(raw).join('\n'))||[]);
+        if(!extra.length){
           const st=document.getElementById('wizStatus');
           if(st) st.textContent='I could not find a time in that. Add the time, then click Add this.';
           return;
         }
-        w.pending=(w.pending||[]).concat(more);
+        w.pending=(w.pending||[]).concat(extra);
         w.phase='one';
         renderModal();
       };
@@ -5681,17 +5701,21 @@ function renderModal(){
     const p=w.pending[0];
     const n=(w.done||[]).length+1;
     const total=n+(w.pending.length-1);
+    const kind=w.kind||'event';
+    const noun=kind==='task'?'Task':(kind==='nudge'?'Nudge':'Appointment');
     const date=p.date || (p.day!=null && typeof nextDateForWeekday==='function' ? nextDateForWeekday(p.day) : todayStr());
+    const timeRow=kind==='event'
+      ? `<div class="row" style="margin-top:8px"><div class="field"><label>Start</label><input id="wizStart" type="time" value="${escapeHtml(p.start||'')}"></div><div class="field"><label>End</label><input id="wizEnd" type="time" value="${escapeHtml(p.end||'')}"></div></div>`
+      : `<div class="field" style="margin-top:8px"><label>Time</label><input id="wizStart" type="time" value="${escapeHtml(p.start||'')}"></div>`;
+    const mathRow=kind==='nudge' ? `<label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input id="wizMath" type="checkbox" ${p.math?'checked':''}> Ask a math problem</label>` : '';
     root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:440px;text-align:left;position:relative">
       <button type="button" id="wizX" style="position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.2rem">✕</button>
-      <div style="font-weight:800;font-size:1.05rem;margin:8px 28px 8px 0">Appointment ${n} of ${total}</div>
+      <div style="font-weight:800;font-size:1.05rem;margin:8px 28px 8px 0">${noun} ${n} of ${total}</div>
       <p style="margin:0 0 8px">Edit anything that is wrong, then confirm.</p>
       <div class="field"><label>Name</label><input id="wizTitle" value="${escapeHtml(p.title||'')}"></div>
       <div class="field" style="margin-top:8px"><label>Date</label><input id="wizDate" type="date" value="${escapeHtml(date)}"></div>
-      <div class="row" style="margin-top:8px">
-        <div class="field"><label>Start</label><input id="wizStart" type="time" value="${escapeHtml(p.start||'')}"></div>
-        <div class="field"><label>End</label><input id="wizEnd" type="time" value="${escapeHtml(p.end||'')}"></div>
-      </div>
+      ${timeRow}
+      ${mathRow}
       <button class="btn" id="wizOk" type="button" style="margin-top:12px">Confirm this one</button>
     </div></div>`;
     document.getElementById('wizX').onclick=close;
@@ -5700,10 +5724,12 @@ function renderModal(){
       const dateEl=document.getElementById('wizDate');
       const startEl=document.getElementById('wizStart');
       const endEl=document.getElementById('wizEnd');
+      const mathEl=document.getElementById('wizMath');
       if(title) p.title=title.value.trim()||p.title;
       if(dateEl&&dateEl.value){ p.date=dateEl.value; p.oneOff=true; }
       if(startEl&&startEl.value) p.start=startEl.value;
       if(endEl&&endEl.value) p.end=endEl.value;
+      if(mathEl) p.math=mathEl.checked;
       w.done=(w.done||[]).concat([p]);
       w.pending=w.pending.slice(1);
       w.phase=w.pending.length?'one':'miss';
@@ -13000,16 +13026,19 @@ function finishHeard(area, statusEl){
     if(statusEl) statusEl.textContent='No speech heard. Hold the button and say the whole thing.';
     return;
   }
-  if(kind==='quick' || kind==='event' || kind==='journal' || !kind){
-    if(kind==='quick' || kind==='event'){
-      const parsed=spokenAppointments(said);
-      if(parsed && parsed.length){
-        state.apptWizard={pending:parsed, done:[], phase:'one'};
-        if(statusEl) statusEl.textContent='Check the first one, then confirm. Nothing is saved yet.';
-        try{ renderModal(); }catch(e){}
-        return;
-      }
+  if(kind==='quick' || kind==='event' || kind==='task' || kind==='nudge'){
+    const parsed=spokenAppointments(said);
+    if(parsed && parsed.length){
+      state.apptWizard={pending:parsed, done:[], phase:'one', kind: kind==='quick'?'event':kind};
+      ['newTitle','newDate','newTime','wakeName','wakeTime','wakeOnceDate'].forEach(function(id){
+        const el=document.getElementById(id); if(el) el.value='';
+      });
+      if(statusEl) statusEl.textContent='Check the first one, then confirm. Nothing is saved yet.';
+      try{ renderModal(); }catch(e){}
+      return;
     }
+  }
+  if(kind==='journal' || !kind){
     const lines = kind==='quick' ? splitSpokenItems(speechNumbers(said)) : [said];
     lines.forEach(function(line){ appendHeardText(area, line); });
     if(kind==='quick'){
