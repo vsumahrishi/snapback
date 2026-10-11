@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="356">
+<meta name="snapback-build" content="358">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4691,6 +4691,7 @@ function openHabitFromNotif(extra){
     return;
   }
   if(alreadyAsked(key)) return;
+  if((extra.askKind==='sleep' || extra.log==='sleep') && habitAnswered('sleep', extra.date, extra.hid)) return;
   if(extra.log && extra.log!=='water' && habitAnswered(extra.log, extra.date, extra.hid)) return;
   try{ cancelHabitNotif(key); }catch(e){}
   if(!state.notifiedKeys) state.notifiedKeys=[];
@@ -5603,10 +5604,111 @@ function renderMain(){
     </div>`;
   }
 }
+function saveWizardAppointments(list){
+  const added=[];
+  (list||[]).forEach(function(p){
+    if(!p || !p.title) return;
+    const date=p.date || (p.day!=null && typeof nextDateForWeekday==='function' ? nextDateForWeekday(p.day) : todayStr());
+    if(typeof warnIfConflicts==='function' && !warnIfConflicts({dateStr:date, start:p.start, end:p.end})) return;
+    const item={id:uid(), label:p.title, date:date, start:p.start, end:p.end, meetingUrl:'', room:p.room||'', kind:'other', alarmMinutes:15};
+    if(!state.studyBlocks) state.studyBlocks=[];
+    state.studyBlocks.push(item);
+    added.push(item);
+  });
+  state.apptWizard=null;
+  if(added.length && typeof pushUndo==='function') pushUndo({type:'bulk-add-blocks', items:added, label:added.length+' appointments saved — Undo'});
+  try{ saveState(); }catch(e){}
+  if(added.length) showAppMessage('Saved', added.length+' appointment'+(added.length===1?'':'s')+' added.');
+  try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+}
 function renderModal(){
   const root=document.getElementById('modalRoot');
   if(!state.wakeMathOpen && !hasLaunchConsent()){
     root.innerHTML=launchConsentHtml();
+    return;
+  }
+  if(state.apptWizard){
+    const w=state.apptWizard;
+    if(w.phase!=='miss' && w.phase!=='more' && (!w.pending || !w.pending.length)) w.phase='miss';
+    const close=function(){
+      if(w.done && w.done.length) saveWizardAppointments(w.done);
+      else { state.apptWizard=null; try{ renderModal(); }catch(e){} }
+    };
+    if(w.phase==='miss'){
+      root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:420px;text-align:left;position:relative">
+        <button type="button" id="wizX" style="position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.2rem">✕</button>
+        <div style="font-weight:800;font-size:1.05rem;margin:8px 28px 8px 0">Did I miss anything?</div>
+        <p style="margin:0 0 12px">Say yes if there is another appointment. Say no if that was all.</p>
+        <div style="display:flex;gap:8px">
+          <button class="btn" id="wizYes" type="button">Yes</button>
+          <button class="btn ghost" id="wizNo" type="button">No</button>
+        </div>
+      </div></div>`;
+      document.getElementById('wizX').onclick=close;
+      document.getElementById('wizYes').onclick=function(){ w.phase='more'; renderModal(); };
+      document.getElementById('wizNo').onclick=function(){ saveWizardAppointments(w.done||[]); };
+      return;
+    }
+    if(w.phase==='more'){
+      root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:440px;text-align:left;position:relative">
+        <button type="button" id="wizX" style="position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.2rem">✕</button>
+        <div style="font-weight:800;font-size:1.05rem;margin:8px 28px 8px 0">Add the one I missed</div>
+        <button type="button" class="btn" id="wizHold" data-voice="journal" style="margin-top:8px">Hold and speak</button>
+        <div id="wizStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0">Click Hold and speak, say it, then Done speaking. Or type it.</div>
+        <textarea id="wizMore" rows="3" style="width:100%" placeholder="Example: dentist tomorrow at 4"></textarea>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn" id="wizAdd" type="button">Add this</button>
+          <button class="btn ghost" id="wizDone" type="button">That's all</button>
+        </div>
+      </div></div>`;
+      document.getElementById('wizX').onclick=close;
+      try{ wireHoldTalk('wizHold','wizMore','wizStatus'); }catch(e){}
+      document.getElementById('wizAdd').onclick=function(){
+        const raw=(document.getElementById('wizMore')||{}).value||'';
+        const more=parseTimetableText(splitSpokenItems(raw).join('\n'))||[];
+        if(!more.length){
+          const st=document.getElementById('wizStatus');
+          if(st) st.textContent='I could not find a time in that. Add the time, then click Add this.';
+          return;
+        }
+        w.pending=(w.pending||[]).concat(more);
+        w.phase='one';
+        renderModal();
+      };
+      document.getElementById('wizDone').onclick=function(){ saveWizardAppointments(w.done||[]); };
+      return;
+    }
+    const p=w.pending[0];
+    const n=(w.done||[]).length+1;
+    const total=n+(w.pending.length-1);
+    const date=p.date || (p.day!=null && typeof nextDateForWeekday==='function' ? nextDateForWeekday(p.day) : todayStr());
+    root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:440px;text-align:left;position:relative">
+      <button type="button" id="wizX" style="position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.2rem">✕</button>
+      <div style="font-weight:800;font-size:1.05rem;margin:8px 28px 8px 0">Appointment ${n} of ${total}</div>
+      <p style="margin:0 0 8px">Edit anything that is wrong, then confirm.</p>
+      <div class="field"><label>Name</label><input id="wizTitle" value="${escapeHtml(p.title||'')}"></div>
+      <div class="field" style="margin-top:8px"><label>Date</label><input id="wizDate" type="date" value="${escapeHtml(date)}"></div>
+      <div class="row" style="margin-top:8px">
+        <div class="field"><label>Start</label><input id="wizStart" type="time" value="${escapeHtml(p.start||'')}"></div>
+        <div class="field"><label>End</label><input id="wizEnd" type="time" value="${escapeHtml(p.end||'')}"></div>
+      </div>
+      <button class="btn" id="wizOk" type="button" style="margin-top:12px">Confirm</button>
+    </div></div>`;
+    document.getElementById('wizX').onclick=close;
+    document.getElementById('wizOk').onclick=function(){
+      const title=document.getElementById('wizTitle');
+      const dateEl=document.getElementById('wizDate');
+      const startEl=document.getElementById('wizStart');
+      const endEl=document.getElementById('wizEnd');
+      if(title) p.title=title.value.trim()||p.title;
+      if(dateEl&&dateEl.value){ p.date=dateEl.value; p.oneOff=true; }
+      if(startEl&&startEl.value) p.start=startEl.value;
+      if(endEl&&endEl.value) p.end=endEl.value;
+      w.done=(w.done||[]).concat([p]);
+      w.pending=w.pending.slice(1);
+      w.phase=w.pending.length?'one':'miss';
+      renderModal();
+    };
     return;
   }
   if(state.nudgePreview){
@@ -6804,11 +6906,41 @@ function applyCloudPayload(payload){
     return;
   }
   _syncApplying = true;
+  const keepLogs=['sleepLog','mealLog','screenLog','habitLog','exerciseLog'];
+  const beforeLogs={};
+  keepLogs.forEach(function(k){ beforeLogs[k]=state[k]; });
+  const beforeAsked=(state.notifiedKeys||[]).slice();
   const keys = cloudSyncKeys();
   keys.forEach(function(k){
     if(payload[k]===undefined) return;
     state[k] = payload[k];
   });
+  function filledAnswer(v){ return v!=null && String(v)!==''; }
+  function mergeLogs(local, remote){
+    const out=Object.assign({}, remote||{});
+    Object.keys(local||{}).forEach(function(k){
+      const a=local[k];
+      const b=out[k];
+      if(a && typeof a==='object' && !Array.isArray(a)){
+        out[k]=mergeLogs(a, (b && typeof b==='object' && !Array.isArray(b)) ? b : {});
+        return;
+      }
+      if(filledAnswer(a) && !filledAnswer(b)) out[k]=a;
+    });
+    return out;
+  }
+  keepLogs.forEach(function(k){ state[k]=mergeLogs(beforeLogs[k], state[k]); });
+  const seenAsk={};
+  state.notifiedKeys=(beforeAsked.concat(state.notifiedKeys||[])).filter(function(k){
+    if(!k || seenAsk[k]) return false;
+    seenAsk[k]=1;
+    return true;
+  });
+  if(state.habitAsk && typeof habitAnswered==='function'){
+    const a=state.habitAsk;
+    const kind=a.kind==='sleep'?'sleep':(a.log||a.kind||'');
+    if(habitAnswered(kind, a.date, a.id)) state.habitAsk=null;
+  }
   state.calTwins = [];
   state.calClashes = [];
   let pruned = false;
@@ -12504,10 +12636,12 @@ function ensureNativeHeard(){
   }catch(e){ _talkNativeOn = false; }
 }
 function spokenClockList(text){
-  let s = String(text||'').toLowerCase().replace(/\b(\d{1,2})[.](\d{2})\b/g,'$1:$2');
+  let s = normalizeSpokenClockText(text).toLowerCase();
   const out=[];
   if(/\bnoon\b/.test(s)) out.push('12:00');
   if(/\bmidnight\b/.test(s)) out.push('00:00');
+  const morning=/\b(morning|breakfast)\b/.test(s);
+  const late=/\b(afternoon|evening|tonight|night|lunch|dinner)\b/.test(s);
   const re=/\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?\b/g;
   let m;
   while((m=re.exec(s))){
@@ -12515,14 +12649,17 @@ function spokenClockList(text){
     const min=m[2]?Number(m[2]):0;
     if(h>23 || min>59) continue;
     const ap=(m[3]||'').replace(/\./g,'');
-    const before=s.slice(Math.max(0,m.index-14), m.index);
-    const looks=!!ap || !!m[2] || /(?:\bat|\bfrom|\buntil|\btill|\bto|\baround)\s*$/.test(before);
+    const before=s.slice(Math.max(0,m.index-16), m.index);
+    const after=s.slice(m.index, m.index+m[0].length+4);
+    const looks=!!ap || !!m[2] || /(?:\bat|\bfrom|\buntil|\btill|\bto|\baround)\s*$/.test(before) || /^\d{1,2}:\d{2}\s+at\b/.test(after);
     if(!looks) continue;
     if(h>12 && !m[2] && !ap) continue;
     if(ap.indexOf('p')===0 && h<12) h+=12;
     if(ap.indexOf('a')===0 && h===12) h=0;
-    if(!ap && !m[2] && h>=1 && h<=7 && !/\b(morning|wake|breakfast)\b/.test(s)) h+=12;
-    else if(!ap && h<=7 && /\b(evening|tonight|night)\b/.test(s)) h+=12;
+    if(!ap && morning && h===12) h=0;
+    else if(!ap && h>=1 && h<=7 && !morning && (late || !m[2] || true)) h+=12;
+    else if(!ap && h<=7 && late) h+=12;
+    if(morning && h>=13 && h<=19 && !ap) h-=12;
     out.push(String(h).padStart(2,'0')+':'+String(min).padStart(2,'0'));
   }
   const seen={};
@@ -12539,6 +12676,8 @@ function spokenDayHits(text){
     const re=new RegExp('\\b'+d[0]+'s?\\b|\\b'+d[1]+'s?\\b');
     if(re.test(s) && days.indexOf(d[2])<0) days.push(d[2]);
   });
+  if(/\bthrusdays?\b/.test(s) && days.indexOf(3)<0) days.push(3);
+  if(/\bwensdays?\b|\bwednsdays?\b/.test(s) && days.indexOf(2)<0) days.push(2);
   return days;
 }
 function speechWantsRepeat(text){
@@ -12576,9 +12715,11 @@ function spokenDate(text){
       const want=(days[0]+1)%7;
       const d=new Date(base);
       for(let i=0;i<8;i++){
-        if(d.getDay()===want) return toDateStr(d);
+        if(d.getDay()===want) break;
         d.setDate(d.getDate()+1);
       }
+      if(/\bnext week\b/.test(s)) d.setDate(d.getDate()+7);
+      return toDateStr(d);
     }
   }
   return '';
@@ -12589,19 +12730,39 @@ function addClockMinutes(hhmm, mins){
   total=((total%1440)+1440)%1440;
   return String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0');
 }
+function normalizeSpokenClockText(text){
+  let s=speechNumbers(String(text||''));
+  s=s.replace(/\b(\d{1,2})\s*(?:o'clock|o clock|oclock)\b/gi,'$1:00');
+  s=s.replace(/\b(\d{1,2})[.](\d{2})\b/g,'$1:$2');
+  s=s.replace(/\b(\d{3,4})\b/g, function(all){
+    if(all.length===4 && Number(all.slice(0,2))>23) return all;
+    const h=Number(all.length===3 ? all.slice(0,1) : all.slice(0,2));
+    const m=Number(all.slice(-2));
+    if(h<1 || h>23 || m>59) return all;
+    return h+':'+String(m).padStart(2,'0');
+  });
+  s=s.replace(/\b(\d{1,2})\s+(\d{2})\b/g, function(all, h, m){
+    const hh=Number(h), mm=Number(m);
+    if(hh<1 || hh>12 || mm>59) return all;
+    return hh+':'+String(mm).padStart(2,'0');
+  });
+  s=s.replace(/(^|[^\d:])(\d{1,2})\s+at\b/gi,'$1$2:00 at');
+  return s;
+}
 function tidySpokenName(text){
-  let s=' '+String(text||'')+' ';
+  let s=' '+normalizeSpokenClockText(text)+' ';
   const cuts=[
-    /\b(remind me to|nudge me to|set a nudge(?: for| to)?|add a nudge(?: for| to)?|please|can you|i need to|i have to|i want to|add a task(?: to| for)?|new task|add an event(?: for)?|add a habit(?: to| for)?|new habit|the habit is|habit called|called|named|name is)\b/gi,
+    /\b(remind me to|nudge me to|set (?:an |a )?alarm(?: for| to| at)?|set a nudge(?: for| to)?|add a nudge(?: for| to)?|please|can you|i need to|i have to|i want to|add a task(?: to| for)?|new task|add an event(?: for)?|add a habit(?: to| for)?|new habit|the habit is|habit called|called|named|name is)\b/gi,
     /\b(every day|everyday|each day|daily|weekdays?|weekends?|every|each|repeating|repeat|weekly|one time|just once|only once|this day only|just this day)\b/gi,
-    /\b(?:on\s+|next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thurs?|fri|sat|sun)s?\b/gi,
+    /\b(?:on\s+|next\s+)?(?:monday|tuesday|wednesday|thursday|thrusday|friday|saturday|sunday|mon|tues?|wed|wensday|thurs?|fri|sat|sun)s?\b/gi,
     /\b(at\s+)?(noon|midnight)\b/gi,
     /\b(today|tomorrow|next week)\b/gi,
     /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:st|nd|rd|th)?\b/gi,
     /\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december)\b/gi,
     /\b(?:on\s+)?the\s+\d{1,2}(?:st|nd|rd|th)\b/gi,
     /\b(?:at|from|until|till|between|around)\s+\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?(?:\s*(?:to|until|till|-)\s*\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)?\b/gi,
-    /\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b/gi,
+    /\b\d{1,2}:\d{2}\s*(?:a\.?m\.?|p\.?m\.?)?\b/gi,
+    /\b(?:morning|afternoon|evening)\b/gi,
     /\bfor (?:an hour|half an hour|\d+ hours?|\d+ minutes?)\b/gi,
     /\b(no math|without (?:a )?math(?: problem)?|don'?t ask(?: me)? (?:a )?math(?: problem)?|with (?:a )?math(?: problem)?|ask (?:a )?math(?: problem)?)\b/gi,
     /\b(silent notification|regular notification|make it silent|keep it silent|no sound|with sound|out loud)\b/gi,
@@ -12631,7 +12792,8 @@ function speechNumbers(text){
   return s;
 }
 function splitSpokenItems(text){
-  const bits=String(text||'').split(/\s+(?:and then|then|also)\s+/i);
+  const norm=normalizeSpokenClockText(text);
+  const bits=norm.split(/\s*(?:\.\s+|;\s+|\n+|\s+(?:and then|then|also)\s+)/i);
   const out=[];
   bits.forEach(function(bit){
     const parts=bit.split(/\s+\band\b\s+/i);
@@ -12642,7 +12804,7 @@ function splitSpokenItems(text){
   return out;
 }
 function planFromSpeech(kind, text){
-  const raw=speechNumbers(String(text||'')).replace(/\s+/g,' ').trim();
+  const raw=normalizeSpokenClockText(text).replace(/\s+/g,' ').trim();
   const low=raw.toLowerCase();
   const until=raw.match(/\b(?:until|till)\s+(.+)$/i);
   const body=until ? raw.slice(0, until.index) : raw;
@@ -12802,6 +12964,15 @@ function finishHeard(area, statusEl){
   }
   if(kind==='quick' || kind==='journal' || !kind){
     const lines = kind==='quick' ? splitSpokenItems(speechNumbers(said)) : [said];
+    if(kind==='quick'){
+      const parsed=parseTimetableText(lines.join('\n'));
+      if(parsed && parsed.length){
+        state.apptWizard={pending:parsed, done:[], phase:'one'};
+        if(statusEl) statusEl.textContent='Check the first one. Nothing is saved yet.';
+        try{ renderModal(); }catch(e){}
+        return;
+      }
+    }
     lines.forEach(function(line){ appendHeardText(area, line); });
     if(kind==='quick'){
       const btn=document.getElementById('ttParseBtn');
@@ -13386,7 +13557,7 @@ function parseDatedOneOffs(raw){
 }
 
 function parseLooseAppointments(raw){
-  let src = String(raw||'').replace(/\u00a0/g,' ').replace(/\r/g,'');
+  let src = normalizeSpokenClockText(String(raw||'')).replace(/\u00a0/g,' ').replace(/\r/g,'');
   if(!src.trim()) return null;
   src = src.replace(/\b(\d{1,2})[.](\d{2})\b/g, '$1:$2');
   src = src.replace(/\b(at|from|until|till|around)\s+(\d{1,2})(?!:)\b/gi, '$1 $2:00');
@@ -13396,11 +13567,11 @@ function parseLooseAppointments(raw){
     if(/\ball\s*days\b|\bevery\s*day\b|\bdaily\b/.test(s)) return [0,1,2,3,4,5,6];
     if(/\bweekdays?\b/.test(s)) return [0,1,2,3,4];
     const hits=[];
-    const re=/\b(mon(?:days?)?|tue(?:s(?:days?)?)?|wed(?:nesdays?)?|thu(?:r(?:s(?:days?)?)?|rsdays?)?|fri(?:days?)?|sat(?:urdays?)?|sun(?:days?)?)\b/g;
+    const re=/\b(mon(?:days?)?|tue(?:s(?:days?)?)?|wed(?:nesdays?)?|wensdays?|thu(?:r(?:s(?:days?)?)?|rsdays?)?|thrusdays?|fri(?:days?)?|sat(?:urdays?)?|sun(?:days?)?)\b/g;
     let m;
     while((m=re.exec(s))){
       const k=m[1];
-      const d=k.startsWith('mon')?0:k.startsWith('tue')?1:k.startsWith('wed')?2:k.startsWith('thu')?3:k.startsWith('fri')?4:k.startsWith('sat')?5:6;
+      const d=k.startsWith('mon')?0:k.startsWith('tue')?1:(k.startsWith('wed')||k.startsWith('wen'))?2:(k.startsWith('thu')||k.startsWith('thr'))?3:k.startsWith('fri')?4:k.startsWith('sat')?5:6;
       if(hits.indexOf(d)<0) hits.push(d);
     }
     return hits;
@@ -13413,7 +13584,6 @@ function parseLooseAppointments(raw){
     const a=String(ap||otherAp||'').toLowerCase();
     if(a==='pm' && hour<12) hour+=12;
     else if(a==='am' && hour===12) hour=0;
-    else if(!a && hour>=1 && hour<=6) hour+=12;
     if(hour>23 || mi>59) return null;
     return String(hour).padStart(2,'0')+':'+String(mi).padStart(2,'0');
   }
@@ -13448,7 +13618,7 @@ function parseLooseAppointments(raw){
   function cleanTitle(s){
     return String(s||'')
       .replace(/\b(mon(?:days?)?|tue(?:s(?:days?)?)?|wed(?:nesdays?)?|thu(?:r(?:s(?:days?)?)?|rsdays?)?|fri(?:days?)?|sat(?:urdays?)?|sun(?:days?)?)\b/gi,' ')
-      .replace(/\b(all\s*days?|every\s*day|daily|weekdays?|on|at|and|to|the)\b/gi,' ')
+      .replace(/\b(all\s*days?|every\s*day|daily|weekdays?|today|tomorrow|next week|morning|afternoon|evening|on|at|and|to|the)\b/gi,' ')
       .replace(/\b\d{1,2}(?:st|nd|rd|th)\b/gi,' ')
       .replace(/[.,;|/]+/g,' ')
       .replace(/\s{2,}/g,' ')
@@ -13471,11 +13641,31 @@ function parseLooseAppointments(raw){
   }
   const pieces=[];
   src.split(/\n+/).forEach(function(row){
-    row.split(/\s+\band\b\s+|\s+\/\s+|;(?!\d)|,(?=\s*[A-Za-z])/).forEach(function(p){
-      p=p.replace(/^\s*(?:[\d]+[.)]|[-*•·])\s*/,'').trim();
-      if(p) pieces.push(p);
+    row.split(/\s+\band\b\s+|\s+\/\s+|;(?!\d)|\.\s+/).forEach(function(chunk){
+      const commaParts=chunk.split(/,(?=\s*[A-Za-z])/).map(function(p){ return p.trim(); }).filter(Boolean);
+      const timed=commaParts.filter(function(p){ return spokenClockList(p).length; });
+      const use=timed.length>=2 ? commaParts : [chunk.trim()];
+      use.forEach(function(p){
+        p=p.replace(/^\s*(?:[\d]+[.)]|[-*•·])\s*/,'').trim();
+        if(p) pieces.push(p);
+      });
     });
   });
+  function dayPart(times, text){
+    if(!times || !times.start) return times;
+    const morning=/\bmornings?\b|\bbreakfast\b/i.test(text||'');
+    function one(t){
+      let h=parseInt(String(t).slice(0,2),10);
+      const rest=String(t).slice(2);
+      if(morning) return String(h===12?0:h).padStart(2,'0')+rest;
+      if(h>=1 && h<=7) h+=12;
+      return String(h).padStart(2,'0')+rest;
+    }
+    const start=one(times.start);
+    let end=one(times.end||times.start);
+    if(end<=start) end=String((parseInt(start.slice(0,2),10)+1)%24).padStart(2,'0')+start.slice(2);
+    return {start:start, end:end};
+  }
   const results=[];
   pieces.forEach(function(piece){
     const matches=[];
@@ -13484,11 +13674,11 @@ function parseLooseAppointments(raw){
     while((m=re.exec(piece))) matches.push({index:m.index, length:m[0].length, raw:m[0], groups:m});
     if(!matches.length) return;
     matches.forEach(function(hit, i){
-      const times=rangeFrom(hit.groups);
-      if(!times) return;
       const leftStart=i===0?0:matches[i-1].index+matches[i-1].length;
       const rightEnd=i+1<matches.length?matches[i+1].index:piece.length;
       const slice=piece.slice(leftStart, rightEnd);
+      const times=dayPart(rangeFrom(hit.groups), slice+' '+piece);
+      if(!times) return;
       const left=cleanTitle(piece.slice(leftStart, hit.index));
       const right=cleanTitle(piece.slice(hit.index+hit.length, rightEnd));
       let title=(left && left.length>=2)?left:(right && right.length>=2?right:'');
@@ -17304,6 +17494,16 @@ function wireView(){
 
     const addBtn=document.getElementById('addTaskBtn'); if(addBtn) addBtn.addEventListener('click', addTask);
     try{ wireHoldTalk('taskHold','newTitle','taskVoiceStatus'); }catch(e){}
+    const spokenTitle=document.getElementById('newTitle');
+    if(spokenTitle && !spokenTitle.dataset.whenRefill){
+      spokenTitle.dataset.whenRefill='1';
+      spokenTitle.addEventListener('change', function(){
+        const plan=planFromSpeech('task', spokenTitle.value||'');
+        if(plan.date) setFormValue('newDate', plan.date);
+        const clock=(plan.clocks&&plan.clocks[0])||'';
+        if(clock) setFormValue('newTime', clock);
+      });
+    }
 
     const newDateEl=document.getElementById('newDate');
     function syncLeadOptions(){
