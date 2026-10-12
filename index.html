@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="371">
+<meta name="snapback-build" content="372">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -2323,25 +2323,6 @@ function addTask(){
   state.filter = 'all';
   state.contextFilter = state.contextFilter || 'all';
   pushUndo({type:'add-task', id, label:'Task added — Undo'});
-  try{
-    if(date && (leads||[]).length){
-      leads.forEach(daysBefore=>{
-        try{
-          const d=new Date(date+'T12:00:00');
-          if(isNaN(d.getTime())) return;
-          d.setDate(d.getDate()-daysBefore);
-          const [hh,mm]=(reminderTime||time||'09:00').split(':').map(Number);
-          d.setHours(hh||9, mm||0, 0, 0);
-          scheduleNativeNotification({
-            key:'wake-task-'+id+'-'+daysBefore,
-            title: 'Nudge',
-            body: title,
-            when: d
-          });
-        }catch(e1){}
-      });
-    }
-  }catch(e){}
   if(titleEl) titleEl.value='';
   // Keep the chosen due date in the form so next add is easy; do not reset to today
   try{ saveState(); }catch(e){}
@@ -3257,16 +3238,6 @@ function addScheduleItem(){
       kind:type, alarmMinutes:alarmMin
     });
     pushUndo({type:'add-block', id, label:'Saved — Undo'});
-    // schedule native/web reminder if alarm set
-    if(alarmMin > 0){
-      try{
-        const [hh,mm]=start.split(':').map(Number);
-        const when=new Date(date+'T00:00:00'); when.setHours(hh,mm,0,0); when.setMinutes(when.getMinutes()-alarmMin);
-        if(typeof scheduleNativeNotification==='function'){
-          scheduleNativeNotification({key:'wake-sched-'+id, title:'Nudge', body:title+' in '+alarmMin+' min', when});
-        }
-      }catch(e){}
-    }
   } else {
     const day = Number(document.getElementById('schedDay')?.value || 0);
     if(!warnIfConflicts({day, start, end})) return;
@@ -5161,84 +5132,59 @@ function rebuildAllReminderSounds(){
       add('task:'+t.id+':'+daysBefore, t.title, d);
     });
   });
+  const nn=state.nonNegotiable&&state.nonNegotiable[todayStr()];
+  if(nn && nn.remindAt && nn.text){
+    const parts=String(nn.remindAt).split(':').map(Number);
+    const d=new Date();
+    d.setHours(parts[0]||9, parts[1]||0, 0, 0);
+    add('nn:'+todayStr(), nn.text, d);
+  }
   items.sort(function(a,b){ return a.at-b.at; });
   plug.replacePings({ items: JSON.stringify(items.slice(0, 48)) }).catch(function(){});
 }
 
+async function cancelLocalReminderCopies(){
+  if(typeof isNativeApp!=='function' || !isNativeApp()) return;
+  try{
+    const LocalNotifications=window.Capacitor.Plugins.LocalNotifications;
+    if(!LocalNotifications || !LocalNotifications.cancel) return;
+    const ids=[];
+    function add(key){ ids.push({id:notifIdFromKey(key)}); }
+    for(let offset=0; offset<14; offset++){
+      const d=new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()+offset);
+      const ds=toDateStr(d);
+      const dow=mondayIndex(d);
+      (state.classes||[]).forEach(function(c){
+        let applies=false;
+        if(c.scope==='session') applies=c.date===ds;
+        else applies=Number(c.day)===dow;
+        if(!applies) return;
+        add('wake-class-'+c.id+'-'+ds);
+      });
+      (state.studyBlocks||[]).forEach(function(b){
+        if(b.date!==ds) return;
+        add('wake-block-'+b.id);
+        add('wake-sched-'+b.id);
+      });
+    }
+    (state.tasks||[]).forEach(function(t){
+      add('wake-task-'+t.id+'-on');
+      (t.reminderLeads||[]).forEach(function(daysBefore){ add('wake-task-'+t.id+'-'+daysBefore); });
+      [0,1,3,7].forEach(function(daysBefore){ add('wake-task-'+t.id+'-'+daysBefore); });
+    });
+    add('nn-'+todayStr());
+    if(ids.length){
+      const batch={notifications:ids.slice(0,400)};
+      await LocalNotifications.cancel(batch);
+      if(LocalNotifications.removeDeliveredNotifications) await LocalNotifications.removeDeliveredNotifications(batch);
+    }
+  }catch(e){}
+}
 async function syncNativeClassReminders(){
   if(!isNativeApp()) return;
   const ok = await ensureNotifyPermission();
   if(!ok) return;
-  for(let offset=0; offset<14; offset++){
-    const d=new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()+offset);
-    const ds=toDateStr(d);
-    const dow=mondayIndex(d);
-    (state.classes||[]).forEach(c=>{
-      let applies=false;
-      if(c.scope==='session') applies = c.date===ds;
-      else applies = Number(c.day)===dow;
-      if(!applies || !c.start) return;
-      const mins = (c.alarmMinutes!=null)?Number(c.alarmMinutes):15;
-      if(!(mins>0)) return;
-      const [hh,mm]=(c.start||'09:00').split(':').map(Number);
-      const startAt=new Date(ds+'T00:00:00'); startAt.setHours(hh,mm,0,0);
-      const when=new Date(startAt.getTime()-mins*60000);
-      scheduleNativeNotification({
-        key: 'wake-class-'+c.id+'-'+ds,
-        title: 'Nudge',
-        body: (c.title||'Class')+' in '+mins+' min',
-        when
-      });
-    });
-    (state.studyBlocks||[]).forEach(b=>{
-      if(b.date!==ds || !b.start) return;
-      const mins=(b.alarmMinutes!=null)?Number(b.alarmMinutes):0;
-      if(!(mins>0)) return;
-      const [hh,mm]=b.start.split(':').map(Number);
-      const startAt=new Date(ds+'T00:00:00'); startAt.setHours(hh,mm,0,0);
-      const when=new Date(startAt.getTime()-mins*60000);
-      scheduleNativeNotification({
-        key:'wake-block-'+b.id,
-        title:'Nudge',
-        body:(b.label||'Appointment')+' in '+mins+' min',
-        when
-      });
-    });
-  }
-  (state.tasks||[]).filter(t=>!t.done && t.remindOn && t.reminderTime).forEach(t=>{
-    const parts=String(t.reminderTime).split(':').map(Number);
-    const d=new Date(t.remindOn+'T00:00:00');
-    d.setHours(parts[0]||8, parts[1]||0, 0, 0);
-    scheduleNativeNotification({
-      key:'wake-task-'+t.id+'-on',
-      title:'SnapBack',
-      body:t.title,
-      when:d
-    });
-  });
-  (state.tasks||[]).filter(t=>!t.done && t.date && (t.reminderLeads||[]).length).forEach(t=>{
-    const leads=t.reminderLeads;
-    const rt=t.reminderTime||t.time||'08:00';
-    leads.forEach(daysBefore=>{
-      const d=new Date(t.date+'T12:00:00');
-      d.setDate(d.getDate()-daysBefore);
-      const [hh,mm]=rt.split(':').map(Number);
-      d.setHours(hh||9,mm||0,0,0);
-      scheduleNativeNotification({
-        key:'wake-task-'+t.id+'-'+daysBefore,
-        title: 'SnapBack',
-        body:t.title,
-        when:d
-      });
-    });
-  });
-  // Non-negotiable today
-  const nn=state.nonNegotiable&&state.nonNegotiable[todayStr()];
-  if(nn && nn.remindAt){
-    const [hh,mm]=nn.remindAt.split(':').map(Number);
-    const when=new Date(); when.setHours(hh,mm,0,0);
-    scheduleNativeNotification({key:'nn-'+todayStr(), title:'SnapBack', body:nn.text, when});
-  }
+  await cancelLocalReminderCopies();
   try{ rebuildAllReminderSounds(); }catch(e){}
 }
 
