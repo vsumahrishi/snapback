@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="370">
+<meta name="snapback-build" content="371">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4212,9 +4212,9 @@ async function scheduleNativeNotification({key, title, body, when}){
         smallIcon: 'ic_stat_icon',
         largeIcon: 'ic_launcher',
         actionTypeId: 'OPEN',
-        extra: { key: key || '' },
+        extra: { key: key || '', title: title || 'SnapBack', body: body || '' },
         ongoing: false,
-        autoCancel: true
+        autoCancel: false
       }]
     });
     return true;
@@ -4950,7 +4950,10 @@ async function ensureNativeNotifListeners(){
           const note = (n && n.notification && n.notification.body) || '';
           triggerWakeMath('notification', note);
         } else {
-          try{ persistRender(); }catch(e){}
+          const note = (n && n.notification) || n || {};
+          const title = note.title || (note.extra && note.extra.title) || 'SnapBack';
+          const body = note.body || (note.extra && note.extra.body) || '';
+          if(title || body) showAppMessage(title, body || 'Swipe this away when you have read it.');
         }
       }catch(e){ console.warn(e); }
     });
