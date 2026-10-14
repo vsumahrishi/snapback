@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="372">
+<meta name="snapback-build" content="373">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -15688,7 +15688,7 @@ function workoutPlanHtml(){
     let dayCell=names[dow]||'';
     let timeCell=timeText;
     let focusCell=focusText;
-    let detailCell=escapeHtml(details);
+    let detailCell=escapeHtml(details).replace(/\n/g,'<br>');
     if(editing){
       dayCell=`<select data-wp="day" style="width:100%;font-weight:700">${names.map(function(n,i){ return '<option value="'+i+'"'+(Number(dow)===i?' selected':'')+'>'+n+'</option>'; }).join('')}</select><div style="font-weight:500;font-size:.75rem;color:#334155;margin-top:4px">${escapeHtml(workoutDateLabel(ds))}</div>`;
       timeCell=timeOpen
@@ -15699,14 +15699,14 @@ function workoutPlanHtml(){
       focusCell=focusOpen
         ? `<select data-wp="focus" style="width:100%">${opts.join('')}</select>`
         : `<button type="button" class="btn ghost sm" data-action="wp-focus" data-date="${ds}">${focusText}</button>`;
-      detailCell=`<input data-wp="details" value="${escapeHtml(details)}" placeholder="Type here" style="width:100%">`;
+      detailCell=`<textarea data-wp="details" rows="4" placeholder="Type here" style="width:100%;min-width:240px;min-height:110px;line-height:1.4;resize:vertical;box-sizing:border-box">${escapeHtml(details)}</textarea>`;
     } else {
       dayCell=`<div style="font-weight:700">${escapeHtml(names[dow]||'')}</div><div style="font-weight:500;font-size:.75rem;color:#334155">${escapeHtml(workoutDateLabel(ds))}</div>`;
     }
     const buttons=editing
       ? `<button type="button" class="btn sm" data-action="wp-save" data-date="${ds}">Save</button> <button type="button" class="btn ghost sm" data-action="wp-cancel" data-date="${ds}">Cancel</button>`
       : `<button type="button" class="btn ghost sm" data-action="wp-edit" data-date="${ds}">Edit</button>`+(plan?` <button type="button" class="btn ghost sm" data-action="ex-clear" data-id="${escapeHtml(plan.id)}">Clear</button>`:'');
-    return `<tr data-wp-row="${ds}" data-plan="${plan?escapeHtml(plan.id):''}" data-repeat="${plan&&!plan.onceDate?'1':'0'}" style="background:${bg}"><td style="padding:8px">${dayCell}</td><td style="padding:8px">${timeCell}</td><td style="padding:8px">${focusCell}</td><td style="padding:8px">${detailCell}</td><td style="padding:8px" data-wp-dur="${ds}">${escapeHtml(workoutDurText(start,end))}</td><td style="padding:8px;white-space:nowrap">${buttons}</td></tr>`;
+    return `<tr data-wp-row="${ds}" data-plan="${plan?escapeHtml(plan.id):''}" data-repeat="${plan&&!plan.onceDate?'1':'0'}" style="background:${bg}"><td style="padding:8px">${dayCell}</td><td style="padding:8px">${timeCell}</td><td style="padding:8px">${focusCell}</td><td style="padding:8px;min-width:260px;white-space:normal;vertical-align:top;line-height:1.4">${detailCell}</td><td style="padding:8px" data-wp-dur="${ds}">${escapeHtml(workoutDurText(start,end))}</td><td style="padding:8px;white-space:nowrap">${buttons}</td></tr>`;
   }).join('');
   return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 0 8px">
       <span style="font-weight:800">Workout Plan</span>
