@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="373">
+<meta name="snapback-build" content="379">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -18,7 +18,7 @@
   --bg:#F2EFE7;
   --panel:#FFFFFF;
   --ink:#1E2422;
-  --muted:#6C766E;
+  --muted:#3E4943;
   --line:#DFDACD;
   --pine:#2F6F5E;
   --pine-soft:#DDEAE4;
@@ -47,7 +47,7 @@ body/* dark-mode-title-fix */
   --bg:#1A1E1C;
   --panel:#252A27;
   --ink:#F4F2EC;
-  --muted:#B8C2BA;
+  --muted:#E4EBE6;
   --line:#3A403C;
   --pine:#4A9B82;
   --pine-soft:#1E3A32;
@@ -77,12 +77,15 @@ button{font-family:inherit}
 .brand{padding:0 8px 16px;border-bottom:1px solid rgba(255,255,255,.12);margin-bottom:10px}
 .brand .mark{font-size:1.3rem;font-weight:700;font-family:'Space Grotesk',sans-serif}
 .brand .sub{font-size:.76rem;color:#B9C2BC;margin-top:2px}
-.navsection{font-size:.66rem;text-transform:uppercase;letter-spacing:.09em;color:#8B958E;padding:12px 10px 4px;font-weight:700}
+.navsection{font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;color:#D5DDD8;padding:12px 10px 4px;font-weight:700}
 .navbtn{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:10px;background:transparent;border:0;color:#E7E9E6;text-align:left;cursor:pointer;font-size:.87rem;width:100%}
 .navbtn:hover{background:rgba(255,255,255,.08)}
 .navbtn.active{background:var(--pine);color:#fff;font-weight:600}
 .navbtn .ico{width:16px;text-align:center;flex-shrink:0}
-.navfoot{margin-top:auto;font-size:.7rem;color:#8B958E;padding:10px 8px 0}
+.navfoot{margin-top:auto;font-size:.75rem;color:#D5DDD8;padding:10px 8px 0}
+html.text-large{font-size:118%}
+html.text-large .pagehead h1{font-size:1.85rem}
+html.text-large .btn,html.text-large .navbtn,html.text-large label,html.text-large input,html.text-large select,html.text-large textarea{font-size:1.05rem}
 
 /* Main */
 .main{flex:1;min-width:0;padding:28px 32px 70px;max-width:1080px}
@@ -1317,6 +1320,7 @@ function defaultState(){
       notifyBrowser:false,
       quoteOnLoad:true,
       darkMode:false, celebrateOnComplete:true, celebrateSound:true,
+      gcalWrite:false,
       customQuotes:[]
     },
     timer:{mode:'work',remaining:25*60,total:25*60,running:false,sessionCount:0,activeTaskId:1,distractionCount:0,distractionSeconds:0}
@@ -2019,9 +2023,8 @@ function modeLength(mode){
 }
 function focusEndLabel(){
   const t=state.timer;
-  if(!t || t.mode==='work') return 'Focus session done';
-  if(t.mode==='shortBreak') return 'Short break done';
-  return 'Long break done';
+  if(!t || t.mode==='work') return 'Break has started';
+  return 'Break is over';
 }
 function armFocusEndAlarm(){
   try{
@@ -2127,6 +2130,7 @@ function completeSegment(alreadyDue){
   disarmFocusEndAlarm();
   if(!alreadyDue){
     try{ playAlarm(); }catch(e){}
+    try{ showAppMessage(doneLabel, doneLabel==='Break has started' ? 'The break timer is ready.' : 'The next focus session is ready.'); }catch(e){}
     try{
       if(document.hidden && !(typeof isNativeApp==='function' && isNativeApp()) && typeof Notification!=='undefined' && Notification.permission==='granted'){
         new Notification('SnapBack', {body:doneLabel});
@@ -2158,6 +2162,37 @@ function completeSegment(alreadyDue){
   persistRender();
 }
 function fmtTime(s){ const m=Math.floor(s/60), sec=s%60; return String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0'); }
+function applyFocusPreset(key){
+  const map={sprint:[25,5], power:[15,5], deep:[50,10]};
+  state.timer.preset=key;
+  if(map[key]){
+    state.settings.workMin=map[key][0];
+    state.settings.shortBreakMin=map[key][1];
+  }
+  if(!state.timer.running){
+    state.timer.mode='work';
+    state.timer.remaining=modeLength('work');
+    state.timer.total=state.timer.remaining;
+  }
+  persistRender();
+}
+function logDistraction(){
+  if(!state.timer || !state.timer.running || state.timer.mode!=='work') return;
+  if(!Array.isArray(state.distractLog)) state.distractLog=[];
+  const task=findTask(state.timer.activeTaskId);
+  state.distractLog.push({at:Date.now(), date:todayStr(), taskId:task?task.id:'', title:task?task.title:''});
+  showAppMessage('Noted', 'Back to the session.');
+  persistRender();
+}
+function startTechniqueLine(){
+  const lines=[
+    'Open the file. That is the whole first step.',
+    'Set the timer, then do two minutes only.',
+    'Write one line. Then choose the next bite.'
+  ];
+  const n=Number(String(todayStr()).slice(-1))||0;
+  return lines[n%lines.length];
+}
 function switchTimerMode(mode){
   clearInterval(timerHandle);
   clearTimeout(focusEndTimer);
@@ -2320,6 +2355,7 @@ function addTask(){
   else if(eis==='later'){ urgent=false; important=false; eisSet=true; }
   const taskObj={id,title,notes:'',date:date||'',time,priority,urgent,important,eisSet,tier:'could',frog:false,context:taskContext,technique:technique,meetingUrl:'',nudgeWhen:nudgeWhen,reminderLeads:leads,reminderTime,startDate,startTime,startReminderMinutes:[],chunks:[],pomodoros:0,done:false,whenThen:{},rewarding:{avoid:title},strategic:{what:title},flip:{},created:Date.now()};
   state.tasks.unshift(taskObj);
+  try{ writeTaskToGoogleCalendar(taskObj); }catch(e){}
   state.filter = 'all';
   state.contextFilter = state.contextFilter || 'all';
   pushUndo({type:'add-task', id, label:'Task added — Undo'});
@@ -2870,9 +2906,13 @@ function setNonNegotiable(){
   const el = document.getElementById('nnInput') || document.getElementById('nnInputPlate');
   const text = el ? el.value.trim() : '';
   if(!text) return;
-  state.nonNegotiable[todayStr()]={text,done:false};
+  const timeEl = document.getElementById('nnRemindTime');
+  const rec = {text:text, done:false};
+  if(timeEl && timeEl.value) rec.remindAt = timeEl.value;
+  state.nonNegotiable[todayStr()] = rec;
   if(el) el.value='';
   persistRender();
+  try{ rebuildAllReminderSounds(); }catch(e){}
 }
 function toggleNonNegotiable(){
   const rec=state.nonNegotiable[todayStr()];
@@ -3496,10 +3536,11 @@ function addHabit(){
   const remind=!!(document.getElementById('newHabitRemind')&&document.getElementById('newHabitRemind').checked);
   const track=document.getElementById('newHabitTrack')?!!document.getElementById('newHabitTrack').checked:true;
   const time=(document.getElementById('newHabitTime')&&document.getElementById('newHabitTime').value)||'18:00';
+  const anchor=(document.getElementById('newHabitAfter')&&document.getElementById('newHabitAfter').value||'').trim();
   const dow=mondayIndex(new Date());
   const voice=state.habitVoice||null;
   state.habitVoice=null;
-  state.habitAddPopup={step:'pick', name:name, remind:remind, track:track, time:time, onceDate:(voice&&voice.date)||todayStr(), from:(voice&&voice.from)||todayStr(), to:(voice&&voice.to)||'', days:(voice&&voice.days&&voice.days.length)?voice.days:[dow], err:''};
+  state.habitAddPopup={step:'pick', name:name, remind:remind, track:track, time:time, anchor:anchor, onceDate:(voice&&voice.date)||todayStr(), from:(voice&&voice.from)||todayStr(), to:(voice&&voice.to)||'', days:(voice&&voice.days&&voice.days.length)?voice.days:[dow], err:''};
   if(voice&&voice.mode==='once') state.habitAddPopup.step='date';
   else if(voice&&voice.mode==='repeat') state.habitAddPopup.step='repeat';
   renderModal();
@@ -3788,8 +3829,6 @@ function resetAllDataConfirmed(){
   persistRender();
 }
 async function deleteMySnapBackData(){
-  const ok = window.confirm ? window.confirm('Delete the SnapBack copy saved with this Google account? Tasks, schedule, and nudges in the cloud will be removed from this device too. This does not delete your Gmail.') : true;
-  if(!ok) return;
   try{
     const ref = cloudDocRef();
     if(ref) await ref.delete();
@@ -4026,10 +4065,16 @@ function checkHabitNudges(now){
       return;
     }
     const t=hm(h.time||'18:00');
-    if(now>=t && now<t+40*60*1000) once('habitn:'+h.id+':'+today, 'Did you do '+h.name+'?', {kind:'yesno', log:'custom', id:h.id, date:today, name:h.name, text:'Did you do '+h.name+'?'});
+    if(now>=t && now<t+40*60*1000) once('habitn:'+h.id+':'+today, (h.anchor?String(h.anchor).replace(/[.\s]+$/,'')+'. ':'')+'Did you do '+h.name+'?', {kind:'yesno', log:'custom', id:h.id, date:today, name:h.name, text:(h.anchor?String(h.anchor).replace(/[.\s]+$/,'')+'. ':'')+'Did you do '+h.name+'?'});
   });
   return changed;
 }
+function withAnchor(slot, text){
+  const cue=state.habitAnchors && state.habitAnchors[slot];
+  if(!cue) return text;
+  return String(cue).replace(/[.\s]+$/,'')+'. '+text;
+}
+function markHabitSaved(line){ state.habitSavedLine=line; }
 function answerHabitAsk(which){
   const a=state.habitAsk; if(!a) return;
   ensureHabitPlans();
@@ -4056,6 +4101,16 @@ function answerHabitAsk(which){
     state.habitLog[a.date]=state.habitLog[a.date]||{};
     state.habitLog[a.date][a.id]=yes;
   }
+  if(a.log==='water'){
+    const waterHabit=(state.habits||[]).find(function(h){ return h.id===4 || /hydrat|water/i.test(h.name||''); });
+    if(waterHabit){
+      if(!state.habitLog) state.habitLog={};
+      state.habitLog[a.date]=state.habitLog[a.date]||{};
+      state.habitLog[a.date][waterHabit.id]=yes;
+    }
+  }
+  const label=a.name||(a.log==='meal'?'a real meal':a.log==='water'?'water':a.log||'that');
+  markHabitSaved(yes ? ('Saved. Yes for '+label+'.') : 'Saved. Not this time.');
   state.habitAsk=null;
   state.reminderModalOpen=false;
   state.appMsg=null;
@@ -4078,6 +4133,7 @@ function saveSleepAsk(){
   ensureHabitPlans();
   const v=document.getElementById('sleepHours')&&document.getElementById('sleepHours').value;
   state.sleepLog[a.date]=v||'';
+  markHabitSaved(v ? ('Saved. '+v+' hours of sleep.') : 'Saved.');
   const sleepHabit=(state.habits||[]).find(function(h){ return h.id===3 || /sleep/i.test(h.name||''); });
   if(sleepHabit){
     if(!state.habitLog) state.habitLog={};
@@ -4098,6 +4154,7 @@ function saveScreenAsk(){
   const mins=Math.max(0, Math.min(59, Number(m&&m.value)||0));
   if(!state.screenLog) state.screenLog={};
   state.screenLog[a.date]=hours+'h '+mins+'m';
+  markHabitSaved('Saved. Screens: '+hours+'h '+mins+'m.');
   state.habitAsk=null;
   try{ saveState(); }catch(e){}
   persistRender();
@@ -4511,17 +4568,17 @@ function habitPopupItems(){
   for(let i=0;i<7;i++){
     const dateStr=icsAddDays(today, i);
     if(state.habitNudges.sleep!==false && habitClock('sleep') && !habitAnswered('sleep', dateStr)){
-      pushItem('sleep:'+dateStr, atClock(dateStr, habitClock('sleep')), 'How many hours did you sleep?', {kind:'habit', mode:'ask', askKind:'sleep', log:'sleep', hkey:'sleep:'+dateStr, date:dateStr, text:'How many hours did you sleep?'});
+      pushItem('sleep:'+dateStr, atClock(dateStr, habitClock('sleep')), withAnchor('sleep','How many hours did you sleep?'), {kind:'habit', mode:'ask', askKind:'sleep', log:'sleep', hkey:'sleep:'+dateStr, date:dateStr, text:withAnchor('sleep','How many hours did you sleep?')});
     }
     if(state.habitNudges.meal!==false && habitClock('meal') && !habitAnswered('meal', dateStr)){
-      pushItem('meal:'+dateStr, atClock(dateStr, habitClock('meal')), 'Did you eat a real meal today?', {kind:'habit', mode:'ask', askKind:'yesno', log:'meal', hkey:'meal:'+dateStr, date:dateStr, text:'Did you eat a real meal today?'});
+      pushItem('meal:'+dateStr, atClock(dateStr, habitClock('meal')), withAnchor('meal','Did you eat a real meal today?'), {kind:'habit', mode:'ask', askKind:'yesno', log:'meal', hkey:'meal:'+dateStr, date:dateStr, text:withAnchor('meal','Did you eat a real meal today?')});
     }
     if(state.habitNudges.water!==false){
       ['water1','water2'].forEach(function(slot, idx){
         const hh=habitClock(slot);
         if(!hh) return;
         const wkey='water:'+dateStr+':'+idx;
-        pushItem(wkey, atClock(dateStr, hh), 'Did you Hydrate?', {kind:'habit', mode:'ask', askKind:'yesno', log:'water', hkey:wkey, date:dateStr, text:'Did you Hydrate?'});
+        pushItem(wkey, atClock(dateStr, hh), withAnchor('water','Did you Hydrate?'), {kind:'habit', mode:'ask', askKind:'yesno', log:'water', hkey:wkey, date:dateStr, text:withAnchor('water','Did you Hydrate?')});
       });
     }
     if(state.habitNudges.screen!==false && state.screenPlan && !habitAnswered('screen', dateStr)){
@@ -4549,7 +4606,7 @@ function habitPopupItems(){
       if(!customOccursOn(h, dateStr)) return;
       if(habitAnswered('custom', dateStr, h.id)) return;
       const key='habitn:'+h.id+':'+dateStr;
-      const q='Did you do '+h.name+'?';
+      const q=(h.anchor?String(h.anchor).replace(/[.\s]+$/,'')+'. ':'')+'Did you do '+h.name+'?';
       pushItem(key, atClock(dateStr, h.time||'18:00'), q, {kind:'habit', mode:'ask', askKind:'yesno', log:'custom', hid:String(h.id), hkey:key, date:dateStr, text:q, name:h.name});
     });
   }
@@ -4675,6 +4732,10 @@ function openHabitFromNotif(extra){
     name: extra.name||'',
     key: key
   };
+  state.quoteModalOpen=false;
+  if(state.settings && state.settings.quoteOnLoad && state.lastQuoteShownDate!==todayStr()){
+    state.lastQuoteShownDate=todayStr();
+  }
   state.reminderModalOpen=false;
   state.appMsg=null;
   try{ saveState(); }catch(e){}
@@ -4796,7 +4857,7 @@ function commitHabitJust(){
   const p=state.habitAddPopup; if(!p) return;
   const date=(document.getElementById('habPopDate')&&document.getElementById('habPopDate').value)||todayStr();
   const id=uid();
-  state.habits.push({id:id, name:p.name, icon:'', type:'check', remind:!!p.remind, track:p.track!==false, custom:true, time:p.time||'18:00', onceDate:date, days:[], from:'', to:'', stopped:false});
+  state.habits.push({id:id, name:p.name, icon:'', type:'check', remind:!!p.remind, track:p.track!==false, custom:true, time:p.time||'18:00', anchor:p.anchor||'', onceDate:date, days:[], from:'', to:'', stopped:false});
   ensureHabitPlans();
   state.habitNudges['habit_'+id]=!!p.remind;
   state.habitAddPopup=null;
@@ -4811,7 +4872,7 @@ function commitHabitRepeat(){
   const to=(document.getElementById('habPopTo')&&document.getElementById('habPopTo').value)||'';
   if(to && from && to<from){ p.err='To is before From.'; renderModal(); return; }
   const id=uid();
-  state.habits.push({id:id, name:p.name, icon:'', type:'check', remind:!!p.remind, track:p.track!==false, custom:true, time:p.time||'18:00', onceDate:'', days:days, from:from, to:to, stopped:false});
+  state.habits.push({id:id, name:p.name, icon:'', type:'check', remind:!!p.remind, track:p.track!==false, custom:true, time:p.time||'18:00', anchor:p.anchor||'', onceDate:'', days:days, from:from, to:to, stopped:false});
   ensureHabitPlans();
   state.habitNudges['habit_'+id]=!!p.remind;
   state.habitAddPopup=null;
@@ -5092,6 +5153,8 @@ function rebuildAllReminderSounds(){
     if(!at || at<=Date.now()+1500) return;
     items.push({key:String(key||''), title:'SnapBack', body:String(body||'').slice(0,140), at:at});
   }
+  const allowDeadline = !(state.settings && state.settings.deadlineNotify===false);
+  if(allowDeadline){
   for(let offset=0; offset<14; offset++){
     const d=new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate()+offset);
     const ds=toDateStr(d);
@@ -5132,12 +5195,23 @@ function rebuildAllReminderSounds(){
       add('task:'+t.id+':'+daysBefore, t.title, d);
     });
   });
+  }
   const nn=state.nonNegotiable&&state.nonNegotiable[todayStr()];
   if(nn && nn.remindAt && nn.text){
     const parts=String(nn.remindAt).split(':').map(Number);
     const d=new Date();
     d.setHours(parts[0]||9, parts[1]||0, 0, 0);
     add('nn:'+todayStr(), nn.text, d);
+  }
+  const moodAt=state.settings&&state.settings.moodAskTime;
+  if(moodAt){
+    const mp=String(moodAt).split(':').map(Number);
+    for(let i=0;i<7;i++){
+      const d=new Date(); d.setHours(mp[0]||20, mp[1]||0, 0, 0); d.setDate(d.getDate()+i);
+      const ds=toDateStr(d);
+      if(state.moodLog && state.moodLog[ds]) continue;
+      add('mood:'+ds, 'How are you? Open Check-in. One tap.', d);
+    }
   }
   items.sort(function(a,b){ return a.at-b.at; });
   plug.replacePings({ items: JSON.stringify(items.slice(0, 48)) }).catch(function(){});
@@ -5263,7 +5337,8 @@ const NAV=[
     {id:'today', label:'Today', ico:'&#9737;'},
     {id:'tasks', label:'Tasks', ico:'&#9776;'},
     {id:'challenges', label:'Challenges', ico:'&#127919;'},
-    {id:'journal', label:'Journal', ico:'&#128221;'},
+    {id:'journal', label:'Ideas', ico:'&#128221;'},
+    {id:'checkin', label:'Check-in', ico:'&#9786;'},
     {id:'plan', label:'Plan', ico:'&#128197;'},
     {id:'techniques', label:'Techniques', ico:'&#128295;'},
     {id:'studytools', label:'Study Tools', ico:'&#128218;'} /* relabelled for non-students */,
@@ -5271,6 +5346,26 @@ const NAV=[
     {id:'settings', label:'Settings', ico:'&#9881;'}
   ]}
 ];
+
+function seeOn(group, key){
+  try{
+    const box = state.settings && state.settings.see && state.settings.see[group];
+    if(!box || box[key]===undefined) return true;
+    return !!box[key];
+  }catch(e){ return true; }
+}
+function visibleNav(){
+  return NAV.map(function(sec){
+    return { section:sec.section, items:sec.items.filter(function(n){
+      if(n.id==='today' || n.id==='settings') return true;
+      return seeOn('menu', n.id);
+    }) };
+  });
+}
+function seeRow(group, key, label){
+  const on = seeOn(group, key);
+  return `<div class="deadline-row" style="gap:8px;align-items:center"><span style="flex:1">${label}</span><button type="button" class="btn sm ${on?'':'ghost'}" data-action="see-set" data-group="${group}" data-key="${key}" data-on="1">Show</button><button type="button" class="btn sm ${on?'ghost':''}" data-action="see-set" data-group="${group}" data-key="${key}" data-on="0">Hide</button></div>`;
+}
 
 
 /* Audience: Student vs Not a student — wording only */
@@ -5409,7 +5504,7 @@ function renderSidebar(){
   }else{
     el.className='sidebar';
     el.innerHTML=`<div class="brand" id="brandHomeBtn" style="cursor:pointer"><div class="brand-row"><img src="icon-192.png" alt=""><span class="brand-name">SnapBack</span></div><div class="sub">a calmer way through the list</div></div>` +
-      NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
+      visibleNav().map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.id==='studytools'?L('studyTools'):n.label}</button>`
       ).join('')).join('') +
       `<div class="navfoot">Saved automatically</div>`;
@@ -5427,7 +5522,7 @@ function renderMobileDrawer(){
     <div class="drawer-backdrop" id="drawerBackdrop"></div>
     <div class="drawer-panel">
       <div class="brand" id="brandHomeBtnDrawer" style="cursor:pointer"><div class="brand-row"><img src="icon-192.png" alt=""><span class="brand-name">SnapBack</span></div><div class="sub">a calmer way through the list</div></div>
-      ${NAV.map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
+      ${visibleNav().map(sec=>`<div class="navsection">${sec.section}</div>` + sec.items.map(n=>
         `<button class="navbtn ${state.view===n.id?'active':''}" data-nav="${n.id}"><span class="ico">${n.ico}</span>${n.id==='studytools'?L('studyTools'):n.label}</button>`
       ).join('')).join('')}
       <div class="navfoot">Saved automatically</div>
@@ -5492,6 +5587,86 @@ function topOfMindBanner(){
     <button class="btn ghost sm" data-action="clear-tom">Clear</button>
   </div>`;
 }
+function habitSavedHtml(){
+  if(!state.habitSavedLine) return '';
+  return `<div class="card" role="status" style="display:flex;gap:8px;align-items:center"><span style="flex:1">${escapeHtml(state.habitSavedLine)}</span><button type="button" class="btn ghost sm" data-action="hide-habit-saved" aria-label="Close">×</button></div>`;
+}
+function startHereHtml(){
+  if(state.startDone) return '';
+  const step=state.startStep||1;
+  const skip=`<button type="button" class="btn ghost sm" data-action="start-skip">Skip</button>`;
+  if(step===1) return `<div class="card"><b>Start here. Step 1 of 4.</b><p style="margin:8px 0">Name one thing you need to do. Only one.</p><input id="obTask" placeholder="One task" style="width:100%;margin-bottom:8px"><div style="display:flex;gap:8px"><button type="button" class="btn sm" data-action="start-next">Next</button>${skip}</div></div>`;
+  if(step===2) return `<div class="card"><b>Step 2 of 4.</b><p style="margin:8px 0">Sleep, a real meal, and water are already on. You can turn one off later in Healthy Habits.</p><div style="display:flex;gap:8px"><button type="button" class="btn sm" data-action="start-next">Next</button>${skip}</div></div>`;
+  if(step===3) return `<div class="card"><b>Step 3 of 4.</b><p style="margin:8px 0">Pick a time for one reminder tomorrow. It will not use a math problem.</p><input type="time" id="obTime" value="09:00" style="margin-bottom:8px"><div style="display:flex;gap:8px"><button type="button" class="btn sm" data-action="start-next">Next</button>${skip}</div></div>`;
+  return `<div class="card"><b>Step 4 of 4.</b><p style="margin:8px 0">You are on Today. The + button adds another task from any screen.</p><button type="button" class="btn sm" data-action="start-next">Done</button></div>`;
+}
+function advanceStartHere(){
+  const step=state.startStep||1;
+  if(step===1){
+    const title=(document.getElementById('obTask')&&document.getElementById('obTask').value||'').trim();
+    if(!title){ showAppMessage('Name one task','One line is enough.'); return; }
+    const task={id:uid(), title:title, notes:'', date:todayStr(), time:'', priority:'medium', urgent:false, important:false, tier:'could', frog:false, done:false, created:Date.now()};
+    if(!Array.isArray(state.tasks)) state.tasks=[];
+    state.tasks.unshift(task);
+    state.startTaskId=task.id;
+    state.startStep=2;
+    persistRender();
+    return;
+  }
+  if(step===2){ state.startStep=3; persistRender(); return; }
+  if(step===3){
+    const time=(document.getElementById('obTime')&&document.getElementById('obTime').value)||'09:00';
+    const d=new Date(); d.setDate(d.getDate()+1);
+    ensureNudges();
+    const item={id:uid(), enabled:true, name:'Start one thing', time:time, onceDate:toDateStr(d), days:[], sound:'chime', math:false, alert:'regular', snoozesMax:1, snoozesLeft:1, created:Date.now()};
+    state.nudges.push(item);
+    state.wakeAlarm=item;
+    state.startStep=4;
+    persistRender();
+    try{ scheduleWakeAlarms(); }catch(e){}
+    try{ if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms(); }catch(e){}
+    return;
+  }
+  state.startDone=true;
+  persistRender();
+}
+function parseProgressFromQuery(){
+  try{
+    const p=new URLSearchParams(String(location.search||'')).get('p');
+    if(!p) return null;
+    const obj=JSON.parse(b64urlDecode(p));
+    if(!obj || obj.kind!=='progress') return null;
+    return obj;
+  }catch(e){ return null; }
+}
+function habitYesRecent(){
+  let n=0;
+  last7Days().forEach(function(d){
+    if(state.mealLog && state.mealLog[d]===true) n++;
+    if(state.sleepLog && state.sleepLog[d]) n++;
+    const ex=state.exerciseLog && state.exerciseLog[d];
+    if(ex) Object.keys(ex).forEach(function(k){ if(ex[k]===true) n++; });
+    const hl=(state.habitLog && state.habitLog[d])||{};
+    Object.keys(hl).forEach(function(k){ if(hl[k]) n++; });
+  });
+  return n;
+}
+function copyProgressLink(){
+  const payload={kind:'progress', name:(state.profile&&state.profile.name)||'SnapBack', on:todayStr(), done:(state.tasks||[]).filter(function(t){ return t.done && !t.exerciseId; }).length, open:(state.tasks||[]).filter(function(t){ return !t.done && !t.exerciseId; }).length, habitYes:habitYesRecent()};
+  const link=location.origin+location.pathname+'?p='+b64urlEncode(JSON.stringify(payload));
+  try{ navigator.clipboard.writeText(link); showAppMessage('Link copied','Send it. It shows counts only.'); }
+  catch(e){ showAppMessage('Copy this link', link); }
+}
+function viewProgressShare(){
+  const d=state.progressPublic||parseProgressFromQuery()||{};
+  return `<div class="pagehead"><h1>Shared update</h1><p>${escapeHtml(d.name||'SnapBack')} · ${escapeHtml(d.on||'')}</p></div>
+    <div class="grid3">
+      <div class="statbox"><div class="lbl">Done</div><div class="val">${Number(d.done)||0}</div></div>
+      <div class="statbox"><div class="lbl">Open</div><div class="val">${Number(d.open)||0}</div></div>
+      <div class="statbox"><div class="lbl">Habit yes, 7 days</div><div class="val">${Number(d.habitYes)||0}</div></div>
+    </div>
+    <p style="color:var(--muted)">This link does not show notes, Ideas, or Check-in.</p>`;
+}
 function restoreMainFields(snap){
   if(!snap || snap.view!==state.view) return;
   (snap.fields||[]).forEach(function(f){
@@ -5512,6 +5687,7 @@ function restoreMainFields(snap){
 function renderMain(){
   const el=document.getElementById('main');
   if(!el) return;
+  try{ ensureFab(); }catch(e){}
   let _fieldSnap=null;
   try{
     if(!window._skipRestore){
@@ -5529,7 +5705,9 @@ function renderMain(){
   window._skipRestore=false;
   try{
     const fb = (typeof parseFreeBusyFromHash==='function') ? parseFreeBusyFromHash() : null;
-    if(fb){ state.freeBusyPublic = fb; state.view = 'freebusy'; }
+    const prog = (typeof parseProgressFromQuery==='function') ? parseProgressFromQuery() : null;
+    if(prog){ state.progressPublic = prog; state.view = 'progressShare'; }
+    else if(fb){ state.freeBusyPublic = fb; state.view = 'freebusy'; }
     else { try{ resolveShortShare(); }catch(e){} }
   }catch(e){}
   try{
@@ -5547,14 +5725,15 @@ function renderMain(){
   const views={today:viewToday,terms:viewTerms,tasks:viewTasks,challenges:viewChallenges,planAhead:viewPlanAhead,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
     eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,nudge:viewNudge,
     bodydouble:viewBodyDouble,energyFocus:viewEnergyFocus,ifThen:viewIfThen,ritualBackpack:viewRitualBackpack,ritualCostume:viewRitualCostume,ritualLocation:viewRitualLocation,contextSplit:viewContextSplit,settings:viewSettings,
-    habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp,reminders:viewNudge,mindmaps:viewMindmaps,soundscape:viewSoundscape,
+    habits:viewHabits,journal:viewJournal,checkin:viewCheckin,studytools:viewStudyTools,stats:viewStats,help:viewHelp,reminders:viewNudge,mindmaps:viewMindmaps,soundscape:viewSoundscape,
     freebusyPreview:viewFreeBusyPreview,
     freebusyPreview:viewFreeBusyPreview,
-    freebusy:function(){ return viewFreeBusyPublic(state.freeBusyPublic||parseFreeBusyFromHash()); }
+    freebusy:function(){ return viewFreeBusyPublic(state.freeBusyPublic||parseFreeBusyFromHash()); },
+    progressShare:viewProgressShare
   };
   try{
     let html=(views[state.view]||viewToday)();
-    try{ html = topOfMindBanner() + html; }catch(e2){ console.warn('topOfMindBanner', e2); }
+    try{ html = habitSavedHtml() + ((state.view==='today'||!state.view)?startHereHtml():'') + topOfMindBanner() + html; }catch(e2){ console.warn('topOfMindBanner', e2); }
     el.innerHTML=html;
     try{ wireView(); }catch(e3){ console.error('wireView', e3); }
     try{ restoreMainFields(_fieldSnap); }catch(e4){}
@@ -5608,9 +5787,34 @@ function saveWizardAppointments(list){
   if(added.length) showAppMessage('Saved', added.length+' '+word+(added.length===1?'':'s')+' added.');
   try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
 }
+function ensureFab(){
+  if(document.getElementById('fabTask')) return;
+  const b=document.createElement('button');
+  b.id='fabTask';
+  b.type='button';
+  b.className='fab-task';
+  b.textContent='+';
+  b.setAttribute('aria-label','Add a task');
+  b.addEventListener('click', function(){ state.quickAddOpen=true; try{ renderModal(); }catch(e){} });
+  document.body.appendChild(b);
+}
+function saveQuickTask(){
+  const titleEl=document.getElementById('fabTitle');
+  const title=(titleEl&&titleEl.value||'').trim();
+  if(!title){ showAppMessage('Type a task', 'Say it or type it, then add it.'); return; }
+  const date=(document.getElementById('fabDate')&&document.getElementById('fabDate').value)||'';
+  const time=(document.getElementById('fabTime')&&document.getElementById('fabTime').value)||'';
+  const task={id:uid(), title:title, notes:'', date:date, time:time, priority:'medium', urgent:false, important:false, tier:'could', frog:false, meetingUrl:'', reminderLeads:[], reminderTime:time||'', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{avoid:title}, strategic:{what:title}, flip:{}, created:Date.now()};
+  if(!Array.isArray(state.tasks)) state.tasks=[];
+  state.tasks.unshift(task);
+  state.quickAddOpen=false;
+  try{ writeTaskToGoogleCalendar(task); }catch(e){}
+  persistRender();
+  showAppMessage('Added', title);
+}
 function renderModal(){
   const root=document.getElementById('modalRoot');
-  if(!state.wakeMathOpen && !hasLaunchConsent()){
+  if(!parseProgressFromQuery() && !state.wakeMathOpen && !hasLaunchConsent()){
     root.innerHTML=launchConsentHtml();
     return;
   }
@@ -6544,19 +6748,55 @@ function renderModal(){
     return;
   }
 
-  if(!state.quoteModalOpen){ root.innerHTML=''; return; }
+  if(!state.quoteModalOpen && !state.quickAddOpen){ root.innerHTML=''; return; }
+  if(state.quickAddOpen){
+    root.innerHTML=`<div class="overlay" id="fabOverlay"><div class="quotecard" style="max-width:420px;text-align:left;position:relative">
+      <button type="button" id="fabX" aria-label="Close" style="position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem">×</button>
+      <div style="font-weight:800;margin:0 28px 8px 0">Add a task</div>
+      <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Hold and speak, or type. Nothing is saved until you add it.</p>
+      <button type="button" class="btn" id="fabHold" data-voice="fab" style="touch-action:none">Hold and speak</button>
+      <div id="fabStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0">Click Hold and speak, say the task, then add it.</div>
+      <textarea id="fabHeard" rows="3" placeholder="What needs doing?" style="width:100%"></textarea>
+      <div class="field" style="margin-top:8px"><label>Name</label><input id="fabTitle" style="width:100%"></div>
+      <div class="row">
+        <div class="field"><label>Date</label><input id="fabDate" type="date"></div>
+        <div class="field"><label>Time</label><input id="fabTime" type="time"></div>
+      </div>
+      <button type="button" class="btn" id="fabSave" style="margin-top:10px">Add this task</button>
+    </div></div>`;
+    document.getElementById('fabX').onclick=function(){ state.quickAddOpen=false; renderModal(); };
+    document.getElementById('fabOverlay').onclick=function(e){ if(e.target.id==='fabOverlay'){ state.quickAddOpen=false; renderModal(); } };
+    const heard=document.getElementById('fabHeard');
+    function fillFab(){
+      const raw=(heard.value||'').trim();
+      const items=(typeof spokenAppointments==='function')?spokenAppointments(raw):[];
+      const first=items[0]||{};
+      const title=document.getElementById('fabTitle');
+      const date=document.getElementById('fabDate');
+      const time=document.getElementById('fabTime');
+      if(title && !title.value) title.value=first.title||raw;
+      if(date && first.date && !date.value) date.value=first.date;
+      if(time && first.start && !time.value) time.value=first.start;
+    }
+    if(heard) heard.addEventListener('input', fillFab);
+    try{ wireHoldTalk('fabHold','fabHeard','fabStatus'); }catch(e){}
+    document.getElementById('fabSave').onclick=function(){ fillFab(); saveQuickTask(); };
+    return;
+  }
   const q=allQuotes()[state.quoteIndex]||QUOTE_BANK[0];
   root.innerHTML=`<div class="overlay" id="quoteOverlay">
     <div class="quotecard">
       <div class="qeyebrow">A small nudge</div>
       <div class="qtext">"${escapeHtml(q)}"</div>
       <div class="qactions">
+        <button class="btn ghost sm" id="qNone">No more quotes</button>
         <button class="btn ghost sm" id="qShuffle">Another one</button>
         <button class="btn sm" id="qClose">I'm ready — let's go</button>
       </div>
     </div>
   </div>`;
   document.getElementById('qShuffle').addEventListener('click', shuffleQuote);
+  document.getElementById('qNone').addEventListener('click', function(){ state.settings.quoteOnLoad=false; state.quoteModalOpen=false; try{ saveState(); }catch(e){} renderModal(); });
   document.getElementById('qClose').addEventListener('click', closeQuote);
   document.getElementById('quoteOverlay').addEventListener('click',(e)=>{ if(e.target.id==='quoteOverlay') closeQuote(); });
 }
@@ -7147,6 +7387,45 @@ async function fetchGoogleCalendarEvents(daysAhead){
   return (data.items||[]);
 }
 
+async function ensureCalendarWriteToken(){
+  try{
+    initFirebase();
+    if(!_auth) return '';
+    if(state._googleAccessToken && state._gcalWriteOk) return state._googleAccessToken;
+    const provider=new firebase.auth.GoogleAuthProvider();
+    provider.addScope('https://www.googleapis.com/auth/calendar.events');
+    const result=await _auth.signInWithPopup(provider);
+    const fresh=result && result.credential && result.credential.accessToken;
+    if(fresh){ state._googleAccessToken=fresh; state._gcalWriteOk=true; }
+    return fresh||'';
+  }catch(e){ return ''; }
+}
+async function writeTaskToGoogleCalendar(task){
+  if(!state.settings || !state.settings.gcalWrite) return;
+  if(!task || task.done || !task.date) return;
+  try{
+    const token=await ensureCalendarWriteToken();
+    if(!token) return;
+    let body;
+    if(!task.time){
+      const end=new Date(task.date+'T12:00:00');
+      end.setDate(end.getDate()+1);
+      body={summary:task.title||'Task', start:{date:task.date}, end:{date:toDateStr(end)}};
+    }else{
+      const start=new Date(task.date+'T'+String(task.time).slice(0,5)+':00');
+      const end=new Date(start.getTime()+30*60000);
+      body={summary:task.title||'Task', start:{dateTime:start.toISOString()}, end:{dateTime:end.toISOString()}};
+    }
+    const url=task.gcalEventId
+      ? 'https://www.googleapis.com/calendar/v3/calendars/primary/events/'+encodeURIComponent(task.gcalEventId)
+      : 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+    const res=await fetch(url,{method:task.gcalEventId?'PATCH':'POST', headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    if(!res.ok) return;
+    const data=await res.json();
+    if(data && data.id && data.id!==task.gcalEventId){ task.gcalEventId=data.id; try{ saveState(); }catch(e){} }
+  }catch(e){}
+}
+
 function mapGcalToStudyBlocks(items){
   const blocks = [];
   (items||[]).forEach(ev=>{
@@ -7716,18 +7995,7 @@ function wireLoginScreen(){
 }
 
 function maybeOfferTour(){
-  try{
-    if(!state.tour) state.tour={};
-    if(state.tour.completed || state.tour.declinedOffer) return;
-    if(state.tour.offerShown) return;
-    state.tour.offerShown = true;
-    // mild prompt only once per session
-    setTimeout(function(){
-      if(state.tour && state.tour.open) return;
-      if(state.tour && state.tour.completed) return;
-      showAppMessage('Take a quick tour?', 'Settings → Take a tour walks you through Tasks, Schedule, and Nudge. You can skip anytime.');
-    }, 1200);
-  }catch(e){}
+  return;
 }
 
 
@@ -7744,7 +8012,7 @@ function launchConsentHtml(){
       <div class="qeyebrow">Before you use SnapBack</div>
       <div class="qtext" style="font-size:1.15rem;margin:6px 0 8px">Privacy Policy and Terms of Use</div>
       <div style="font-size:.88rem;line-height:1.45;max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:12px">
-        <p style="margin:0 0 8px"><b>Privacy Policy.</b> SnapBack stores your tasks, schedule, nudges, journal, and habits on this device. If you sign in with Google, that same copy is saved to your Google account so the laptop and the phone stay matched. SnapBack does not sell your information. SnapBack does not require your phone number.</p>
+        <p style="margin:0 0 8px"><b>Privacy Policy.</b> SnapBack stores your tasks, schedule, nudges, ideas, and habits on this device. If you sign in with Google, that same copy is saved to your Google account so the laptop and the phone stay matched. SnapBack does not sell your information. SnapBack does not require your phone number.</p>
         <p style="margin:0 0 8px"><b>Terms of Use.</b> SnapBack is for your personal use. You may not copy the app and publish it as another product. Alarms depend on this device allowing notifications and exact alarms. SnapBack is not a medical service.</p>
         <p style="margin:0">You can delete the SnapBack copy from Settings → Account → Delete my SnapBack data. That does not delete your Google account.</p>
       </div>
@@ -8009,7 +8277,7 @@ async function autoCalendarSyncIfConfigured(){
   }catch(e){}
 }
 
-function render(){ applyDarkMode(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
+function render(){ applyDarkMode(); applyTextSize(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
   try{ consumePendingNudge(); }catch(e){}
   try{
     
@@ -8162,7 +8430,7 @@ const SB_TOOLS = {
   eisenhower: {title:'This or That grid', desc:'Tap Urgent / Important on each task so it jumps to the right box (Do first / Schedule / Later).', ico:'▦', nav:'eisenhower'},
   mustFrog: {title:'The hard one first', desc:'Mark the task you are avoiding. It sits first on Today. Do that one, then the rest feels easier.', ico:'🐸', action:'hard-first'},
   stillHere: {title:'Still here', desc:'Open tasks that are still waiting. Pick one, and SnapBack helps you start it.', ico:'⏳', action:'still-here'},
-  journal: {title:'Journal stickies', desc:'Catch thoughts as notes. File, do, or drop them later.', ico:'📒', nav:'journal'},
+  journal: {title:'Ideas', desc:'Catch thoughts as notes. File, do, or drop them later.', ico:'📒', nav:'journal'},
   schedule: {title:'Your Schedule', desc:'See the week as time blocks, not an endless list.', ico:'📅', nav:'calendar'},
   calendar: {title:'Calendar', desc:'Add classes and appointments once; they show on your week.', ico:'🎓', nav:'semester'},
   projects: {title:'Projects', desc:'Park class/course work under each project so study stays grouped.', ico:'📚', nav:'projects'},
@@ -8676,7 +8944,7 @@ Suggest a realistic plan:
 Short and practical.`;
 }
 function promptJournalReflect(note){
-  return `I wrote this in my student journal. Help me gently sort it (ADHD-friendly, not clinical):
+  return `I wrote this in my Ideas notes. Help me gently sort it (not clinical):
 
 """
 ${note||''}
@@ -9378,6 +9646,7 @@ function viewToday(){
 
   return `
   ${installBannerHtml()}
+  ${(typeof isIOSDevice!=='undefined' && isIOSDevice && !state.iosHintHidden) ? `<div class="card" style="display:flex;gap:8px;align-items:flex-start"><div style="flex:1"><b>On an iPhone.</b> Open this page in Safari, tap Share, then Add to Home Screen. SnapBack stays on this phone as a website. An alarm that rings when the phone is locked is only on the Android app.</div><button type="button" class="btn ghost sm" data-action="hide-ios" aria-label="Close">×</button></div>` : ''}
   <div class="pagehead">
     <div class="eyebrow">${new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</div>
     <h1>${(function(){ const n=(state.profile&&state.profile.name||'').trim(); if(!n||n.toLowerCase()==='student') return 'Today'; return escapeHtml(n)+'\u2019s day'; })()}</h1>
@@ -9385,7 +9654,7 @@ function viewToday(){
     <p>${L('justToday')}</p>
   </div>
 
-  <div class="card nn-card">
+  <div class="card nn-card"${seeOn('today','nn')?'':' hidden style="display:none"'}>
     <div class="lbl">One non-negotiable</div>
     ${nn ? `
       <div class="nntext" style="${nn.done?'text-decoration:line-through;opacity:.6':''}">${escapeHtml(nn.text)}</div>
@@ -9402,13 +9671,13 @@ function viewToday(){
     `}
   </div>
 
-  ${frogTasks.length ? `
+  ${frogTasks.length && seeOn('today','frog') ? `
   <div class="card" style="border-left:4px solid var(--gold);background:linear-gradient(90deg,var(--gold-soft),#fff 45%)">
     <div class="lbl" style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:#8a6a1a;font-weight:800">Today's frog — eat it first</div>
     ${frogTasks.map(t=>`<div class="mc-item" style="background:transparent;border:none;padding:6px 0"><button type="button" class="btn ghost sm" data-action="open-task-menu" data-id="${t.id}" style="text-align:left">${escapeHtml(t.title)}</button></div>`).join('')}
   </div>` : ''}
 
-  <div class="card" style="padding:0;overflow:hidden">
+  <div class="card" style="padding:0;overflow:hidden${seeOn('today','mustCould')?'':';display:none'}"${seeOn('today','mustCould')?'':' hidden'}>
     <button type="button" class="btn ghost" data-action="home-toggle" data-key="mustCould" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
       <h3 style="margin:0">Must-Do vs Could-Do</h3>
       <span style="font-size:1.1rem;color:var(--muted)">${homeSectionOpen('mustCould')?'▾':'▸'}</span>
@@ -9427,16 +9696,14 @@ function viewToday(){
     </div>`:''}
   </div>
 
-  <div class="card" style="padding:0;overflow:hidden">
-    <button type="button" class="btn ghost" data-action="home-toggle" data-key="deadlines" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
+  <div class="card" style="padding:0;overflow:hidden${seeOn('today','deadlines')?'':';display:none'}"${seeOn('today','deadlines')?'':' hidden'}>
       <h3 style="margin:0">Upcoming deadlines</h3>
       <span style="font-size:1.1rem;color:var(--muted)">${homeSectionOpen('deadlines')?'▾':'▸'}</span>
     </button>
     ${homeSectionOpen('deadlines')?`<div style="padding:0 16px 16px">${deadlines.length ? deadlines.map(dlRow).join('') : '<div class="empty">Nothing dated yet.</div>'}</div>`:''}
   </div>
 
-  <div class="card" style="padding:0;overflow:hidden">
-    <button type="button" class="btn ghost" data-action="home-toggle" data-key="classes" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
+  <div class="card" style="padding:0;overflow:hidden${seeOn('today','classes')?'':';display:none'}"${seeOn('today','classes')?'':' hidden'}>
       <h3 style="margin:0">${L('classesToday')}</h3>
       <span style="font-size:1.1rem;color:var(--muted)">${homeSectionOpen('classes')?'▾':'▸'}</span>
     </button>
@@ -9451,7 +9718,7 @@ function viewToday(){
     }).sort((a,b)=>String(a.start).localeCompare(String(b.start)));
     const open = homeSectionOpen('sneak');
     return `
-  <div class="card" style="padding:0;overflow:hidden;border:1px dashed var(--line)">
+  <div class="card" style="padding:0;overflow:hidden;border:1px dashed var(--line)${seeOn('today','sneak')?'':';display:none'}"${seeOn('today','sneak')?'':' hidden'}>
     <button type="button" class="btn ghost" data-action="home-toggle" data-key="sneak" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
       <div>
         <div style="font-weight:800">Sneak peek into tomorrow</div>
@@ -9479,6 +9746,7 @@ function priorityBadge(p){ return `<span class="badge ${p}">${p}</span>`; }
 function isOverdue(t){ return t.date && t.date<todayStr() && !t.done; }
 
 function strategyPanel(t){
+  if(!seeOn('tasks','helpers')) return '';
   const wt = t.whenThen || {};
   const rw = t.rewarding || {};
   const st = t.strategic || {};
@@ -9581,6 +9849,8 @@ function taskCard(t){
       ${t.frog?' · 🐸 frog':''}${t.backburner?' · backburner':''}
       ${typeof isOverdue==='function' && isOverdue(t)?' · overdue':''}
     </div>
+    ${typeof isOverdue==='function' && isOverdue(t) && !t.done && !(state.techHide&&state.techHide[t.id]) ? `<div style="background:var(--pine-soft);border-radius:10px;padding:8px 10px;margin-bottom:10px;display:flex;gap:8px;align-items:flex-start"><span style="flex:1;font-size:.88rem">This has been waiting. Do the first two minutes only.</span><button type="button" class="btn ghost sm" data-action="hide-tech" data-id="${t.id}" aria-label="Close">×</button></div>` : ''}
+    ${(!t.done && ((typeof isOverdue==='function' && isOverdue(t)) || (t.created && Date.now()-t.created<36*3600*1000))) ? `<div style="display:flex;gap:8px;margin-bottom:10px"><button type="button" class="btn ghost sm" data-action="open-bite" data-id="${t.id}">Bite Size</button><button type="button" class="btn ghost sm" data-action="open-spot" data-id="${t.id}">Spotlight</button></div>` : ''}
     ${t.notes?`<div style="font-size:.85rem;color:var(--muted);margin-bottom:10px">${escapeHtml((t.notes||'').slice(0,160))}</div>`:''}
     <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:4px">
       <button type="button" class="btn sm" data-action="task-start" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">Start</button>
@@ -9715,6 +9985,10 @@ function viewTasks(){
   if(mode === 'spotlight' || mode === 'batch'){
     let open = (state.tasks||[]).filter(t=>!t.done && !t.backburner);
     if(state.spotlightOnlyPlanWeek) open = open.filter(t=>t.planWeek);
+    if(state.spotlightPin){
+      const pin=open.find(function(t){ return String(t.id)===String(state.spotlightPin); });
+      if(pin) open=[pin].concat(open.filter(function(t){ return String(t.id)!==String(pin.id); }));
+    }
     const n = state.spotlightSize || 3;
     const shown = open.slice(0, n);
     return `
@@ -12224,9 +12498,12 @@ function viewTimer(){
         <select id="taskSelect"><option value="">No task selected</option>${state.tasks.filter(x=>!x.done).map(x=>`<option value="${x.id}" ${String(t.activeTaskId)===String(x.id)?'selected':''}>${escapeHtml(x.title)}</option>`).join('')}</select>
       </div>
       <div class="field">
-        <button class="btn ghost sm" data-mode="work">Focus</button>
-        <button class="btn ghost sm" data-mode="shortBreak">Short break</button>
-        <button class="btn ghost sm" data-mode="longBreak">Long break</button>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <button type="button" class="btn ${((t.preset||'sprint')==='sprint')?'':'ghost'} sm" data-preset="sprint">Study Sprint 25/5</button>
+          <button type="button" class="btn ${(t.preset==='power')?'':'ghost'} sm" data-preset="power">Power Mode 15/5</button>
+          <button type="button" class="btn ${(t.preset==='deep')?'':'ghost'} sm" data-preset="deep">Deep Work 50/10</button>
+          <button type="button" class="btn ${(t.preset==='flex')?'':'ghost'} sm" data-preset="flex">Flexible</button>
+        </div>
       </div>
     </div>
     <div class="timerwrap">
@@ -12238,9 +12515,11 @@ function viewTimer(){
         <div class="ringtext"><div class="time" id="timeLabel">${fmtTime(t.remaining)}</div><div class="mode">${modeLabel}</div></div>
       </div>
       <div class="timerbtns">
+        ${t.running && t.mode==='work' ? `<button class="btn ghost" id="distractBtn" type="button">Distracted</button>` : ''}
         ${t.running ? `<button class="btn warm" id="pauseBtn">Pause</button>` : `<button class="btn" id="startBtn">Start</button>`}
         <button class="btn ghost" id="resetBtn">Reset</button>
       </div>
+      ${(!t.running && !(state.techHide&&state.techHide.focus===todayStr())) ? `<div style="margin:10px auto 0;max-width:420px;background:var(--pine-soft);border-radius:10px;padding:10px 12px;display:flex;gap:8px;align-items:flex-start"><span style="flex:1;font-size:.9rem">${escapeHtml(startTechniqueLine())}</span><button type="button" class="btn ghost sm" id="hideStartTip">×</button></div>` : ''}
       <div class="field" style="max-width:200px;margin:12px auto 0">
         <label>Minutes</label>
         <input type="number" id="podMinutes" min="1" max="180" value="${s.workMin||25}">
@@ -12678,20 +12957,23 @@ function armNativeHeard(area, statusEl){
   _talkStatus = statusEl;
   _talkOnText = function(text, fin, err){
     if(err){
-      if(_talkWaitFinal){
+      if(Number(err)===9){
         _talkWaitFinal = false;
         if(_talkFinishTimer){ clearTimeout(_talkFinishTimer); _talkFinishTimer = null; }
-        if(_talkPartial || _talkTranscript) finishHeard(_talkArea, _talkStatus);
-        else if(_talkStatus) _talkStatus.textContent = Number(err)===9
-          ? 'Allow the microphone for SnapBack, then hold the button again.'
-          : 'The phone did not catch that. Hold the button and speak again.';
+        if(_talkStatus) _talkStatus.textContent = 'Allow the microphone for SnapBack, then hold the button again.';
+        return;
+      }
+      if(_talkPartial || _talkTranscript){
+        _talkWaitFinal = false;
+        if(_talkFinishTimer){ clearTimeout(_talkFinishTimer); _talkFinishTimer = null; }
+        finishHeard(_talkArea, _talkStatus);
       }
       return;
     }
     if(text) noteHeard(text, !!fin);
     const shown = _talkTranscript || _talkPartial;
     if(_talkStatus && shown) _talkStatus.textContent = 'Heard: '+shown;
-    if(fin && _talkWaitFinal){
+    if(fin){
       _talkWaitFinal = false;
       if(_talkFinishTimer){ clearTimeout(_talkFinishTimer); _talkFinishTimer = null; }
       finishHeard(_talkArea, _talkStatus);
@@ -13205,6 +13487,12 @@ function finishHeard(area, statusEl){
     if(statusEl) statusEl.textContent='No speech heard. Hold the button and say the whole thing.';
     return;
   }
+  if(kind==='fab'){
+    appendHeardText(area, said);
+    try{ if(area) area.dispatchEvent(new Event('input', {bubbles:true})); }catch(e){}
+    if(statusEl) statusEl.textContent='The words are in the box. Check the name, date, and time, then add it.';
+    return;
+  }
   if(kind==='quick' || kind==='event' || kind==='task' || kind==='nudge'){
     const parsed=spokenAppointments(said);
     if(parsed && parsed.length){
@@ -13357,6 +13645,52 @@ function transcribeBlob(blob, statusEl){
     new Promise(function(_, reject){ setTimeout(function(){ reject(new Error('slow')); }, 90000); })
   ]);
 }
+function startWebSpeech(area, statusEl, WebRec){
+  releaseMic();
+  _talkArea = area;
+  _talkStatus = statusEl;
+  const rec = new WebRec();
+  rec.continuous = true;
+  rec.interimResults = true;
+  try{ rec.lang = navigator.language || 'en-IN'; }catch(e){}
+  rec.onresult = function(ev){
+    let finText = '';
+    let part = '';
+    for(let i=0;i<ev.results.length;i++){
+      const bit = (ev.results[i][0] && ev.results[i][0].transcript) || '';
+      if(ev.results[i].isFinal) finText += (finText ? ' ' : '') + bit.trim();
+      else part += bit;
+    }
+    if(finText) noteHeard(finText, true);
+    if(part) noteHeard(part, false);
+    const shown = _talkTranscript || _talkPartial;
+    if(statusEl && shown) statusEl.textContent = 'Heard: ' + shown;
+  };
+  rec.onerror = function(ev){
+    const code = ev && ev.error;
+    if(code==='not-allowed' || code==='service-not-allowed'){
+      _talkFatal = true;
+      _talkWaitFinal = false;
+      if(statusEl) statusEl.textContent = 'Allow the microphone for this site, then click Hold and speak again.';
+    }
+  };
+  rec.onend = function(){
+    if(!_talkWaitFinal) return;
+    _talkWaitFinal = false;
+    if(_talkFinishTimer){ clearTimeout(_talkFinishTimer); _talkFinishTimer = null; }
+    finishHeard(_talkArea, _talkStatus);
+  };
+  _talkRec = rec;
+  try{ rec.start(); }
+  catch(e){
+    _talkRec = null;
+    startBrowserMic(statusEl).catch(function(){
+      if(statusEl) statusEl.textContent = 'Allow the microphone for this site, then click Hold and speak again.';
+    });
+    return;
+  }
+  if(statusEl) statusEl.textContent = 'Listening… speak now. Click Done speaking when you finish.';
+}
 function startHoldTalk(area, statusEl, kind){
   if(_talkBusy){
     if(statusEl) statusEl.textContent='Still turning the last recording into text…';
@@ -13387,6 +13721,11 @@ function startHoldTalk(area, statusEl, kind){
     });
     return;
   }
+  const WebRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(WebRec){
+    startWebSpeech(area, statusEl, WebRec);
+    return;
+  }
   if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || typeof MediaRecorder==='undefined'){
     if(statusEl) statusEl.textContent='This browser cannot record. Type it instead.';
     return;
@@ -13403,7 +13742,7 @@ function stopHoldTalk(area, statusEl){
   _talkClickMode = false;
   const plug = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
   const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() && plug && plug.stopListen;
-  if(native && !_talkBrowserFallback){
+  if(native && !_talkBrowserFallback && !_talkRec){
     if(!was) return;
     _talkWaitFinal = true;
     if(statusEl) statusEl.textContent = 'Turning that into text…';
@@ -13415,6 +13754,20 @@ function stopHoldTalk(area, statusEl){
       _talkWaitFinal = false;
       finishHeard(area, statusEl);
     }, 3000);
+    return;
+  }
+  if(_talkRec){
+    if(!was) return;
+    _talkWaitFinal = true;
+    if(statusEl) statusEl.textContent = 'Turning that into text…';
+    try{ _talkRec.stop(); }catch(e){}
+    if(_talkFinishTimer) clearTimeout(_talkFinishTimer);
+    _talkFinishTimer = setTimeout(function(){
+      _talkFinishTimer = null;
+      if(!_talkWaitFinal) return;
+      _talkWaitFinal = false;
+      finishHeard(area, statusEl);
+    }, 1200);
     return;
   }
   if(!was) return;
@@ -15188,6 +15541,20 @@ function habitHistoryCell(h, day){
 }
 
 
+function viewCheckin(){
+  if(!state.moodLog) state.moodLog={};
+  const today=todayStr();
+  const cur=state.moodLog[today]||0;
+  const faces=[[1,'😞'],[2,'😕'],[3,'😐'],[4,'🙂'],[5,'😊']];
+  return `<div class="pagehead"><button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button><h1>Check-in</h1><p>One tap for today. Skip it if you do not want to. Ideas stays the place for notes.</p></div>
+  <div class="card" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between">
+    ${faces.map(function(f){ const names=['','Very low','Low','Okay','Good','Great']; return '<button type="button" class="btn '+(cur===f[0]?'':'ghost')+'" data-action="mood-set" data-mood="'+f[0]+'" aria-label="'+names[f[0]]+'" style="font-size:1.8rem;min-width:56px">'+f[1]+'</button>'; }).join('')}
+  </div>
+  <div class="field" style="margin-top:12px"><label>Ask me at</label><input type="time" id="moodAskTime" value="${escapeHtml((state.settings&&state.settings.moodAskTime)||'')}"></div>
+  <button type="button" class="btn sm" id="saveMoodTime" data-action="save-mood-time">Save time</button>
+  <p style="color:var(--muted);font-size:.9rem;margin-top:12px">If this feels heavy, talk to your therapist, a friend, or someone you trust. You do not have to handle it alone. SnapBack cannot make that call for you.</p>`;
+}
+
 function viewJournal(){
   if(!state.journal) state.journal=[];
   if(!state.journalFiled) state.journalFiled={file:[], do:[], drop:[]};
@@ -15197,7 +15564,7 @@ function viewJournal(){
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">Capture it before it vanishes</div>
-    <h1>Journal</h1>
+    <h1>Ideas</h1>
     <p>Quick thoughts. Hold the button to speak, or type. Edit the words, then add the note. Later: File it, Do it, or Drop it.</p>
   </div>
   <div class="card">
@@ -15255,11 +15622,11 @@ function fileJournalEntry(id, bucket){
   state.journal = (state.journal||[]).filter(j=>j.id!==id);
   if(bucket==='do'){
     const task={
-      id:uid(), title:(item.text||'Journal idea').slice(0,120), date:todayStr(), time:'', done:false,
-      tier:'could', notes:'From journal', context:'school', created:Date.now()
+      id:uid(), title:(item.text||'Idea').slice(0,120), date:todayStr(), time:'', done:false,
+      tier:'could', notes:'From Ideas', context:'school', created:Date.now()
     };
     state.tasks.unshift(task);
-    pushUndo({type:'add-task', id:task.id, label:'Task from journal — Undo'});
+    pushUndo({type:'add-task', id:task.id, label:'Task from Ideas — Undo'});
     persistRender();
     showAppMessage('Do it', 'Sticky filed. A task was added for today. Open Tasks to set a better date or time.');
     return;
@@ -15308,9 +15675,9 @@ async function downloadJournalBucket(bucket){
   if(!list.length && state.journal && state.journal.length){
     list = state.journal.map(e=>({date:e.date||'', time:e.time||'', text:e.text||''}));
   }
-  const lines=list.map(e=>`${e.date||''} ${e.time||''}\n${e.text||''}\n---`).join('\n') || '(No journal entries yet.)';
-  const filename='snapback-journal-'+bucket+'.pdf';
-  const pdfText = 'SnapBack Journal — '+bucket+'\n\n'+lines;
+  const lines=list.map(e=>`${e.date||''} ${e.time||''}\n${e.text||''}\n---`).join('\n') || '(No notes yet.)';
+  const filename='snapback-ideas-'+bucket+'.pdf';
+  const pdfText = 'SnapBack Ideas — '+bucket+'\n\n'+lines;
   try{
     const pdf = buildSimplePdf(pdfText);
     const blob = new Blob([pdf], {type:'application/pdf'});
@@ -15792,6 +16159,7 @@ function viewHabits(){
     <button type="button" class="btn" id="habitHold" data-voice="habit" style="touch-action:none;user-select:none;margin-top:8px">Hold and speak</button>
     <div id="habitVoiceStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0 0">Hold the button and say the whole habit: name, time, whether to ask you, whether it goes in Stats, and one time or repeat. Then check the form. Nothing is saved yet.</div>
     <div class="field"><label>Ask me at</label><input type="time" id="newHabitTime" value="18:00"></div>
+    <div class="field"><label>After (optional)</label><input id="newHabitAfter" placeholder="after breakfast"></div>
     <label style="display:block;margin:6px 0;font-size:.9rem"><input type="checkbox" id="newHabitRemind" checked> Ask me about this habit</label>
     <label style="display:block;margin:6px 0;font-size:.9rem"><input type="checkbox" id="newHabitTrack" checked> Show this in Stats</label>
     <button type="button" class="btn" id="addHabitBtn">Add habit</button>
@@ -15810,6 +16178,11 @@ function viewHabits(){
   `)}
   ${habitSec('nudges','Nudges', `
     <p style="font-size:.9rem;margin-top:0">Click Yes for a Nudge.</p>
+    <p style="font-size:.85rem;color:var(--muted)">Tie a check to something you already do. Leave it blank if you do not want that.</p>
+    <div class="field"><label>Sleep, after</label><input id="anchorSleep" placeholder="after I wake" value="${escapeHtml((state.habitAnchors&&state.habitAnchors.sleep)||'')}"></div>
+    <div class="field"><label>Meal, after</label><input id="anchorMeal" placeholder="after lunch" value="${escapeHtml((state.habitAnchors&&state.habitAnchors.meal)||'')}"></div>
+    <div class="field"><label>Hydrate, after</label><input id="anchorWater" placeholder="after breakfast" value="${escapeHtml((state.habitAnchors&&state.habitAnchors.water)||'')}"></div>
+    <button type="button" class="btn sm" id="saveAnchors">Save</button>
     ${nudgeRow('exercise','Exercise')}
     ${nudgeRow('meal','Meal')}
     ${hydrateNudgeRow()}
@@ -16150,6 +16523,12 @@ function viewHelp(){
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <h1>Help & FAQ</h1>
   </div>
+  ${helpBox('phones','Phones and computers', `
+    <p><b>Android.</b> Install the SnapBack file. Allow notifications. Set the battery to Unrestricted. Then the alarms work when the app is closed.</p>
+    <p><b>iPhone.</b> Open the website in Safari. Tap Share, then Add to Home Screen. Tasks, Check-in, and Focus Pod work while the page is open. An alarm that rings when the phone is locked is not available on iPhone.</p>
+    <p><b>A computer.</b> Open the same website in the browser and sign in with the same Gmail.</p>
+    <p>Website: <a href="${escapeHtml(getPublicWebUrl())}" target="_blank" rel="noopener">${escapeHtml(getPublicWebUrl())}</a></p>
+  `)}
   ${helpBox('how','How do I…', `
     <details class="faqitem"><summary>Open the website and sign in</summary>
       <p>Website: open <a href="${escapeHtml(getPublicWebUrl())}" target="_blank" rel="noopener">${escapeHtml(getPublicWebUrl())}</a>.</p>
@@ -16282,8 +16661,10 @@ function viewStats(){
     <div class="moneystats" style="margin-bottom:10px">
       <div class="statbox"><div class="lbl">Focus sessions</div><div class="val">${focusSessions}</div></div>
       <div class="statbox"><div class="lbl">Minutes</div><div class="val">${focusMinutes}</div></div>
-      <div class="statbox"><div class="lbl">Finished sessions</div><div class="val" style="color:var(--pine)">${state.stats.treesGrown||0}</div></div>
+      <div class="statbox"><div class="lbl">Distracted</div><div class="val">${(state.distractLog||[]).filter(function(x){ return x.date>=start && x.date<=end; }).length}</div></div>
+      <div class="statbox"><div class="lbl">Check-ins</div><div class="val">${days.filter(function(d){ return state.moodLog && state.moodLog[d]; }).length}</div></div>
     </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px">${days.slice(-14).map(function(d){ const m=state.moodLog&&Number(state.moodLog[d]); const face=m===1?'😞':m===2?'😕':m===3?'😐':m===4?'🙂':m===5?'😊':'·'; return '<div style="text-align:center;min-width:32px"><div aria-hidden="true">'+face+'</div><div style="font-size:.7rem;color:var(--muted)">'+d.slice(8)+'</div></div>'; }).join('')}</div>
     <p style="font-size:.85rem;color:var(--muted);margin:0 0 12px">Sessions and minutes are for the dates above. Finished sessions is the full count, including older days.</p>
     ${habitLines.length?habitLines.map(h=>`<div class="deadline-row"><span>${escapeHtml(h.name)}</span><span style="flex:1;text-align:right;color:var(--muted);font-size:.85rem">${escapeHtml(h.summary)}</span></div>`).join(''):'<p style="color:var(--muted);margin:0">No habit answers in this range.</p>'}
   </div>
@@ -16329,10 +16710,10 @@ function viewSoundscape(){
     <h3>Quick launch your music</h3>
     <p style="color:var(--muted);font-size:.85rem;margin-top:-4px">These open your music service in a new tab — this app can't control playback there, so use that tab's own play button. Your Focus Pod timer keeps running here in the background; glance back when the session ends.</p>
     <div class="row">
-      <a href="https://open.spotify.com" target="_blank" rel="noopener"><button class="btn ghost sm">Spotify &#8599;</button></a>
-      <a href="https://music.youtube.com" target="_blank" rel="noopener"><button class="btn ghost sm">YouTube Music &#8599;</button></a>
-      <a href="https://music.apple.com" target="_blank" rel="noopener"><button class="btn ghost sm">Apple Music &#8599;</button></a>
-      <a href="https://soundcloud.com" target="_blank" rel="noopener"><button class="btn ghost sm">SoundCloud &#8599;</button></a>
+      <a class="btn ghost sm" href="https://open.spotify.com" target="_blank" rel="noopener">Spotify &#8599;</a>
+      <a class="btn ghost sm" href="https://music.youtube.com" target="_blank" rel="noopener">YouTube Music &#8599;</a>
+      <a class="btn ghost sm" href="https://music.apple.com" target="_blank" rel="noopener">Apple Music &#8599;</a>
+      <a class="btn ghost sm" href="https://soundcloud.com" target="_blank" rel="noopener">SoundCloud &#8599;</a>
     </div>
   </div>
   <div class="card">
@@ -16390,6 +16771,30 @@ function viewSettings(){
       <button class="btn sm" id="startTourBtn" type="button">Take a tour</button>
       <button class="btn ghost sm" id="gotoHelpBtn" type="button">Help &amp; FAQ</button>
     </p>
+    <details class="setgroup" id="settingsSeeDetails" open>
+      <summary>What I see</summary>
+      <div class="setgroup-body">
+        <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Hide a page or a block you do not use. Your answers stay. Today and Settings always stay.</p>
+        <div style="font-weight:700;margin:8px 0 4px">Menu</div>
+        ${seeRow('menu','tasks','Tasks')}
+        ${seeRow('menu','challenges','Challenges')}
+        ${seeRow('menu','journal','Ideas')}
+        ${seeRow('menu','checkin','Check-in')}
+        ${seeRow('menu','plan','Plan')}
+        ${seeRow('menu','techniques','Techniques')}
+        ${seeRow('menu','studytools', L('studyTools'))}
+        ${seeRow('menu','nudge','Nudge')}
+        <div style="font-weight:700;margin:12px 0 4px">Today</div>
+        ${seeRow('today','nn','One non-negotiable')}
+        ${seeRow('today','frog','Today\'s frog')}
+        ${seeRow('today','mustCould','Must-Do vs Could-Do')}
+        ${seeRow('today','deadlines','Upcoming deadlines')}
+        ${seeRow('today','classes','Today\'s commitments')}
+        ${seeRow('today','sneak','Sneak peek into tomorrow')}
+        <div style="font-weight:700;margin:12px 0 4px">On a task</div>
+        ${seeRow('tasks','helpers','Mindset helpers')}
+      </div>
+    </details>
     <details class="setgroup" id="settingsProfileDetails">
       <summary>Your Profile</summary>
       <div class="setgroup-body">
@@ -16478,6 +16883,8 @@ ${(state.settings&&state.settings.adminOpen)?`<details style="margin-top:12px" i
         <button type="button" class="btn" id="shareEmailBtn">Email</button>
         <button type="button" class="btn" id="shareDownloadBtn">Download</button>
         <button type="button" class="btn" id="shareCopyBtn">Copy text</button>
+        <button type="button" class="btn ghost" id="shareViewLink">Copy a view link</button>
+        <p style="font-size:.8rem;color:var(--muted);margin:6px 0 0">The view link shows how many tasks are done, how many are open, and how many habit answers were yes in the last 7 days. It does not show notes, Ideas, or Check-in.</p>
       </div>
     </div>
     </div></details></div>
@@ -16493,6 +16900,13 @@ ${(state.settings&&state.settings.adminOpen)?`<details style="margin-top:12px" i
       ${toggleRow('setCelebrateSound','Confetti with a short beat', s.celebrateSound !== false)}
       <p style="font-weight:700;margin:12px 0 6px">Display</p>
       ${toggleRow('setDarkMode','Dark mode', !!s.darkMode)}
+      <p style="font-weight:700;margin:12px 0 6px">Text size</p>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="btn ${(s.textSize==='large')?'ghost':' '} sm" id="textSizeStd">Standard</button>
+        <button type="button" class="btn ${(s.textSize==='large')?' ':'ghost'} sm" id="textSizeLg">Large</button>
+      </div>
+      ${toggleRow('setGcalWrite','Add dated tasks to Google Calendar', !!s.gcalWrite)}
+      <p style="font-size:.8rem;color:var(--muted);margin:0 0 10px">Off until you turn it on. Only a task with a date is sent. SnapBack will ask permission to add events.</p>
       ${toggleRow('setQuoteOnLoad','Show one quote a day', s.quoteOnLoad !== false)}
       <p style="font-weight:700;margin:12px 0 6px">Install the web app</p>
       ${(typeof isNativeApp==='function' && isNativeApp()) ? `<p style="color:var(--muted);font-size:.85rem">You already have the phone app installed.</p>`
@@ -16531,7 +16945,7 @@ ${(state.settings&&state.settings.adminOpen)?`<details style="margin-top:12px" i
     </details>
     <details class="setgroup">
       <summary>Web App Link</summary>
-        <p style="font-size:.8rem;color:var(--muted);margin:10px 0 8px">Open the same SnapBack on a laptop: tap <b>Copy link</b>, paste in any browser. (A shorter custom domain needs your own domain name later — the link still works as-is.)</p>
+        <p style="font-size:.8rem;color:var(--muted);margin:10px 0 8px">On a computer, open this link in the browser. On an iPhone, open it in Safari, tap Share, then Add to Home Screen. The Android file does not install on an iPhone.</p>
       <div class="field"><label>Your web app link</label>
         <input id="publicWebUrlInput" readonly value="${escapeHtml((state.settings&&state.settings.publicWebUrl)||DEFAULT_PUBLIC_WEB_URL||'')}" style="font-size:.85rem">
       </div>
@@ -16542,6 +16956,8 @@ ${(state.settings&&state.settings.adminOpen)?`<details style="margin-top:12px" i
       <p style="color:var(--muted);font-size:.85rem;margin:0 0 12px">Clear everything, or only chosen items.</p>
       <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:360px">
         <div style="width:100%">${deleteControl('reset', null, 'Reset All')}</div>
+        <button type="button" class="btn" id="exportDataBtn" style="width:100%;box-sizing:border-box">Export my data</button>
+        <button type="button" class="btn danger" id="deleteAccountBtn" style="width:100%;box-sizing:border-box">Delete my account</button>
         <button type="button" class="btn" id="resetSpecificBtn" style="width:100%;box-sizing:border-box">Reset Specific Data</button>
       </div>
       <div id="resetSpecificPanel" style="display:none;margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--card);width:100%;max-width:100%;box-sizing:border-box;overflow-x:hidden">
@@ -16554,7 +16970,7 @@ ${(state.settings&&state.settings.adminOpen)?`<details style="margin-top:12px" i
             <option value="studyBlocks">Study blocks (${(state.studyBlocks||[]).length})</option>
             <option value="money">Money (${(state.money||[]).length})</option>
             <option value="customReminders">Old extra reminders (${(state.customReminders||[]).length})</option>
-            <option value="journal">Journal notes (${(state.journal||[]).length})</option>
+            <option value="journal">Ideas (${(state.journal||[]).length})</option>
           </select>
         </div>
         <div id="resetItemsBox" style="margin-top:14px;width:100%"></div>
@@ -16815,6 +17231,17 @@ function wireView(){
   function _applyTaskSearch(){ state.taskSearch=(_ts&&_ts.value)||''; try{persistRender();}catch(e){try{render();}catch(e2){}} }
   if(_ts) _ts.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); _applyTaskSearch(); } };
   if(_tsg) _tsg.onclick=function(){ _applyTaskSearch(); };
+  const eisCreate=document.getElementById('eisCreateBtn');
+  if(eisCreate) eisCreate.onclick=function(){
+    const title=(document.getElementById('eisNewTitle')?.value||'').trim();
+    if(!title){ showAppMessage('Title needed','Type a new task name.'); return; }
+    if(!Array.isArray(state.tasks)) state.tasks=[];
+    const id=uid();
+    state.tasks.unshift({id,title,notes:'From Eisenhower',date:todayStr(),time:'',priority:'medium',tier:'could',frog:false,context:'school',technique:'eisenhower',done:false,chunks:[],pomodoros:0,urgent:false,important:false,eisSet:false,created:Date.now()});
+    try{saveState();}catch(e){}
+    showAppMessage('Task created', 'Now choose a quadrant above.');
+    persistRender();
+  };
   
     const saveAd=document.getElementById('saveAdminContactBtn');
     if(saveAd) saveAd.onclick=function(){
@@ -16985,6 +17412,7 @@ function wireView(){
       t.notes=document.getElementById('editNotes-'+id)?.value||'';
       t.frog=!!document.getElementById('editFrog-'+id)?.checked;
       state.editingTaskId=null;
+      try{ writeTaskToGoogleCalendar(t); }catch(e){}
       showAppMessage('Saved', t.title+(t.date?' · '+t.date:''));
       persistRender();
     });
@@ -16992,6 +17420,47 @@ function wireView(){
       e.preventDefault(); e.stopPropagation();
       const t=findTask(id); if(!t) return;
       showAppMessage('Delete this task?', t.title, { ok:'Delete', cancel:'Cancel', onOk:function(){ deleteTask(id); } });
+    });
+    else if(action==='hide-tech') el.addEventListener('click', (e)=>{
+      e.preventDefault(); e.stopPropagation();
+      if(!state.techHide) state.techHide={};
+      state.techHide[id]=true;
+      persistRender();
+    });
+    else if(action==='mood-set') el.addEventListener('click', ()=>{
+      if(!state.moodLog) state.moodLog={};
+      const mood=Number(el.dataset.mood)||0;
+      state.moodLog[todayStr()]=mood;
+      const lows=Object.keys(state.moodLog).filter(function(d){ return Number(state.moodLog[d])>0 && Number(state.moodLog[d])<=2; });
+      if(mood && mood<=2 && lows.length>=3 && state.safetyPopOn!==todayStr()){
+        state.safetyPopOn=todayStr();
+        persistRender();
+        showAppMessage('Talk to someone', 'This has been heavy for a few days. Talk to your therapist, a friend, or someone you trust. SnapBack cannot make that call for you.');
+      } else persistRender();
+    });
+    else if(action==='hide-ios') el.addEventListener('click', ()=>{ state.iosHintHidden=true; persistRender(); });
+    else if(action==='hide-habit-saved') el.addEventListener('click', ()=>{ state.habitSavedLine=''; persistRender(); });
+    else if(action==='start-skip') el.addEventListener('click', ()=>{ state.startDone=true; persistRender(); });
+    else if(action==='see-set') el.addEventListener('click', ()=>{
+      if(!state.settings || typeof state.settings!=='object') state.settings={};
+      if(!state.settings.see) state.settings.see={};
+      const g=el.getAttribute('data-group')||'';
+      const k=el.getAttribute('data-key')||'';
+      if(!g || !k) return;
+      if(!state.settings.see[g]) state.settings.see[g]={};
+      state.settings.see[g][k]=el.getAttribute('data-on')==='1';
+      if(g==='menu' && state.settings.see[g][k]===false && state.view===k) state.view='today';
+      persistRender();
+    });
+    else if(action==='start-next') el.addEventListener('click', advanceStartHere);
+    else if(action==='open-bite') el.addEventListener('click', ()=>{ try{ goCheeseWithTask(id); }catch(e){ navigateTo('bitesize'); } });
+    else if(action==='open-spot') el.addEventListener('click', ()=>{ state.spotlightPin=id; state.spotlightOnlyPlanWeek=false; state.listMode='spotlight'; state.spotlightSize=1; navigateTo('tasks'); });
+    else if(action==='save-mood-time') el.addEventListener('click', ()=>{
+      if(!state.settings) state.settings={};
+      state.settings.moodAskTime=(document.getElementById('moodAskTime')&&document.getElementById('moodAskTime').value)||'';
+      persistRender();
+      try{ rebuildAllReminderSounds(); }catch(e){}
+      showAppMessage(state.settings.moodAskTime?'Saved':'Ask time cleared', state.settings.moodAskTime?'Check-in will ask at that time.':'');
     });
     else if(action==='task-menu') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
@@ -18062,18 +18531,6 @@ function wireView(){
       persistRender();
     };
 
-    const eisCreate=document.getElementById('eisCreateBtn');
-    if(eisCreate) eisCreate.onclick=function(){
-      const title=(document.getElementById('eisNewTitle')?.value||'').trim();
-      if(!title){ showAppMessage('Title needed','Type a new task name.'); return; }
-      if(!Array.isArray(state.tasks)) state.tasks=[];
-      const id=uid();
-      state.tasks.unshift({id,title,notes:'From Eisenhower',date:todayStr(),time:'',priority:'medium',tier:'could',frog:false,context:'school',technique:'eisenhower',done:false,chunks:[],pomodoros:0,urgent:false,important:false,eisSet:false,created:Date.now()});
-      try{saveState();}catch(e){}
-      showAppMessage('Task created', 'Now choose a quadrant above.');
-      persistRender();
-    };
-
     const tsi=document.getElementById('taskSearchInput');
     if(tsi){
       if(state._taskSearchFocus){
@@ -18638,6 +19095,16 @@ function wireView(){
   }
   if(state.view==='habits'){
     const addHabitBtn=document.getElementById('addHabitBtn'); if(addHabitBtn) addHabitBtn.addEventListener('click', addHabit);
+    const saveAnchors=document.getElementById('saveAnchors');
+    if(saveAnchors) saveAnchors.addEventListener('click', function(){
+      state.habitAnchors={
+        sleep:(document.getElementById('anchorSleep')&&document.getElementById('anchorSleep').value||'').trim(),
+        meal:(document.getElementById('anchorMeal')&&document.getElementById('anchorMeal').value||'').trim(),
+        water:(document.getElementById('anchorWater')&&document.getElementById('anchorWater').value||'').trim()
+      };
+      persistRender();
+      showAppMessage('Saved','The next check will say that line first.');
+    });
     try{ wireHoldTalk('habitHold','newHabitName','habitVoiceStatus'); }catch(e){}
     const screenSave=document.getElementById('screenSave'); if(screenSave) screenSave.addEventListener('click', saveScreenPlan);
     function stashWorkout(date){
@@ -18820,6 +19287,9 @@ function wireView(){
   if(state.view==='timer'){
     const sel=document.getElementById('taskSelect'); if(sel) sel.addEventListener('change', ()=>setActiveTask(sel.value));
     const startBtn=document.getElementById('startBtn'); if(startBtn) startBtn.addEventListener('click', startTimer);
+    document.querySelectorAll('[data-preset]').forEach(function(btn){ btn.addEventListener('click', function(){ applyFocusPreset(btn.dataset.preset); }); });
+    const distractBtn=document.getElementById('distractBtn'); if(distractBtn) distractBtn.addEventListener('click', logDistraction);
+    const hideStartTip=document.getElementById('hideStartTip'); if(hideStartTip) hideStartTip.addEventListener('click', function(){ if(!state.techHide) state.techHide={}; state.techHide.focus=todayStr(); persistRender(); });
     const pauseBtn=document.getElementById('pauseBtn'); if(pauseBtn) pauseBtn.addEventListener('click', pauseTimer);
     const resetBtn=document.getElementById('resetBtn'); if(resetBtn) resetBtn.addEventListener('click', resetTimer);
     const podMin=document.getElementById('podMinutes');
@@ -19044,6 +19514,8 @@ function wireView(){
   }
 
   if(state.view==='rule135'){
+    const fillPlateBtn=document.getElementById('fillPlateBtn');
+    if(fillPlateBtn) fillPlateBtn.addEventListener('click', fillPlateFromTasks);
     const setNnPlateBtn=document.getElementById('setNnPlateBtn'); if(setNnPlateBtn) setNnPlateBtn.addEventListener('click', setNonNegotiable);
     const nnInputPlate=document.getElementById('nnInputPlate'); if(nnInputPlate) nnInputPlate.addEventListener('keydown', e=>{ if(e.key==='Enter') setNonNegotiable(); });
     const savePlate=document.getElementById('savePlateToTasksBtn');
@@ -19395,6 +19867,24 @@ function wireView(){
         </div>`;
       if(resetItemsDeleteBtn) resetItemsDeleteBtn.style.display='';
     }
+    const exportDataBtn=document.getElementById('exportDataBtn');
+    if(exportDataBtn) exportDataBtn.addEventListener('click', function(){
+      try{
+        const copy=JSON.parse(JSON.stringify(state));
+        delete copy._googleAccessToken;
+        const blob=new Blob([JSON.stringify(copy,null,2)],{type:'application/json'});
+        const a=document.createElement('a');
+        a.href=URL.createObjectURL(blob);
+        a.download='SnapBack-'+todayStr()+'.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }catch(e){ showAppMessage('Could not export', 'Try again.'); }
+    });
+    const deleteAccountBtn=document.getElementById('deleteAccountBtn');
+    if(deleteAccountBtn) deleteAccountBtn.addEventListener('click', function(){
+      showAppMessage('Delete your SnapBack account?', 'This removes SnapBack data on this device and the copy saved with your Google sign-in. It does not delete your Gmail.', { ok:'Delete', cancel:'Cancel', onOk:function(){ deleteMySnapBackData(); } });
+    });
     if(resetSpecificBtn) resetSpecificBtn.addEventListener('click', ()=>{
       if(resetPanel) resetPanel.style.display='block';
       if(resetKind) resetKind.value='';
@@ -19490,6 +19980,8 @@ function wireView(){
       try{ navigator.clipboard.writeText(msg); showAppMessage('Copied', 'Paste into any chat.'); }
       catch(e){ showAppMessage('Copy', msg.slice(0,200)); }
     });
+    const shareViewLink=document.getElementById('shareViewLink');
+    if(shareViewLink) shareViewLink.addEventListener('click', copyProgressLink);
 
     const ex=document.getElementById('exportBackupBtn'); if(ex) ex.addEventListener('click', exportBackup);
     const snapBox=document.getElementById('autoSnapList');
@@ -19537,8 +20029,6 @@ function wireView(){
     }
     const gOut=document.getElementById('googleSignOutBtn');
     if(gOut) gOut.addEventListener('click', ()=>signOutUser());
-    const delAcc=document.getElementById('deleteAccountBtn');
-    if(delAcc) delAcc.addEventListener('click', ()=>{ try{ deleteMySnapBackData(); }catch(e){} });
 
     const sc=document.getElementById('syncCodeInput'); if(sc) sc.value=getSyncCode();
     const fb=document.getElementById('fbConfigInput'); if(fb){ const c=getFirebaseConfig(); if(c) fb.value=JSON.stringify(c,null,2); }
@@ -19676,7 +20166,10 @@ function wireView(){
     const nb=document.getElementById('setNotifyBrowser'); if(nb) nb.addEventListener('change', ()=>{ updateSetting('notifyBrowser', nb.checked); flashSaved(); });
     const gnb=document.getElementById('grantNotifyBtn'); if(gnb) gnb.addEventListener('click', requestNotifyPermission);
     const qol=document.getElementById('setQuoteOnLoad'); if(qol) qol.addEventListener('change', ()=>{ updateSetting('quoteOnLoad', qol.checked); flashSaved(); });
+    const gcal=document.getElementById('setGcalWrite'); if(gcal) gcal.addEventListener('change', ()=>{ updateSetting('gcalWrite', gcal.checked); if(gcal.checked){ ensureCalendarWriteToken(); } flashSaved(); });
     const dm=document.getElementById('setDarkMode'); if(dm) dm.addEventListener('change', ()=>{ updateSetting('darkMode', dm.checked); applyDarkMode(); flashSaved(); });
+    const textStd=document.getElementById('textSizeStd'); if(textStd) textStd.addEventListener('click', ()=>{ updateSetting('textSize','standard'); applyTextSize(); });
+    const textLg=document.getElementById('textSizeLg'); if(textLg) textLg.addEventListener('click', ()=>{ updateSetting('textSize','large'); applyTextSize(); });
     const cel=document.getElementById('setCelebrateOn'); if(cel) cel.addEventListener('change', ()=>{ updateSetting('celebrateOnComplete', cel.checked); flashSaved(); });
     const ces=document.getElementById('setCelebrateSound'); if(ces) ces.addEventListener('change', ()=>{ updateSetting('celebrateSound', ces.checked); flashSaved(); });
     const aqb=document.getElementById('addQuoteBtn'); if(aqb) aqb.addEventListener('click', addCustomQuote);
@@ -19685,6 +20178,9 @@ function wireView(){
 }
 function applyDarkMode(){
   document.body.classList.toggle('dark', !!(state.settings && state.settings.darkMode));
+}
+function applyTextSize(){
+  document.documentElement.classList.toggle('text-large', !!(state.settings && state.settings.textSize==='large'));
 }
 function flashSaved(){ const el=document.getElementById('savedMsg'); if(!el) return; el.textContent='Saved'; setTimeout(()=>{ if(el) el.textContent=''; },1200); }
 
@@ -19801,10 +20297,11 @@ if (typeof isNativeApp === 'function' && isNativeApp()) {
     if(!Array.isArray(state.flipScripts)) state.flipScripts=[];
     applyStatsThisWeek();
   }
-  if(state.settings.quoteOnLoad && state.lastQuoteShownDate!==todayStr()){
+  if(state.settings.quoteOnLoad && state.lastQuoteShownDate!==todayStr() && !state.habitAsk){
     state.lastQuoteShownDate=todayStr();
     state.quoteModalOpen=true;
     state.quoteIndex=Math.floor(Math.random()*allQuotes().length);
+    try{ saveState(); }catch(e){}
   }
   if(state.timer && state.timer.running && state.timer.endsAt){
     if(state.timer.endsAt<=Date.now()) completeSegment(typeof isNativeApp==='function' && isNativeApp());
