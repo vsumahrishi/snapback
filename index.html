@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="380">
+<meta name="snapback-build" content="382">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -363,28 +363,30 @@ details.setgroup .setgroup-body{margin-top:12px}
 .confetti-piece{position:fixed;width:10px;height:10px;top:-12px;z-index:100;pointer-events:none;border-radius:2px;animation:confetti-fall linear forwards}
 @keyframes confetti-fall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(100vh) rotate(720deg);opacity:0}}
 .fab-task{
-  position:fixed; top:calc(8px + env(safe-area-inset-top, 0px)); right:10px; z-index:36;
-  width:56px; height:56px; padding:0; border:0; border-radius:50%; cursor:pointer;
-  background:
-    radial-gradient(circle at 50% 54%, #fff 0 16px, rgba(255,255,255,0) 17px),
-    url('icon-192.png') center/cover no-repeat;
-  box-shadow:0 8px 18px rgba(30,36,34,.28);
+  position:fixed; top:calc(6px + env(safe-area-inset-top, 0px)); right:8px; z-index:36;
+  width:72px; height:72px; padding:0; margin:0; border:0; border-radius:0;
+  background:transparent; box-shadow:none; cursor:pointer;
+  -webkit-appearance:none; appearance:none;
 }
-.fab-task .fab-plus{
-  position:absolute; left:50%; top:54%; transform:translate(-50%,-50%);
-  font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:1.55rem; line-height:1; color:#1E2422;
-  pointer-events:none;
-}
-.fab-task.fab-run{ animation:fabDash 3.1s cubic-bezier(.4,.05,.2,1) 1; }
+.fab-task .fab-squirrel{ width:72px; height:72px; display:block; overflow:visible; }
+.fab-task.fab-run{ z-index:80; animation:fabDash 8.6s linear 1; }
 @keyframes fabDash{
-  0%{ transform:translate(0,0); }
-  24%{ transform:translate(calc(-100vw + 76px), 0); }
-  50%{ transform:translate(calc(-100vw + 76px), calc(100vh - 90px - env(safe-area-inset-bottom, 0px))); }
-  76%{ transform:translate(0, calc(100vh - 90px - env(safe-area-inset-bottom, 0px))); }
-  100%{ transform:translate(0,0); }
+  0%{ transform:translate(0,0) rotate(0deg); }
+  8%{ transform:translate(-22vw, 26vh) rotate(-16deg); }
+  16%{ transform:translate(-58vw, 6vh) rotate(22deg); }
+  25%{ transform:translate(-78vw, 34vh) rotate(-28deg); }
+  34%{ transform:translate(-84vw, 68vh) rotate(14deg); }
+  43%{ transform:translate(-36vw, 76vh) rotate(-18deg); }
+  52%{ transform:translate(-8vw, 40vh) rotate(26deg); }
+  61%{ transform:translate(-70vw, 14vh) rotate(-12deg); }
+  70%{ transform:translate(-48vw, 58vh) rotate(20deg); }
+  79%{ transform:translate(-14vw, 72vh) rotate(-24deg); }
+  88%{ transform:translate(-6vw, 24vh) rotate(8deg); }
+  94%{ transform:translate(-24vw, 4vh) rotate(-6deg); }
+  100%{ transform:translate(0,0) rotate(0deg); }
 }
 @media (prefers-reduced-motion: reduce){ .fab-task.fab-run{ animation:none; } }
-@media (min-width:821px){ .fab-task{ top:18px; right:18px; } }
+@media (min-width:821px){ .fab-task{ top:14px; right:14px; } }
 
 .qmini{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:7px 10px;margin-bottom:6px;font-size:.85rem}
 
@@ -399,7 +401,7 @@ details.setgroup .setgroup-body{margin-top:12px}
 @media(max-width:820px){
   .app{flex-direction:column}
   .sidebar.mobile-topbar{
-    width:100%;flex-direction:row;align-items:center;gap:10px;padding:10px 74px 10px 14px;
+    width:100%;flex-direction:row;align-items:center;gap:10px;padding:10px 86px 10px 14px;
     position:sticky;top:0;z-index:30;
   }
   .sidebar.mobile-topbar .brand,.sidebar.mobile-topbar .navfoot,.sidebar.mobile-topbar .navsection,.sidebar.mobile-topbar .navbtn{display:none}
@@ -3999,7 +4001,7 @@ function checkHabitNudges(now){
   function once(key, text, ask){
     if(state.notifiedKeys.indexOf(key)>=0) return;
     const onPhone=typeof isNativeApp==='function' && isNativeApp();
-    if(onPhone) return;
+    if(onPhone && document.hidden) return;
     state.notifiedKeys.push(key);
     changed=true;
     if(!document.hidden){ try{ cancelHabitNotif(key); }catch(e){} }
@@ -4119,7 +4121,10 @@ function checkHabitNudges(now){
 function withAnchor(slot, text){
   const cue=state.habitAnchors && state.habitAnchors[slot];
   if(!cue) return text;
-  return String(cue).replace(/[.\s]+$/,'')+'. '+text;
+  const c=String(cue).trim();
+  if(!c) return text;
+  if(c.indexOf(text)>=0) return c;
+  return c.replace(/[.\s]+$/,'')+'. '+text;
 }
 function markHabitSaved(line){ state.habitSavedLine=line; }
 function answerHabitAsk(which){
@@ -4704,6 +4709,28 @@ async function scheduleHabitPopups(){
   }catch(e){}
   const items=habitPopupItems();
   const future=items.filter(function(it){ return it.when.getTime()>Date.now()+4000; });
+  const nativePlug=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+  if(nativePlug && nativePlug.replaceHabitAsks){
+    const quiet=future.map(function(it){
+      const ex=it.extra||{};
+      return {key:it.key, at:it.when.getTime(), text:it.text, askKind:ex.askKind||'', log:ex.log||'', hid:ex.hid||'', date:ex.date||'', name:ex.name||'', mode:ex.mode||'ask'};
+    });
+    try{
+      if(LocalNotifications.getPending){
+        const p=await LocalNotifications.getPending();
+        const drop=((p&&p.notifications)||[]).filter(function(n){ return n && n.extra && String(n.extra.kind)==='habit'; }).map(function(n){ return {id:n.id}; });
+        if(drop.length && LocalNotifications.cancel) await LocalNotifications.cancel({notifications:drop});
+      }
+      if(LocalNotifications.getDeliveredNotifications && LocalNotifications.removeDeliveredNotifications){
+        const got=await LocalNotifications.getDeliveredNotifications();
+        const dropD=((got&&got.notifications)||[]).filter(function(n){ return n && n.extra && String(n.extra.kind)==='habit'; }).map(function(n){ return {id:n.id}; });
+        if(dropD.length) await LocalNotifications.removeDeliveredNotifications({notifications:dropD});
+      }
+    }catch(e){}
+    window.__habitNotifIds=[];
+    try{ await nativePlug.replaceHabitAsks({items:JSON.stringify(quiet)}); }catch(e){ console.warn('habit native', e); }
+    return;
+  }
   const futureIds=future.map(function(it){ return {id:notifIdFromKey('habit:'+it.key)}; });
   let delivered={};
   try{
@@ -4772,6 +4799,114 @@ function habitNotifExtra(n){
     if(extra && String(extra.kind)==='habit') return extra;
   }catch(e){}
   return null;
+}
+function applyNativeHabitReply(r){
+  if(!r || !r.answer || r.answer==='dismiss') return;
+  if(!state.notifiedKeys) state.notifiedKeys=[];
+  if(r.key && state.notifiedKeys.indexOf(r.key)<0) state.notifiedKeys.push(r.key);
+  state.habitAsk={kind:r.askKind||'yesno', log:r.log||'', id:r.hid||'', date:r.date||todayStr(), text:r.text||'', name:r.name||'', key:r.key||''};
+  if(r.answer==='yes' || r.answer==='no'){ answerHabitAsk(r.answer); return; }
+  if(String(r.answer).indexOf('mood')===0){ answerMoodAsk(Number(String(r.answer).slice(4))||0); }
+}
+async function drainHabitReplies(){
+  if(typeof isNativeApp!=='function' || !isNativeApp()) return;
+  const plug=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+  if(!plug || !plug.drainHabitReplies) return;
+  let res=null;
+  try{ res=await plug.drainHabitReplies(); }catch(e){ return; }
+  let list=[];
+  try{ list=JSON.parse((res&&res.replies)||'[]'); }catch(e){ list=[]; }
+  if(!list.length) return;
+  list.forEach(applyNativeHabitReply);
+}
+function titleFromReminder(text){
+  const raw=String(text||'').trim();
+  const m=raw.match(/^(.*)\s+in\s+\d+\s+min\.?$/i);
+  return (m&&m[1]?m[1]:raw).trim();
+}
+function applyNoteEdit(r){
+  const key=String((r&&r.key)||'');
+  const text=String((r&&r.text)||'').trim();
+  if(!text) return false;
+  if(key.indexOf('task:')===0){
+    const id=key.split(':')[1];
+    const t=(state.tasks||[]).find(function(x){ return String(x.id)===String(id); });
+    if(t){ t.title=text; return true; }
+  }
+  if(key.indexOf('class:')===0){
+    const id=key.split(':')[1];
+    const c=(state.classes||[]).find(function(x){ return String(x.id)===String(id); });
+    if(c){ c.title=titleFromReminder(text)||c.title; return true; }
+  }
+  if(key.indexOf('block:')===0){
+    const id=key.split(':')[1];
+    const b=(state.studyBlocks||[]).find(function(x){ return String(x.id)===String(id); });
+    if(b){ b.label=titleFromReminder(text)||b.label; return true; }
+  }
+  if(key.indexOf('nn:')===0){
+    const date=key.slice(3);
+    if(!state.nonNegotiable) state.nonNegotiable={};
+    if(!state.nonNegotiable[date]) state.nonNegotiable[date]={text:'', remindAt:''};
+    state.nonNegotiable[date].text=text;
+    return true;
+  }
+  if(key.indexOf('habitn:')===0){
+    const id=key.split(':')[1];
+    const h=(state.habits||[]).find(function(x){ return String(x.id)===String(id); });
+    if(h){
+      const m=text.match(/^Did you do\s+(.+?)\??$/i);
+      h.name=(m&&m[1]?m[1]:text).trim()||h.name;
+      return true;
+    }
+  }
+  if(key.indexOf('expre:')===0 || key.indexOf('expost:')===0){
+    const id=key.split(':')[2];
+    const row=(state.exercisePlan||[]).find(function(x){ return String(x.id)===String(id); });
+    if(row){
+      let name=text;
+      let m=text.match(/^(.*)\s+is in 30 minutes\.?$/i);
+      if(!(m&&m[1])) m=text.match(/^Did you do\s+(.+?)\??$/i);
+      if(m&&m[1]) name=m[1];
+      row.focus=String(name).trim()||row.focus;
+      return true;
+    }
+  }
+  let slot='';
+  let question='';
+  if(key.indexOf('sleep:')===0){ slot='sleep'; question='How many hours did you sleep?'; }
+  else if(key.indexOf('meal:')===0){ slot='meal'; question='Did you eat a real meal today?'; }
+  else if(key.indexOf('water:')===0){ slot='water'; question='Did you Hydrate?'; }
+  if(slot){
+    if(!state.habitAnchors) state.habitAnchors={};
+    if(question && text.endsWith(question)){
+      state.habitAnchors[slot]=text.slice(0, text.length-question.length).replace(/[\s.]+$/,'').trim();
+    } else {
+      state.habitAnchors[slot]=text;
+    }
+    return true;
+  }
+  if(!Array.isArray(state.journal)) state.journal=[];
+  const now=new Date();
+  const time=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  state.journal.unshift({id:uid(), text:text, date:todayStr(), time:time, filed:false});
+  state.journal=state.journal.slice(0,100);
+  return true;
+}
+async function drainNoteEdits(){
+  if(typeof isNativeApp!=='function' || !isNativeApp()) return;
+  const plug=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+  if(!plug || !plug.drainNoteEdits) return;
+  let res=null;
+  try{ res=await plug.drainNoteEdits(); }catch(e){ return; }
+  let list=[];
+  try{ list=JSON.parse((res&&res.edits)||'[]'); }catch(e){ list=[]; }
+  if(!list.length) return;
+  let changed=false;
+  list.forEach(function(r){ if(applyNoteEdit(r)) changed=true; });
+  if(!changed) return;
+  try{ saveState(); }catch(e){}
+  try{ rebuildAllReminderSounds(); }catch(e){}
+  try{ persistRender(); }catch(e){}
 }
 function openHabitFromNotif(extra){
   if(!extra) return;
@@ -5016,7 +5151,7 @@ async function ensureNativeNotifListeners(){
   if(window.__snapbackNotifListeners) return;
   try{
     const { LocalNotifications } = window.Capacitor.Plugins;
-    if(!LocalNotifications || !LocalNotifications.addListener) return;
+    if(LocalNotifications && LocalNotifications.addListener){
     window.__snapbackNotifListeners = true;
     function isWakeNotif(n){
       try{
@@ -5046,7 +5181,16 @@ async function ensureNativeNotifListeners(){
     await LocalNotifications.addListener('localNotificationActionPerformed', function(n){
       try{
         const hx=habitNotifExtra(n);
-        if(hx){ openHabitFromNotif(hx); return; }
+        if(hx){
+          const act=n && (n.actionId || (n.notification && n.notification.actionId));
+          if(act==='yes' || act==='no' || String(act||'').indexOf('mood')===0){
+            applyNativeHabitReply({key:hx.hkey, askKind:hx.askKind, log:hx.log, hid:hx.hid, date:hx.date, name:hx.name, text:hx.text, answer:act});
+            return;
+          }
+          if(document.visibilityState!=='visible') return;
+          openHabitFromNotif(hx);
+          return;
+        }
         if(isWakeNotif(n)){
           setPendingNudge(true);
           const note = (n && n.notification && n.notification.body) || '';
@@ -5059,13 +5203,29 @@ async function ensureNativeNotifListeners(){
         }
       }catch(e){ console.warn(e); }
     });
+    }
   }catch(e){ console.warn('notif listeners', e); }
+  try{
+    const plug=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+    if(plug && plug.addListener && !window.__snapbackHabitDue){
+      window.__snapbackHabitDue=true;
+      plug.addListener('habitDue', function(ev){
+        if(document.visibilityState!=='visible') return;
+        let item=null;
+        try{ item=JSON.parse((ev&&ev.item)||'{}'); }catch(e){ item=null; }
+        if(!item) return;
+        openHabitFromNotif({kind:'habit', mode:item.mode||'ask', askKind:item.askKind||'', log:item.log||'', hid:item.hid||'', hkey:item.key||'', date:item.date||'', text:item.text||'', name:item.name||''});
+      });
+    }
+  }catch(e){}
 }
 function wireNudgeForegroundHooks(){
   if(window.__snapbackNudgeHooks) return;
   window.__snapbackNudgeHooks = true;
   document.addEventListener('visibilitychange', function(){
     if(document.visibilityState==='visible'){
+      try{ drainHabitReplies(); }catch(e){}
+      try{ drainNoteEdits(); }catch(e){}
       try{ consumePendingNudge(); }catch(e){}
       try{ armPhoneCloudNudgeSync(); }catch(e){}
     }
@@ -5078,7 +5238,7 @@ function wireNudgeForegroundHooks(){
     const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
     if(App && App.addListener){
       App.addListener('appStateChange', function(s){
-        if(s && s.isActive){ try{ consumePendingNudge(); }catch(e){} try{ armPhoneCloudNudgeSync(); }catch(e){} }
+        if(s && s.isActive){ try{ drainHabitReplies(); }catch(e){} try{ drainNoteEdits(); }catch(e){} try{ consumePendingNudge(); }catch(e){} try{ armPhoneCloudNudgeSync(); }catch(e){} }
       });
     }
   }catch(e){}
@@ -5221,7 +5381,7 @@ function rebuildAllReminderSounds(){
   function add(key, body, when){
     const at=when instanceof Date ? when.getTime() : new Date(when).getTime();
     if(!at || at<=Date.now()+1500) return;
-    items.push({key:String(key||''), title:'SnapBack', body:String(body||'').slice(0,140), at:at});
+    items.push({key:String(key||''), title:'SnapBack', body:String(body||'').slice(0,4000), at:at});
   }
   const allowDeadline = !(state.settings && state.settings.deadlineNotify===false);
   if(allowDeadline){
@@ -5649,59 +5809,77 @@ function habitSavedHtml(){
   return `<div class="card" role="status" style="display:flex;gap:8px;align-items:center"><span style="flex:1">${escapeHtml(state.habitSavedLine)}</span><button type="button" class="btn ghost sm" data-action="hide-habit-saved" aria-label="Close">×</button></div>`;
 }
 function startTourPending(){
-  if(state.startTour===2) return false;
+  if(state.startTour===3) return false;
   if(typeof needsLoginScreen==='function' && needsLoginScreen()) return false;
   if(state.quoteModalOpen || state.quickAddOpen) return false;
-  if(state.startTour!==1){
+  if(state.startMark!=='v3'){
     state.startStep=1;
-    state.startTour=1;
+    state.startMark='v3';
+    state.startHint='';
   }
   return !state.view || state.view==='today';
+}
+function skipStartPopup(){
+  state.startHint='';
+  const step=state.startStep||1;
+  if(step>=4){ state.startDone=true; state.startTour=3; }
+  else state.startStep=step+1;
+  state.startMark='v3';
+  try{ persistRender(); }catch(e){}
 }
 function startPopupHtml(){
   const step=state.startStep||1;
   const skip='<button type="button" class="btn ghost" id="startSkip">Skip</button>';
+  const hint=state.startHint?'<p style="margin:0 0 8px;color:var(--brick)">'+escapeHtml(state.startHint)+'</p>':'';
   let body='';
   if(step===1){
-    body='<div class="qeyebrow">Step 1 of 4</div><div class="qtext" style="font-size:1.25rem">Add one task</div><p style="margin:8px 0 10px;color:var(--muted)">Name one thing you can do. Only one.</p><input id="obTask" placeholder="One task" style="width:100%;margin-bottom:12px"><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startNext">Add it</button>'+skip+'</div>';
+    body='<div class="qeyebrow">1 of 4</div><div class="qtext" style="font-size:1.25rem">Personalize your screen</div><p style="margin:8px 0 10px;color:var(--muted)">Open Settings. Personalize your screen is the first block. Turn off a page or a block you do not use. Your answers stay.</p>'+hint+'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startTry">Try now</button><button type="button" class="btn" id="startNext">Let\'s Go</button>'+skip+'</div>';
   } else if(step===2){
-    body='<div class="qeyebrow">Step 2 of 4</div><div class="qtext" style="font-size:1.25rem">Set one nudge</div><p style="margin:8px 0 10px;color:var(--muted)">Pick a time tomorrow. It rings once. No math problem.</p><input type="time" id="obTime" value="09:00" style="width:100%;margin-bottom:12px"><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startNext">Set it</button>'+skip+'</div>';
+    body='<div class="qeyebrow">2 of 4</div><div class="qtext" style="font-size:1.25rem">Set up a nudge</div><p style="margin:8px 0 10px;color:var(--muted)">Pick a time tomorrow. It rings once. No math problem.</p><input type="time" id="obTime" value="09:00" style="width:100%;margin-bottom:12px">'+hint+'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startNext">Let\'s Go</button>'+skip+'</div>';
   } else if(step===3){
-    body='<div class="qeyebrow">Step 3 of 4</div><div class="qtext" style="font-size:1.25rem">Too much on the screen?</div><p style="margin:8px 0 10px;color:var(--muted)">Finding the app too texty? Go to settings and change the look to suit you.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startLook">Personalize your screen</button>'+skip+'</div>';
+    body='<div class="qeyebrow">3 of 4</div><div class="qtext" style="font-size:1.25rem">Set up a task</div><p style="margin:8px 0 10px;color:var(--muted)">Name one thing you can do.</p><input id="obTask" placeholder="One task" style="width:100%;margin-bottom:12px">'+hint+'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startNext">Let\'s Go</button>'+skip+'</div>';
   } else {
-    body='<div class="qeyebrow">Step 4 of 4</div><div class="qtext" style="font-size:1.25rem">Plan a workout</div><p style="margin:8px 0 10px;color:var(--muted)">Last step. Open the workout page and set one session.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startWorkout">Click here</button>'+skip+'</div>';
+    body='<div class="qeyebrow">4 of 4</div><div class="qtext" style="font-size:1.25rem">Set up a Healthy Habit</div><p style="margin:8px 0 10px;color:var(--muted)">Pick one to open now.</p>'+hint+'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startNext">Let\'s Go</button><button type="button" class="btn" id="startExercise">Exercise</button><button type="button" class="btn" id="startScreen">Screen time</button>'+skip+'</div>';
   }
   return '<div class="overlay" id="startOverlay"><div class="quotecard" style="text-align:left">'+body+'</div></div>';
 }
 function wireStartPopup(){
   const skip=document.getElementById('startSkip');
-  if(skip) skip.onclick=function(){ state.startDone=true; state.startTour=2; try{ persistRender(); }catch(e){} };
+  if(skip) skip.onclick=skipStartPopup;
   const next=document.getElementById('startNext');
   if(next) next.onclick=advanceStartHere;
-  const look=document.getElementById('startLook');
-  if(look) look.onclick=function(){
-    state.startStep=4;
-    state.startTour=1;
+  const tryNow=document.getElementById('startTry');
+  if(tryNow) tryNow.onclick=function(){
+    state.startHint='';
+    state.startStep=2;
+    state.startMark='v3';
     navigateTo('settings');
     setTimeout(function(){
       const el=document.getElementById('settingsSeeDetails');
       if(el){ el.open=true; try{ el.scrollIntoView({block:'start'}); }catch(e){} }
     }, 60);
   };
-  const work=document.getElementById('startWorkout');
-  if(work) work.onclick=function(){ state.startDone=true; state.startTour=2; navigateTo('habits'); };
+  function openHabit(which){
+    state.startHint='';
+    state.startDone=true;
+    state.startTour=3;
+    state.startMark='v3';
+    if(!state.habitOpen) state.habitOpen={};
+    state.habitOpen.exercise = which==='exercise';
+    state.habitOpen.screen = which==='screen';
+    navigateTo('habits');
+  }
+  const ex=document.getElementById('startExercise');
+  if(ex) ex.onclick=function(){ openHabit('exercise'); };
+  const sc=document.getElementById('startScreen');
+  if(sc) sc.onclick=function(){ openHabit('screen'); };
 }
 function advanceStartHere(){
   const step=state.startStep||1;
+  state.startHint='';
   if(step===1){
-    const title=(document.getElementById('obTask')&&document.getElementById('obTask').value||'').trim();
-    if(!title){ showAppMessage('Name one task','One line is enough.'); return; }
-    const task={id:uid(), title:title, notes:'', date:todayStr(), time:'', priority:'medium', urgent:false, important:false, tier:'could', frog:false, done:false, created:Date.now()};
-    if(!Array.isArray(state.tasks)) state.tasks=[];
-    state.tasks.unshift(task);
-    state.startTaskId=task.id;
     state.startStep=2;
-    state.startTour=1;
+    state.startMark='v3';
     persistRender();
     return;
   }
@@ -5714,14 +5892,26 @@ function advanceStartHere(){
     state.nudges.push(item);
     state.wakeAlarm=item;
     state.startStep=3;
-    state.startTour=1;
+    state.startMark='v3';
     persistRender();
     try{ scheduleWakeAlarms(); }catch(e){}
     try{ if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms(); }catch(e){}
     return;
   }
-  state.startDone=true;
-  state.startTour=2;
+  if(step===3){
+    const title=(document.getElementById('obTask')&&document.getElementById('obTask').value||'').trim();
+    if(!title){ state.startHint='Type one task first.'; persistRender(); return; }
+    const task={id:uid(), title:title, notes:'', date:todayStr(), time:'', priority:'medium', urgent:false, important:false, tier:'could', frog:false, done:false, created:Date.now()};
+    if(!Array.isArray(state.tasks)) state.tasks=[];
+    state.tasks.unshift(task);
+    state.startTaskId=task.id;
+    state.startStep=4;
+    state.startMark='v3';
+    persistRender();
+    return;
+  }
+  state.startHint='Tap Exercise or Screen time.';
+  state.startMark='v3';
   persistRender();
 }
 function parseProgressFromQuery(){
@@ -5888,24 +6078,60 @@ function ensureFab(){
     b.id='fabTask';
     b.type='button';
     b.className='fab-task';
-    b.innerHTML='<span class="fab-plus" aria-hidden="true">+</span>';
+    b.innerHTML='<svg class="fab-squirrel" viewBox="0 0 86 86" aria-hidden="true"><g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"><path stroke-width="7" d="M34 60c-16 2-24-16-14-28 8-10 22-4 20 8 0 8-8 10-10 4"/><path stroke-width="7" d="M36 46c-2 16 12 24 28 16 12-6 12-18 2-22-8 8-18 4-22 0"/><circle cx="62" cy="30" r="13" stroke-width="7"/><path stroke-width="6" d="M52 22c-2-10 8-14 10-4M66 18c2-10 14-8 8 3"/><path stroke-width="9" d="M50 50v18M41 59h18"/></g><g fill="none" stroke="#1E2422" stroke-linecap="round" stroke-linejoin="round"><path stroke-width="2.4" d="M34 60c-16 2-24-16-14-28 8-10 22-4 20 8 0 8-8 10-10 4"/><path stroke-width="2.4" d="M36 46c-2 16 12 24 28 16 12-6 12-18 2-22-8 8-18 4-22 0"/><circle cx="62" cy="30" r="13" stroke-width="2.4"/><path stroke-width="2.2" d="M52 22c-2-10 8-14 10-4M66 18c2-10 14-8 8 3"/><circle cx="67" cy="29" r="1.5" fill="#1E2422" stroke="none"/><path stroke-width="4.4" d="M50 50v18M41 59h18"/></g></svg>';
     b.setAttribute('aria-label','Add a task');
-    b.addEventListener('click', function(){ state.quickAddOpen=true; try{ renderModal(); }catch(e){} });
+    b.addEventListener('click', function(){
+      if(b.getAnimations){ try{ b.getAnimations().forEach(function(a){ a.cancel(); }); }catch(e){} }
+      b.classList.remove('fab-run');
+      state.quickAddOpen=true;
+      try{ renderModal(); }catch(e){}
+    });
     document.body.appendChild(b);
   }
   const hide=document.body.classList.contains('login-only') || document.body.classList.contains('share-only');
   b.hidden=!!hide;
-  if(hide || state.fabIntroDone || b.dataset.ran==='1') return;
+}
+let _fabRanDay='';
+function maybeFabRun(){
+  const b=document.getElementById('fabTask');
+  if(!b) return;
+  const hide=document.body.classList.contains('login-only') || document.body.classList.contains('share-only');
+  b.hidden=!!hide;
+  if(hide) return;
+  if(!Array.isArray(state.fabDays)) state.fabDays=[];
+  if(state.fabDays.length>=4) return;
+  const today=todayStr();
+  if(state.fabDays.indexOf(today)>=0 || _fabRanDay===today) return;
+  if(document.querySelector('#modalRoot .overlay, .tour-overlay')) return;
   let reduce=false;
   try{ reduce=!!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); }catch(e){}
-  state.fabIntroDone=true;
-  b.dataset.ran='1';
+  _fabRanDay=today;
+  state.fabDays.push(today);
   try{ saveState(); }catch(e){}
   if(reduce) return;
+  const w=Math.max(240, (window.innerWidth||360)-80);
+  const h=Math.max(320, (window.innerHeight||640)-90);
+  const hops=8+Math.floor(Math.random()*4);
+  const frames=[{transform:'translate(0px,0px) rotate(0deg)'}];
+  for(let i=0;i<hops;i++){
+    const x=Math.round(-Math.random()*w);
+    const y=Math.round(Math.random()*h*0.82);
+    const rot=Math.round(Math.random()*90-45);
+    frames.push({transform:'translate('+x+'px,'+y+'px) rotate('+rot+'deg)'});
+  }
+  frames.push({transform:'translate(0px,0px) rotate(0deg)'});
+  const ms=9000+Math.floor(Math.random()*4000);
+  try{
+    if(b.animate){
+      b.style.zIndex='80';
+      const anim=b.animate(frames, {duration:ms, easing:'linear'});
+      const done=function(){ b.style.zIndex=''; };
+      if(anim){ anim.onfinish=done; anim.oncancel=done; }
+      return;
+    }
+  }catch(e){}
   b.classList.add('fab-run');
-  const stop=function(){ b.classList.remove('fab-run'); };
-  b.addEventListener('animationend', stop, {once:true});
-  setTimeout(stop, 3400);
+  setTimeout(function(){ b.classList.remove('fab-run'); }, ms);
 }
 function saveQuickTask(){
   const titleEl=document.getElementById('fabTitle');
@@ -5922,6 +6148,7 @@ function saveQuickTask(){
   showAppMessage('Added', title);
 }
 function renderModal(){
+  setTimeout(function(){ try{ maybeFabRun(); }catch(e){} }, 0);
   const root=document.getElementById('modalRoot');
   if(!parseProgressFromQuery() && !state.wakeMathOpen && !hasLaunchConsent()){
     root.innerHTML=launchConsentHtml();
@@ -7920,7 +8147,7 @@ function persistRender(){
     if(state.profile && !state.profile.audience){
       state.profile.audience = 'student';
     }
-  }catch(e){} try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ wireNudgeForegroundHooks(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} try{ if(typeof isNativeApp==='function'&&isNativeApp()){ ensureNativeNotifListeners(); scheduleNativeWakeAlarms(); } }catch(e){} try{ consumePendingNudge(); }catch(e){} try{ scheduleHabitPopupsSoon(); }catch(e){} }
+  }catch(e){} try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ wireNudgeForegroundHooks(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} try{ if(typeof isNativeApp==='function'&&isNativeApp()){ ensureNativeNotifListeners(); scheduleNativeWakeAlarms(); drainHabitReplies(); drainNoteEdits(); } }catch(e){} try{ consumePendingNudge(); }catch(e){} try{ scheduleHabitPopupsSoon(); }catch(e){} }
 
 /* ============================================================
    First-launch login gate (Google and/or simple local account)
@@ -17564,7 +17791,7 @@ function wireView(){
     });
     else if(action==='hide-ios') el.addEventListener('click', ()=>{ state.iosHintHidden=true; persistRender(); });
     else if(action==='hide-habit-saved') el.addEventListener('click', ()=>{ state.habitSavedLine=''; persistRender(); });
-    else if(action==='start-skip') el.addEventListener('click', ()=>{ state.startDone=true; state.startTour=2; persistRender(); });
+    else if(action==='start-skip') el.addEventListener('click', ()=>{ skipStartPopup(); });
     else if(action==='see-set') el.addEventListener('click', ()=>{
       if(!state.settings || typeof state.settings!=='object') state.settings={};
       if(!state.settings.see) state.settings.see={};
