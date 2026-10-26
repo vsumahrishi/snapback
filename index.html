@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="382">
+<meta name="snapback-build" content="384">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -341,11 +341,6 @@ details.setgroup > div:not(summary) {
   text-align: left;
 }
 
-details.setgroup{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:14px}
-details.setgroup>summary{list-style:none;font-weight:700;font-size:.95rem;cursor:pointer;color:var(--ink);padding:4px 0}
-details.setgroup>summary::-webkit-details-marker{display:none}
-details.setgroup>summary::before{content:'▸ ';color:var(--muted)}
-details.setgroup[open]>summary::before{content:'▾ '}
 details.setgroup .setgroup-body{margin-top:12px}
 .setgroup h4{font-size:.85rem;margin-bottom:8px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .toggle{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line)}
@@ -5809,22 +5804,24 @@ function habitSavedHtml(){
   return `<div class="card" role="status" style="display:flex;gap:8px;align-items:center"><span style="flex:1">${escapeHtml(state.habitSavedLine)}</span><button type="button" class="btn ghost sm" data-action="hide-habit-saved" aria-label="Close">×</button></div>`;
 }
 function startTourPending(){
-  if(state.startTour===3) return false;
+  if(state.startTour===4) return false;
   if(typeof needsLoginScreen==='function' && needsLoginScreen()) return false;
   if(state.quoteModalOpen || state.quickAddOpen) return false;
-  if(state.startMark!=='v3'){
+  if(state.startMark!=='v4'){
     state.startStep=1;
-    state.startMark='v3';
+    state.startMark='v4';
     state.startHint='';
+    state.startPickHabit=false;
   }
   return !state.view || state.view==='today';
 }
 function skipStartPopup(){
   state.startHint='';
+  state.startPickHabit=false;
   const step=state.startStep||1;
-  if(step>=4){ state.startDone=true; state.startTour=3; }
+  if(step>=4){ state.startDone=true; state.startTour=4; }
   else state.startStep=step+1;
-  state.startMark='v3';
+  state.startMark='v4';
   try{ persistRender(); }catch(e){}
 }
 function startPopupHtml(){
@@ -5837,11 +5834,19 @@ function startPopupHtml(){
   } else if(step===2){
     body='<div class="qeyebrow">2 of 4</div><div class="qtext" style="font-size:1.25rem">Set up a nudge</div><p style="margin:8px 0 10px;color:var(--muted)">Pick a time tomorrow. It rings once. No math problem.</p><input type="time" id="obTime" value="09:00" style="width:100%;margin-bottom:12px">'+hint+'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startNext">Let\'s Go</button>'+skip+'</div>';
   } else if(step===3){
-    body='<div class="qeyebrow">3 of 4</div><div class="qtext" style="font-size:1.25rem">Set up a task</div><p style="margin:8px 0 10px;color:var(--muted)">Name one thing you can do.</p><input id="obTask" placeholder="One task" style="width:100%;margin-bottom:12px">'+hint+'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startNext">Let\'s Go</button>'+skip+'</div>';
+    body='<div class="qeyebrow">3 of 4</div><div class="qtext" style="font-size:1.25rem">Set up a task</div><p style="margin:8px 0 10px;color:var(--muted)">Same fields as a real task. Nothing is saved until you tap Let\'s Go.</p>'
+      +'<div class="field"><label>Title</label><input id="obTask" placeholder="What needs doing?" style="width:100%"></div>'
+      +'<div class="row" style="margin-top:8px"><div class="field"><label>Due date</label><input id="obDate" type="date" value="'+todayStr()+'"></div><div class="field"><label>Time</label><input id="obTimeTask" type="time"></div></div>'
+      +'<div class="field" style="margin-top:8px"><label>Type</label><select id="obContext"><option value="school">'+escapeHtml(L('newTaskSchool'))+'</option><option value="personal">'+escapeHtml(L('personal'))+'</option></select></div>'
+      +'<div class="field" style="margin-top:8px"><label>Nudge me</label><select id="obNudge"><option value="none" selected>Not at all</option><option value="morning">That morning</option><option value="daybefore">The day before</option></select></div>'
+      +'<div class="field" style="margin-top:8px"><label>Nudge time</label><input id="obNudgeTime" type="time" value="08:00"></div>'
+      +hint+'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px"><button type="button" class="btn" id="startNext">Let\'s Go</button>'+skip+'</div>';
+  } else if(state.startPickHabit){
+    body='<div class="qeyebrow">4 of 4</div><div class="qtext" style="font-size:1.25rem">Set up a Healthy Habit</div><p style="margin:8px 0 10px;color:var(--muted)">Choose one. It opens that page.</p>'+hint+'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startExercise">Exercise</button><button type="button" class="btn" id="startScreen">Screen time</button>'+skip+'</div>';
   } else {
-    body='<div class="qeyebrow">4 of 4</div><div class="qtext" style="font-size:1.25rem">Set up a Healthy Habit</div><p style="margin:8px 0 10px;color:var(--muted)">Pick one to open now.</p>'+hint+'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startNext">Let\'s Go</button><button type="button" class="btn" id="startExercise">Exercise</button><button type="button" class="btn" id="startScreen">Screen time</button>'+skip+'</div>';
+    body='<div class="qeyebrow">4 of 4</div><div class="qtext" style="font-size:1.25rem">Set up a Healthy Habit</div><p style="margin:8px 0 10px;color:var(--muted)">Next you choose Exercise or Screen time.</p>'+hint+'<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="startNext">Let\'s Go</button>'+skip+'</div>';
   }
-  return '<div class="overlay" id="startOverlay"><div class="quotecard" style="text-align:left">'+body+'</div></div>';
+  return '<div class="overlay" id="startOverlay"><div class="quotecard" style="text-align:left;max-width:440px;max-height:90vh;overflow:auto">'+body+'</div></div>';
 }
 function wireStartPopup(){
   const skip=document.getElementById('startSkip');
@@ -5852,7 +5857,7 @@ function wireStartPopup(){
   if(tryNow) tryNow.onclick=function(){
     state.startHint='';
     state.startStep=2;
-    state.startMark='v3';
+    state.startMark='v4';
     navigateTo('settings');
     setTimeout(function(){
       const el=document.getElementById('settingsSeeDetails');
@@ -5861,13 +5866,19 @@ function wireStartPopup(){
   };
   function openHabit(which){
     state.startHint='';
+    state.startPickHabit=false;
     state.startDone=true;
-    state.startTour=3;
-    state.startMark='v3';
+    state.startTour=4;
+    state.startMark='v4';
     if(!state.habitOpen) state.habitOpen={};
     state.habitOpen.exercise = which==='exercise';
     state.habitOpen.screen = which==='screen';
     navigateTo('habits');
+    setTimeout(function(){
+      const key=which==='exercise'?'exercise':'screen';
+      const el=document.querySelector('[data-action="habit-sec"][data-key="'+key+'"]');
+      if(el){ try{ el.scrollIntoView({block:'start'}); }catch(e){} }
+    }, 80);
   }
   const ex=document.getElementById('startExercise');
   if(ex) ex.onclick=function(){ openHabit('exercise'); };
@@ -5879,7 +5890,7 @@ function advanceStartHere(){
   state.startHint='';
   if(step===1){
     state.startStep=2;
-    state.startMark='v3';
+    state.startMark='v4';
     persistRender();
     return;
   }
@@ -5892,7 +5903,7 @@ function advanceStartHere(){
     state.nudges.push(item);
     state.wakeAlarm=item;
     state.startStep=3;
-    state.startMark='v3';
+    state.startMark='v4';
     persistRender();
     try{ scheduleWakeAlarms(); }catch(e){}
     try{ if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms(); }catch(e){}
@@ -5900,18 +5911,32 @@ function advanceStartHere(){
   }
   if(step===3){
     const title=(document.getElementById('obTask')&&document.getElementById('obTask').value||'').trim();
-    if(!title){ state.startHint='Type one task first.'; persistRender(); return; }
-    const task={id:uid(), title:title, notes:'', date:todayStr(), time:'', priority:'medium', urgent:false, important:false, tier:'could', frog:false, done:false, created:Date.now()};
+    if(!title){ state.startHint='Type a task title first.'; persistRender(); return; }
+    let date=normalizeTaskDate(document.getElementById('obDate')&&document.getElementById('obDate').value);
+    const time=(document.getElementById('obTimeTask')&&document.getElementById('obTimeTask').value)||'';
+    if(date){
+      const y=parseInt(String(date).slice(0,4),10);
+      if(y && (y<2000 || y>2100)){ state.startHint='Use a year between 2000 and 2100.'; persistRender(); return; }
+    }
+    const nudgeWhen=(document.getElementById('obNudge')&&document.getElementById('obNudge').value)||'none';
+    const reminderTime=(document.getElementById('obNudgeTime')&&document.getElementById('obNudgeTime').value)||time||'08:00';
+    const leads=[];
+    if(nudgeWhen==='morning') leads.push(0);
+    else if(nudgeWhen==='daybefore') leads.push(1);
+    const taskContext=(document.getElementById('obContext')&&document.getElementById('obContext').value)||'school';
+    const task={id:uid(), title:title, notes:'', date:date||'', time:time, priority:'medium', urgent:false, important:false, eisSet:false, tier:'could', frog:false, context:taskContext, technique:'', meetingUrl:'', nudgeWhen:nudgeWhen, reminderLeads:leads, reminderTime:reminderTime, startDate:'', startTime:'', startReminderMinutes:[], chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{avoid:title}, strategic:{what:title}, flip:{}, created:Date.now()};
     if(!Array.isArray(state.tasks)) state.tasks=[];
     state.tasks.unshift(task);
+    try{ writeTaskToGoogleCalendar(task); }catch(e){}
     state.startTaskId=task.id;
     state.startStep=4;
-    state.startMark='v3';
+    state.startPickHabit=false;
+    state.startMark='v4';
     persistRender();
     return;
   }
-  state.startHint='Tap Exercise or Screen time.';
-  state.startMark='v3';
+  state.startPickHabit=true;
+  state.startMark='v4';
   persistRender();
 }
 function parseProgressFromQuery(){
@@ -8754,9 +8779,9 @@ function hubPage(title, sub, cards){
   </div>
   <div style="display:grid;gap:10px">
     ${cards.map(c=>`<button type="button" class="card" data-action="open-nav" data-view="${c.id}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line);background:var(--card)">
-      <div style="font-size:1.4rem">${c.ico}</div>
-      <div style="font-weight:700;margin-top:4px">${escapeHtml(c.label)}</div>
-      <div style="font-size:.85rem;color:var(--muted)">${escapeHtml(c.desc)}</div>
+      <span style="display:block;font-size:1.4rem">${c.ico}</span>
+      <span style="display:block;font-weight:700;margin-top:4px">${escapeHtml(c.label)}</span>
+      <span style="display:block;font-size:.85rem;color:var(--muted)">${escapeHtml(c.desc)}</span>
     </button>`).join('')}
   </div>`;
 }
@@ -9170,9 +9195,9 @@ function viewChallenges(){
     <div style="display:grid;gap:12px">
       ${paths.map((p,i)=>`
         <button class="card" data-action="challenge-path" data-idx="${i}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line);background:var(--card)">
-          <div style="font-size:1.6rem">${p.ico||''}</div>
-          <div style="font-weight:700;margin-top:6px">${escapeHtml(p.title)}</div>
-          <div style="font-size:.88rem;color:var(--muted);margin-top:4px">${escapeHtml(p.desc)}</div>
+          <span style="display:block;font-size:1.6rem">${p.ico||''}</span>
+          <span style="display:block;font-weight:700;margin-top:6px">${escapeHtml(p.title)}</span>
+          <span style="display:block;font-size:.88rem;color:var(--muted);margin-top:4px">${escapeHtml(p.desc)}</span>
         </button>`).join('')}
     </div>`;
   }
@@ -9185,9 +9210,9 @@ function viewChallenges(){
   <div style="display:grid;gap:10px">
     ${CHALLENGES.map(c=>`
       <button class="card" data-action="challenge-open" data-id="${c.id}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line);background:var(--card)">
-        <div style="font-size:1.4rem">${c.ico}</div>
-        <div style="font-weight:700;margin-top:4px">${escapeHtml(c.title)}</div>
-        <div style="font-size:.85rem;color:var(--muted)">${escapeHtml(c.blurb)}</div>
+        <span style="display:block;font-size:1.4rem">${c.ico}</span>
+        <span style="display:block;font-weight:700;margin-top:4px">${escapeHtml(c.title)}</span>
+        <span style="display:block;font-size:.85rem;color:var(--muted)">${escapeHtml(c.blurb)}</span>
       </button>`).join('')}
   </div>`;
 }
@@ -10043,9 +10068,9 @@ function viewToday(){
   </div>` : ''}
 
   <div class="card" style="padding:0;overflow:hidden${seeOn('today','mustCould')?'':';display:none'}"${seeOn('today','mustCould')?'':' hidden'}>
-    <button type="button" class="btn ghost" data-action="home-toggle" data-key="mustCould" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
-      <h3 style="margin:0">Must-Do vs Could-Do</h3>
-      <span style="font-size:1.1rem;color:var(--muted)">${homeSectionOpen('mustCould')?'▾':'▸'}</span>
+    <button type="button" class="btn ghost" data-action="home-toggle" data-key="mustCould" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <span style="font-weight:800;font-size:1.05rem">Must-Do vs Could-Do</span>
+      <span style="font-size:1.1rem;color:var(--muted);flex-shrink:0">${homeSectionOpen('mustCould')?'▾':'▸'}</span>
     </button>
     ${homeSectionOpen('mustCould')?`<div style="padding:0 16px 16px">
       <div class="mustcould">
@@ -10062,15 +10087,17 @@ function viewToday(){
   </div>
 
   <div class="card" style="padding:0;overflow:hidden${seeOn('today','deadlines')?'':';display:none'}"${seeOn('today','deadlines')?'':' hidden'}>
-      <h3 style="margin:0">Upcoming deadlines</h3>
-      <span style="font-size:1.1rem;color:var(--muted)">${homeSectionOpen('deadlines')?'▾':'▸'}</span>
+    <button type="button" class="btn ghost" data-action="home-toggle" data-key="deadlines" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <span style="font-weight:800;font-size:1.05rem">Upcoming deadlines</span>
+      <span style="font-size:1.1rem;color:var(--muted);flex-shrink:0">${homeSectionOpen('deadlines')?'▾':'▸'}</span>
     </button>
     ${homeSectionOpen('deadlines')?`<div style="padding:0 16px 16px">${deadlines.length ? deadlines.map(dlRow).join('') : '<div class="empty">Nothing dated yet.</div>'}</div>`:''}
   </div>
 
   <div class="card" style="padding:0;overflow:hidden${seeOn('today','classes')?'':';display:none'}"${seeOn('today','classes')?'':' hidden'}>
-      <h3 style="margin:0">${L('classesToday')}</h3>
-      <span style="font-size:1.1rem;color:var(--muted)">${homeSectionOpen('classes')?'▾':'▸'}</span>
+    <button type="button" class="btn ghost" data-action="home-toggle" data-key="classes" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <span style="font-weight:800;font-size:1.05rem">${L('classesToday')}</span>
+      <span style="font-size:1.1rem;color:var(--muted);flex-shrink:0">${homeSectionOpen('classes')?'▾':'▸'}</span>
     </button>
     ${homeSectionOpen('classes')?`<div style="padding:0 16px 16px">${commitmentRowsHtml(dayCommitments(todayStr()), isStudentMode() ? 'Nothing scheduled today. Add a class, a workout, or an appointment on the Schedule page.' : 'Nothing scheduled today. Add it on the Schedule page.')}</div>`:''}
   </div>
@@ -10084,12 +10111,12 @@ function viewToday(){
     const open = homeSectionOpen('sneak');
     return `
   <div class="card" style="padding:0;overflow:hidden;border:1px dashed var(--line)${seeOn('today','sneak')?'':';display:none'}"${seeOn('today','sneak')?'':' hidden'}>
-    <button type="button" class="btn ghost" data-action="home-toggle" data-key="sneak" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
-      <div>
-        <div style="font-weight:800">Sneak peek into tomorrow</div>
-        <div style="font-size:.85rem;color:var(--muted)">${new Date(tom+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}</div>
-      </div>
-      <span style="font-size:1.1rem;color:var(--muted)">${open?'▾':'▸'}</span>
+    <button type="button" class="btn ghost" data-action="home-toggle" data-key="sneak" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <span style="display:block;min-width:0">
+        <span style="display:block;font-weight:800">Sneak peek into tomorrow</span>
+        <span style="display:block;font-size:.85rem;color:var(--muted)">${new Date(tom+'T12:00:00').toLocaleDateString(undefined,{weekday:'long',month:'short',day:'numeric'})}</span>
+      </span>
+      <span style="font-size:1.1rem;color:var(--muted);flex-shrink:0">${open?'▾':'▸'}</span>
     </button>
     ${open?`
       <div style="padding:0 16px 16px">
@@ -10421,8 +10448,8 @@ function viewTasks(){
     const tiles = open.map(t=>`
       <button type="button" class="card" data-action="open-task-menu" data-id="${t.id}"
         style="text-align:left;padding:14px;min-height:88px;cursor:pointer;border:1px solid var(--line)">
-        <div style="font-size:.72rem;color:var(--muted)">${taskDateTag(t)}</div>
-        <div style="font-weight:700;margin-top:6px">${escapeHtml(t.title)}</div>
+        <span style="display:block;font-size:.72rem;color:var(--muted)">${taskDateTag(t)}</span>
+        <span style="display:block;font-weight:700;margin-top:6px">${escapeHtml(t.title)}</span>
       </button>`).join('');
     return `
     <div class="pagehead">
@@ -10594,8 +10621,8 @@ function viewTasks(){
     const open = list.filter(t=>!t.done);
     modeBody = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px">
       ${open.map(t=>`<button class="card" data-action="toggle-done-btn" data-id="${t.id}" style="min-height:88px;text-align:left;cursor:pointer;border:1px solid var(--line)">
-        <div style="font-weight:700;font-size:.9rem">${escapeHtml(t.title)}</div>
-        <div style="font-size:.75rem;color:var(--muted);margin-top:6px">${t.date||'no date'}</div>
+        <span style="display:block;font-weight:700;font-size:.9rem">${escapeHtml(t.title)}</span>
+        <span style="display:block;font-size:.75rem;color:var(--muted);margin-top:6px">${t.date||'no date'}</span>
       </button>`).join('')||'<div class="empty">No open tasks</div>'}
     </div>`;
   }
@@ -15374,12 +15401,12 @@ function viewProjectWizard(){
     </div>
     <div style="display:grid;gap:12px">
       <button class="card" data-action="proj-start-existing" style="text-align:left;cursor:pointer;border:2px solid var(--pine);background:var(--pine-soft)">
-        <div style="font-weight:800">Convert an existing item</div>
-        <div style="font-size:.88rem;color:var(--muted);margin-top:4px">${isStudentMode()?'Pick a task, a class, or type a title of my own.':'Pick a task, or type a title of my own.'}</div>
+        <span style="display:block;font-weight:800">Convert an existing item</span>
+        <span style="display:block;font-size:.88rem;color:var(--muted);margin-top:4px">${isStudentMode()?'Pick a task, a class, or type a title of my own.':'Pick a task, or type a title of my own.'}</span>
       </button>
       <button class="card" data-action="proj-start-new" style="text-align:left;cursor:pointer;border:2px solid #1F497D;background:#eef3f9">
-        <div style="font-weight:800;color:#1F497D">Start a new project</div>
-        <div style="font-size:.88rem;color:var(--muted);margin-top:4px">Academic or non-academic → stream → title → generate guide.</div>
+        <span style="display:block;font-weight:800;color:#1F497D">Start a new project</span>
+        <span style="display:block;font-size:.88rem;color:var(--muted);margin-top:4px">Academic or non-academic → stream → title → generate guide.</span>
       </button>
     </div>`;
   }
@@ -15409,12 +15436,12 @@ function viewProjectWizard(){
     </div>
     <div style="display:grid;gap:12px">
       <button class="card" data-action="proj-kind" data-kind="academic" style="text-align:left;cursor:pointer;border:2px solid #1F497D;background:#eef3f9">
-        <div style="font-weight:800;color:#1F497D">${isStudentMode()?'Academic':'A structured project'}</div>
-        <div style="font-size:.88rem;color:var(--muted);margin-top:4px">Sciences, liberal arts, commerce, engineering — milestones + deadline budget.</div>
+        <span style="display:block;font-weight:800;color:#1F497D">${isStudentMode()?'Academic':'A structured project'}</span>
+        <span style="display:block;font-size:.88rem;color:var(--muted);margin-top:4px">Sciences, liberal arts, commerce, engineering — milestones + deadline budget.</span>
       </button>
       <button class="card" data-action="proj-kind" data-kind="non_academic" style="text-align:left;cursor:pointer;border:2px solid #2d6a4f;background:#eef8f2">
-        <div style="font-weight:800;color:#2d6a4f">${isStudentMode()?'Non-academic':'Something I am making'}</div>
-        <div style="font-size:.88rem;color:var(--muted);margin-top:4px">Portfolio, side hustle, community, passion — MVP → ship → post-mortem.</div>
+        <span style="display:block;font-weight:800;color:#2d6a4f">${isStudentMode()?'Non-academic':'Something I am making'}</span>
+        <span style="display:block;font-size:.88rem;color:var(--muted);margin-top:4px">Portfolio, side hustle, community, passion — MVP → ship → post-mortem.</span>
       </button>
     </div>`;
   }
@@ -15426,14 +15453,14 @@ function viewProjectWizard(){
     </div>
     <div style="display:grid;gap:12px;grid-template-columns:1fr 1fr">
       <button class="card" data-action="proj-team-mode" data-mode="individual" style="text-align:left;cursor:pointer;border:2px solid var(--line)">
-        <div style="font-size:1.4rem">👤</div>
-        <div style="font-weight:800;margin-top:6px">Individual</div>
-        <div style="font-size:.82rem;color:var(--muted);margin-top:4px">Just me.</div>
+        <span style="display:block;font-size:1.4rem">👤</span>
+        <span style="display:block;font-weight:800;margin-top:6px">Individual</span>
+        <span style="display:block;font-size:.82rem;color:var(--muted);margin-top:4px">Just me.</span>
       </button>
       <button class="card" data-action="proj-team-mode" data-mode="group" style="text-align:left;cursor:pointer;border:2px solid var(--line)">
-        <div style="font-size:1.4rem">👥</div>
-        <div style="font-weight:800;margin-top:6px">Group</div>
-        <div style="font-size:.82rem;color:var(--muted);margin-top:4px">Collaborating with a team.</div>
+        <span style="display:block;font-size:1.4rem">👥</span>
+        <span style="display:block;font-weight:800;margin-top:6px">Group</span>
+        <span style="display:block;font-size:.82rem;color:var(--muted);margin-top:4px">Collaborating with a team.</span>
       </button>
     </div>`;
   }
@@ -15446,9 +15473,9 @@ function viewProjectWizard(){
     <div style="display:grid;gap:10px">${Object.keys(streams).map(k=>{
       const s=streams[k];
       return `<button class="card" data-action="proj-pick-stream" data-stream="${k}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line)">
-        <div style="font-weight:800">${escapeHtml(s.label)}</div>
-        <div style="font-size:.82rem;color:var(--muted);margin-top:4px">${escapeHtml(s.focus||'')}</div>
-        <div style="font-size:.78rem;margin-top:6px"><b>Often ends with:</b> ${escapeHtml(s.deliverables||'')}</div>
+        <span style="display:block;font-weight:800">${escapeHtml(s.label)}</span>
+        <span style="display:block;font-size:.82rem;color:var(--muted);margin-top:4px">${escapeHtml(s.focus||'')}</span>
+        <span style="display:block;font-size:.78rem;margin-top:6px"><b>Often ends with:</b> ${escapeHtml(s.deliverables||'')}</span>
       </button>`;
     }).join('')}</div>`;
   }
@@ -15584,8 +15611,8 @@ function viewProjectDetail(p){
     <div style="font-size:.72rem;font-weight:800;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Phases</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       ${phases.map((phx,i)=>`<button type="button" class="btn ${i===pi?'':'ghost'} sm" data-action="proj-phase" data-idx="${i}" style="flex:1;min-width:72px;text-align:center;padding:8px 6px">
-        <div style="font-size:.68rem;opacity:.8">${i+1}</div>
-        <div style="font-weight:700;font-size:.78rem">${escapeHtml(phx.short||phx.title)}</div>
+        <span style="display:block;font-size:.68rem;opacity:.8">${i+1}</span>
+        <span style="display:block;font-weight:700;font-size:.78rem">${escapeHtml(phx.short||phx.title)}</span>
       </button>`).join('')}
     </div>
   </div>
@@ -15605,8 +15632,8 @@ function viewProjectDetail(p){
       return `<div style="padding:12px 0;border-bottom:1px solid var(--line)">
         <div style="display:flex;gap:10px;align-items:flex-start">
           <button type="button" class="btn ghost sm" data-action="proj-item-open" data-phase="${pi}" data-idx="${ii}" style="flex:1;text-align:left;padding:8px 10px;border:1px solid var(--line);background:${isOpen?'var(--pine-soft)':'var(--card)'}">
-            <div style="font-weight:700;font-size:.95rem;line-height:1.35">${escapeHtml(it.text)}</div>
-            <div style="font-size:.75rem;color:var(--muted);margin-top:4px">${statusLabel}${hasNote && !isOpen ? ' · ' + escapeHtml(String(it.note).slice(0,60))+(String(it.note).length>60?'…':'') : ''}</div>
+            <span style="display:block;font-weight:700;font-size:.95rem;line-height:1.35">${escapeHtml(it.text)}</span>
+            <span style="display:block;font-size:.75rem;color:var(--muted);margin-top:4px">${statusLabel}${hasNote && !isOpen ? ' · ' + escapeHtml(String(it.note).slice(0,60))+(String(it.note).length>60?'…':'') : ''}</span>
           </button>
         </div>
         ${isOpen?`<div style="margin-top:10px;padding:12px;background:var(--bg);border-radius:12px;border:1px solid var(--line)">
@@ -18253,10 +18280,12 @@ function wireView(){
       persistRender();
     });
 
-    else if(action==='settings-toggle') el.addEventListener('click', ()=>{
+    else if(action==='settings-toggle') el.addEventListener('click', (ev)=>{
+      try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
       settingsSectionToggle(el.dataset.key||'');
     });
-    else if(action==='study-tool-toggle') el.addEventListener('click', ()=>{
+    else if(action==='study-tool-toggle') el.addEventListener('click', (ev)=>{
+      try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
       if(!state.studyToolOpen) state.studyToolOpen={};
       const i=String(el.dataset.idx);
       state.studyToolOpen[i]=!state.studyToolOpen[i];
@@ -18266,23 +18295,27 @@ function wireView(){
     else if(action==='bd-pick') el.addEventListener('click', (ev)=>{ try{ev.preventDefault();ev.stopPropagation();}catch(e){} const k=el.getAttribute('data-key')||el.dataset.key; if(k) bdSelectTemplate(k); });
     else if(action==='bd-back-pick') el.addEventListener('click', ()=>{ if(!state.bodyDouble) state.bodyDouble={}; state.bodyDouble.stage='pick'; state.bodyDouble.templateKey=null; persistRender(); });
     else if(action==='tasks-panel') el.addEventListener('click', (ev)=>{ try{ev.preventDefault();ev.stopPropagation();}catch(e){} const pan=el.getAttribute('data-panel')||el.dataset.panel||'open'; tasksPanelSwitch(pan); });
-    else if(action==='home-toggle') el.addEventListener('click', ()=>{
-      homeSectionToggle(el.dataset.key||'');
+    else if(action==='home-toggle') el.addEventListener('click', (ev)=>{
+      try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
+      homeSectionToggle(el.getAttribute('data-key')||el.dataset.key||'');
     });
-    else if(action==='help-sec') el.addEventListener('click', ()=>{
+    else if(action==='help-sec') el.addEventListener('click', (ev)=>{
+      try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
       if(!state.helpOpen) state.helpOpen={};
       const k=el.dataset.key||'';
       state.helpOpen[k]=!state.helpOpen[k];
       persistRender();
     });
-    else if(action==='proj-list-toggle') el.addEventListener('click', ()=>{
+    else if(action==='proj-list-toggle') el.addEventListener('click', (ev)=>{
+      try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
       const which=el.dataset.which;
       if(which==='open') state.projectsListOpen = !(state.projectsListOpen !== false);
       else state.projectsListClosed = !state.projectsListClosed;
       try{saveState();}catch(e){}
       persistRender();
     });
-    else if(action==='proj-list-expand') el.addEventListener('click', ()=>{
+    else if(action==='proj-list-expand') el.addEventListener('click', (ev)=>{
+      try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
       const id=el.getAttribute('data-id')||el.dataset.id;
       state.projectListExpandId = (String(state.projectListExpandId)===String(id)) ? null : id;
       persistRender();
@@ -18322,14 +18355,16 @@ function wireView(){
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
     else if(action==='ex-edit') el.addEventListener('click', ()=>{ beginExerciseEdit(el.dataset.id); });
     else if(action==='ex-clear') el.addEventListener('click', ()=>{ clearExercisePlan('id:'+el.dataset.id); });
-    else if(action==='sched-toggle' || action==='habit-sec') el.addEventListener('click', ()=>{
+    else if(action==='sched-toggle' || action==='habit-sec') el.addEventListener('click', (ev)=>{
+      try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
       const bag = action==='habit-sec' ? 'habitOpen' : 'schedOpen';
       if(!state[bag]) state[bag] = action==='sched-toggle' ? {glance:true} : {today:true};
       const key=el.dataset.key;
       state[bag][key]=!state[bag][key];
       persistRender();
     });
-    else if(action==='nudge-toggle') el.addEventListener('click', ()=>{
+    else if(action==='nudge-toggle') el.addEventListener('click', (ev)=>{
+      try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
       if(!state.nudgeOpen) state.nudgeOpen={create:true, yours:true};
       state.nudgeOpen[el.dataset.key]=!state.nudgeOpen[el.dataset.key];
       persistRender();
