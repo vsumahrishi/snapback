@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="385">
+<meta name="snapback-build" content="390">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -358,7 +358,7 @@ details.setgroup .setgroup-body{margin-top:12px}
 .confetti-piece{position:fixed;width:10px;height:10px;top:-12px;z-index:100;pointer-events:none;border-radius:2px;animation:confetti-fall linear forwards}
 @keyframes confetti-fall{0%{transform:translateY(0) rotate(0deg);opacity:1}100%{transform:translateY(100vh) rotate(720deg);opacity:0}}
 .fab-task{
-  position:fixed; top:calc(6px + env(safe-area-inset-top, 0px)); right:8px; z-index:36;
+  position:fixed; bottom:calc(18px + env(safe-area-inset-bottom, 0px)); right:12px; z-index:36;
   width:72px; height:72px; padding:0; margin:0; border:0; border-radius:0;
   background:transparent; box-shadow:none; cursor:pointer;
   -webkit-appearance:none; appearance:none;
@@ -381,7 +381,7 @@ details.setgroup .setgroup-body{margin-top:12px}
   100%{ transform:translate(0,0) rotate(0deg); }
 }
 @media (prefers-reduced-motion: reduce){ .fab-task.fab-run{ animation:none; } }
-@media (min-width:821px){ .fab-task{ top:14px; right:14px; } }
+@media (min-width:821px){ .fab-task{ bottom:18px; right:18px; } }
 
 .qmini{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:7px 10px;margin-bottom:6px;font-size:.85rem}
 
@@ -2006,6 +2006,7 @@ function nextTrack(){
 }
 function prevTrack(){ playTrack(state.player.currentIndex-1); }
 function removeTrack(id){
+  noteRemoved('playlist', id);
   const idx=state.playlist.findIndex(t=>t.id===id);
   state.playlist=state.playlist.filter(t=>t.id!==id);
   if(idx===state.player.currentIndex) pauseTrack();
@@ -2529,6 +2530,7 @@ function toggleDone(id){
   const t=findTask(id); if(!t) return;
   const wasDone=t.done;
   t.done=!t.done;
+  t.doneAt=Date.now();
   if(t.done && !wasDone){
     state.stats.tasksCompletedTotal=(state.stats.tasksCompletedTotal||0)+1;
     t.completedDate=todayStr();
@@ -2540,12 +2542,24 @@ function toggleDone(id){
   }
   persistRender();
 }
+function noteRemoved(bag, id){
+  if(id==null || id==='') return;
+  if(!state.removed || typeof state.removed!=='object' || Array.isArray(state.removed)) state.removed={};
+  if(!state.removed[bag] || typeof state.removed[bag]!=='object') state.removed[bag]={};
+  state.removed[bag][String(id)]=Date.now();
+}
+function noteRestored(bag, id){
+  if(id==null || !state.removed || !state.removed[bag]) return;
+  delete state.removed[bag][String(id)];
+}
 function deleteTask(id){
   const item=state.tasks.find(t=>t.id===id);
   if(item && item.exerciseId){
+    noteRemoved('exercisePlan', item.exerciseId);
     state.exercisePlan=(state.exercisePlan||[]).filter(function(r){ return String(r.id)!==String(item.exerciseId); });
   }
   if(item) pushUndo({type:'delete-task', item:JSON.parse(JSON.stringify(item)), label:'Task deleted — Undo'});
+  noteRemoved('tasks', id);
   state.tasks=state.tasks.filter(t=>t.id!==id);
   if(state.timer.activeTaskId===id) state.timer.activeTaskId=null;
   persistRender();
@@ -2937,7 +2951,9 @@ function setNonNegotiable(){
 function toggleNonNegotiable(){
   const rec=state.nonNegotiable[todayStr()];
   if(!rec) return;
-  rec.done=!rec.done; persistRender();
+  rec.done=!rec.done;
+  rec.doneAt=Date.now();
+  persistRender();
 }
 function clearNonNegotiable(){ delete state.nonNegotiable[todayStr()]; persistRender(); }
 
@@ -3132,15 +3148,15 @@ function performUndo(){
   const u=(state.undoStack||[]).shift();
   state.undoBanner=null;
   if(!u) return;
-  if(u.type==='delete-class' && u.item) state.classes.push(u.item);
-  else if(u.type==='delete-task' && u.item) state.tasks.unshift(u.item);
-  else if(u.type==='delete-block' && u.item) state.studyBlocks.push(u.item);
-  else if(u.type==='delete-reminder' && u.item) state.customReminders.push(u.item);
-  else if(u.type==='delete-habit' && u.item) state.habits.push(u.item);
-  else if(u.type==='delete-money' && u.item) state.money.push(u.item);
-  else if(u.type==='add-class' && u.id!=null) state.classes=state.classes.filter(c=>c.id!==u.id);
-  else if(u.type==='add-block' && u.id!=null) state.studyBlocks=state.studyBlocks.filter(b=>b.id!==u.id);
-  else if(u.type==='add-task' && u.id!=null) state.tasks=state.tasks.filter(t=>t.id!==u.id);
+  if(u.type==='delete-class' && u.item){ noteRestored('classes', u.item.id); state.classes.push(u.item); }
+  else if(u.type==='delete-task' && u.item){ noteRestored('tasks', u.item.id); state.tasks.unshift(u.item); }
+  else if(u.type==='delete-block' && u.item){ noteRestored('studyBlocks', u.item.id); state.studyBlocks.push(u.item); }
+  else if(u.type==='delete-reminder' && u.item){ noteRestored('customReminders', u.item.id); state.customReminders.push(u.item); }
+  else if(u.type==='delete-habit' && u.item){ noteRestored('habits', u.item.id); state.habits.push(u.item); }
+  else if(u.type==='delete-money' && u.item){ noteRestored('money', u.item.id); state.money.push(u.item); }
+  else if(u.type==='add-class' && u.id!=null){ noteRemoved('classes', u.id); state.classes=state.classes.filter(c=>c.id!==u.id); }
+  else if(u.type==='add-block' && u.id!=null){ noteRemoved('studyBlocks', u.id); state.studyBlocks=state.studyBlocks.filter(b=>b.id!==u.id); }
+  else if(u.type==='add-task' && u.id!=null){ noteRemoved('tasks', u.id); state.tasks=state.tasks.filter(t=>t.id!==u.id); }
   else if(u.type==='bulk-add-classes' && u.items){
     const ids=new Set(u.items.map(i=>i.id));
     state.classes=state.classes.filter(c=>!ids.has(c.id));
@@ -3192,6 +3208,7 @@ function addClass(){
 function deleteClass(id){
   const item=state.classes.find(c=>c.id===id);
   if(item) pushUndo({type:'delete-class', item:JSON.parse(JSON.stringify(item)), label:'Class removed — Undo'});
+  noteRemoved('classes', id);
   state.classes=state.classes.filter(c=>c.id!==id);
   persistRender();
 }
@@ -3419,6 +3436,7 @@ function deleteStudyBlock(id){
     removeTasksForSchedule({id:item.id, title:item.label, date:item.date, start:item.start}, 'one');
     pushUndo({type:'delete-block', item:JSON.parse(JSON.stringify(item)), label:'Appointment removed — Undo'});
   }
+  noteRemoved('studyBlocks', id);
   state.studyBlocks=state.studyBlocks.filter(b=>b.id!==id);
   persistRender();
 }
@@ -3579,6 +3597,7 @@ function customHabitAdminHtml(){
   return html;
 }
 function deleteHabit(id){
+  noteRemoved('habits', id);
   state.habits=state.habits.filter(h=>h.id!==id);
   persistRender();
 }
@@ -3685,6 +3704,7 @@ function newMindmap(){
 function openMindmap(id){ state.currentMindmapId=id; persistRender(); }
 function backToMindmapList(){ state.currentMindmapId=null; persistRender(); }
 function deleteMindmap(id){
+  noteRemoved('mindmaps', id);
   state.mindmaps=state.mindmaps.filter(m=>m.id!==id);
   if(state.currentMindmapId===id) state.currentMindmapId=null;
   persistRender();
@@ -3747,6 +3767,7 @@ function addMoney(){
 function deleteMoney(id){
   const item=state.money.find(x=>x.id===id);
   if(item) pushUndo({type:'delete-money', item:JSON.parse(JSON.stringify(item)), label:'Money entry removed — Undo'});
+  noteRemoved('money', id);
   state.money=state.money.filter(x=>x.id!==id);
   persistRender();
 }
@@ -4021,12 +4042,19 @@ function checkHabitNudges(now){
   };
   const times=habitTimes();
   if(state.habitNudges.water!==false){
-    ['water1','water2'].forEach(function(slot, idx){
-      const hh=habitClock(slot);
-      if(!hh) return;
-      const t=hm(hh);
-      if(now>=t && now<t+40*60*1000) once('water:'+today+':'+idx, 'Did you Hydrate?', {kind:'yesno', log:'water', date:today, text:'Did you Hydrate?'});
-    });
+    if(waterAnswered(today)){
+      ['water1','water2'].forEach(function(slot, idx){
+        const k='water:'+today+':'+idx;
+        if(state.notifiedKeys.indexOf(k)<0){ state.notifiedKeys.push(k); changed=true; }
+      });
+    } else {
+      ['water1','water2'].forEach(function(slot, idx){
+        const hh=habitClock(slot);
+        if(!hh) return;
+        const t=hm(hh);
+        if(now>=t && now<t+40*60*1000) once('water:'+today+':'+idx, 'Did you Hydrate?', {kind:'yesno', log:'water', date:today, text:'Did you Hydrate?'});
+      });
+    }
   }
   if(state.habitNudges.exercise!==false){
     (state.exercisePlan||[]).filter(function(r){ return exerciseOccursOn(r, today); }).forEach(function(r){
@@ -4121,7 +4149,7 @@ function withAnchor(slot, text){
   if(c.indexOf(text)>=0) return c;
   return c.replace(/[.\s]+$/,'')+'. '+text;
 }
-function markHabitSaved(line){ state.habitSavedLine=line; }
+function markHabitSaved(line){}
 function answerHabitAsk(which){
   const a=state.habitAsk; if(!a) return;
   ensureHabitPlans();
@@ -4487,6 +4515,7 @@ function prunePastNudges(){
   if(!Array.isArray(state.nudges)) return false;
   const next=state.nudges.filter(function(n){ return !nudgeIsPast(n); });
   if(next.length===state.nudges.length) return false;
+  state.nudges.forEach(function(n){ if(nudgeIsPast(n)) noteRemoved('nudges', n.id); });
   state.nudges=next;
   if(state.wakeAlarm && nudgeIsPast(state.wakeAlarm)){
     state.wakeAlarm=Object.assign({}, state.wakeAlarm, {enabled:false});
@@ -4600,10 +4629,22 @@ function atClock(dateStr, hhmm){
   d.setHours(parseInt(p[0],10)||0, parseInt(p[1],10)||0, 0, 0);
   return d;
 }
+function waterHabitRow(){
+  return (state.habits||[]).find(function(h){ return h && (h.id===4 || /hydrat|water/i.test(h.name||'')); })||null;
+}
+function waterAnswered(dateStr){
+  const h=waterHabitRow();
+  if(!h || !dateStr) return false;
+  const day=state.habitLog && state.habitLog[dateStr];
+  if(!day) return false;
+  const v=day[h.id]!=null ? day[h.id] : day[String(h.id)];
+  return v===true || v===false;
+}
 function habitAnswered(kind, dateStr, id){
   if(kind==='sleep') return !!(state.sleepLog && state.sleepLog[dateStr]!=null && String(state.sleepLog[dateStr])!=='');
   if(kind==='meal') return !!(state.mealLog && (state.mealLog[dateStr]===true || state.mealLog[dateStr]===false));
   if(kind==='screen') return !!(state.screenLog && state.screenLog[dateStr]!=null && String(state.screenLog[dateStr])!=='');
+  if(kind==='water') return waterAnswered(dateStr);
   if(kind==='custom'){
     const v=state.habitLog && state.habitLog[dateStr] && state.habitLog[dateStr][id];
     return v===true || v===false;
@@ -4637,7 +4678,7 @@ function habitPopupItems(){
     if(state.habitNudges.meal!==false && habitClock('meal') && !habitAnswered('meal', dateStr)){
       pushItem('meal:'+dateStr, atClock(dateStr, habitClock('meal')), withAnchor('meal','Did you eat a real meal today?'), {kind:'habit', mode:'ask', askKind:'yesno', log:'meal', hkey:'meal:'+dateStr, date:dateStr, text:withAnchor('meal','Did you eat a real meal today?')});
     }
-    if(state.habitNudges.water!==false){
+    if(state.habitNudges.water!==false && !waterAnswered(dateStr)){
       ['water1','water2'].forEach(function(slot, idx){
         const hh=habitClock(slot);
         if(!hh) return;
@@ -4915,6 +4956,31 @@ async function drainNoteEdits(){
   try{ rebuildAllReminderSounds(); }catch(e){}
   try{ persistRender(); }catch(e){}
 }
+function dismissNativeHabit(key){
+  if(!key || typeof isNativeApp!=='function' || !isNativeApp()) return;
+  try{ cancelHabitNotif(key); }catch(e){}
+  try{
+    const plug=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+    if(plug && plug.dismissHabitNote) plug.dismissHabitNote({key:String(key)}).catch(function(){});
+  }catch(e){}
+}
+function dismissAnsweredHabitNotes(){
+  const today=todayStr();
+  if(waterAnswered(today)){
+    dismissNativeHabit('water:'+today+':0');
+    dismissNativeHabit('water:'+today+':1');
+  }
+  if(habitAnswered('meal', today)) dismissNativeHabit('meal:'+today);
+  if(habitAnswered('sleep', today)) dismissNativeHabit('sleep:'+today);
+  if(habitAnswered('screen', today)) dismissNativeHabit('screen:'+today);
+  if(habitAnswered('mood', today)) dismissNativeHabit('mood:'+today);
+  (state.exercisePlan||[]).forEach(function(r){
+    if(habitAnswered('exercise', today, r.id)) dismissNativeHabit('expost:'+today+':'+r.id);
+  });
+  (state.habits||[]).forEach(function(h){
+    if(typeof isCustomHabit==='function' && isCustomHabit(h) && habitAnswered('custom', today, h.id)) dismissNativeHabit('habitn:'+h.id+':'+today);
+  });
+}
 function openHabitFromNotif(extra){
   if(!extra) return;
   const key=extra.hkey||'';
@@ -4928,10 +4994,8 @@ function openHabitFromNotif(extra){
     try{ saveState(); }catch(e){}
     return;
   }
-  if(alreadyAsked(key)) return;
-  if((extra.askKind==='mood' || extra.log==='mood') && habitAnswered('mood', extra.date)) return;
-  if((extra.askKind==='sleep' || extra.log==='sleep') && habitAnswered('sleep', extra.date, extra.hid)) return;
-  if(extra.log && extra.log!=='water' && habitAnswered(extra.log, extra.date, extra.hid)) return;
+  if(alreadyAsked(key)) { dismissNativeHabit(key); return; }
+  if(extra.log && habitAnswered(extra.log, extra.date, extra.hid)) { dismissNativeHabit(key); return; }
   try{ cancelHabitNotif(key); }catch(e){}
   if(!state.notifiedKeys) state.notifiedKeys=[];
   if(key && state.notifiedKeys.indexOf(key)<0) state.notifiedKeys.push(key);
@@ -5812,10 +5876,7 @@ function topOfMindBanner(){
     <button class="btn ghost sm" data-action="clear-tom">Clear</button>
   </div>`;
 }
-function habitSavedHtml(){
-  if(!state.habitSavedLine) return '';
-  return `<div class="card" role="status" style="display:flex;gap:8px;align-items:center"><span style="flex:1">${escapeHtml(state.habitSavedLine)}</span><button type="button" class="btn ghost sm" data-action="hide-habit-saved" aria-label="Close">×</button></div>`;
-}
+function habitSavedHtml(){ return ''; }
 function startTourPending(){
   if(state.startTour===4) return false;
   if(typeof needsLoginScreen==='function' && needsLoginScreen()) return false;
@@ -6927,6 +6988,7 @@ function renderModal(){
       document.getElementById('tmDone').onclick=()=>{
         const was=!!t.done;
         t.done=!t.done;
+        t.doneAt=Date.now();
         if(t.done && !was){
           t.completedDate=todayStr();
           try{ cancelTaskNotifications(t.id); }catch(e){}
@@ -7512,11 +7574,164 @@ function lastSyncedLine(){
     return 'Last synced '+new Date(t).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
   }catch(e){ return 'Last synced'; }
 }
-function cloudDocRef(){
-  return userDocRef() || legacySyncDocRef();
+function syncSkipKeys(){
+  return {
+    view:1, filter:1, listMode:1, calMode:1, calRef:1, moneyMonth:1, selectedDay:1,
+    cheeseTaskId:1, currentMindmapId:1, player:1, timer:1, timeTrack:1,
+    breathingOpen:1, breathingSecondsLeft:1, focusGuardNudgeSeconds:1,
+    quoteModalOpen:1, quoteIndex:1, pendingConfirm:1,
+    appMsg:1, appPrompt:1, habitAsk:1, reminderModalOpen:1, reminderBanner:1, quickAddOpen:1,
+    undoStack:1, undoBanner:1, navHistory:1, tour:1,
+    startHint:1, startPickHabit:1, startStep:1,
+    editingTaskId:1, taskMenuId:1, taskMenuOpen:1, dateEditId:1, dateEditOpen:1,
+    projectId:1, projectWizard:1, projectEditKey:1, projectListExpandId:1, projectTeamAdding:1, projectTeamEditIdx:1, projectsListOpen:1, projectsListClosed:1,
+    nudgeEditId:1, nudgeEditing:1, nudgeFormDraft:1, nudgePreview:1, nudgeOpen:1,
+    habitAddPopup:1, habitVoice:1, habitOpen:1, habitSavedLine:1, exForm:1, exSavePopup:1,
+    homeOpen:1, settingsOpen:1, schedOpen:1, helpOpen:1, studyToolOpen:1, tasksPanel:1,
+    workoutView:1, workoutEdit:1, workoutDraft:1, workoutAsk:1, workoutFocusOpen:1, workoutTimeOpen:1, workoutAnchor:1,
+    calDraft:1, calFind:1, calLook:1, calNote:1, calTwins:1, calClashes:1, dayPop:1,
+    conflictIdx:1, conflictModalOpen:1, conflictPass:1, conflictQueue:1,
+    ampmPrompt:1, ampmPromptOpen:1, jigPromptOpen:1, focusFinish:1, focusPodAsk:1, workSession:1, seriesAsk:1,
+    pickStill:1, pickTimer:1, pickTom:1, dueWizard:1, apptWizard:1, wizard:1, askDateOpen:1,
+    biteGuide:1, biteLocked:1, biteOtherTitle:1, wakeMath:1, wakeMathOpen:1,
+    showAddTask:1, taskSearch:1, iosHintHidden:1, lastNotifyMsg:1, lastTestSoundMsg:1, fabDays:1,
+    contextFilter:1, completedFrom:1, completedTo:1, progressFrom:1, progressTo:1,
+    oneAtATimeIndex:1, jarCurrent:1, jarQueue:1, spinResult:1,
+    spotlightOnlyPlanWeek:1, spotlightPin:1, spotlightSize:1,
+    techHide:1, sneakTomorrow:1, shareShowDetails:1, icsUndo:1, deleteSeriesPrompt:1, scheduleNotice:1,
+    returnChallengeId:1, challengeId:1, pendingEis:1, pendingStrategyTaskId:1, plateTaskId:1, techniqueTaskId:1,
+    startTaskId:1, startToolOpen:1, startToolTaskId:1, backburner:1, statsRangeStart:1, statsRangeEnd:1
+  };
 }
 function cloudSyncKeys(){
-  return ['tasks','classes','studyBlocks','externalBusy','habits','habitLog','sleepLog','mealLog','exerciseLog','exerciseHistory','screenLog','habitTimes','notifiedKeys','journal','nonNegotiable','rule135','money','customReminders','settings','stats','profile','wakeAlarm','nudges','projects','exercisePlan','ifThen','energyFocus','screenPlan','habitNudges','semester','bodyDouble','calTwinSkip'];
+  const skip=syncSkipKeys();
+  const seen={};
+  const keys=[];
+  function add(k){
+    if(!k || seen[k] || skip[k] || String(k).charAt(0)==='_') return;
+    if(k==='updatedAt' || k==='syncEpoch' || k==='ownerUid' || k==='ownerEmail') return;
+    seen[k]=1;
+    keys.push(k);
+  }
+  try{ Object.keys(state||{}).forEach(add); }catch(e){}
+  try{ if(argumentsRemote) Object.keys(argumentsRemote).forEach(add); }catch(e){}
+  return keys;
+}
+function mergeRemovedMaps(a, b){
+  const out={};
+  function take(src){
+    if(!src || typeof src!=='object') return;
+    Object.keys(src).forEach(function(bag){
+      const box=src[bag];
+      if(!box || typeof box!=='object') return;
+      if(!out[bag]) out[bag]={};
+      Object.keys(box).forEach(function(id){
+        const t=Number(box[id])||0;
+        if(!out[bag][id] || t>out[bag][id]) out[bag][id]=t;
+      });
+    });
+  }
+  take(a); take(b);
+  return out;
+}
+function mergeSharedRecords(remoteNewer){
+  function plain(v){ return !!v && typeof v==='object' && !Array.isArray(v); }
+  function filled(v){ return v!=null && String(v)!==''; }
+  function leaf(local, remote){
+    const lf=filled(local), rf=filled(remote);
+    if(lf && rf) return remoteNewer ? remote : local;
+    if(rf) return remote;
+    if(lf) return local;
+    return remoteNewer ? remote : local;
+  }
+  function any(local, remote){
+    const la=Array.isArray(local), ra=Array.isArray(remote);
+    if(la || ra){
+      const L=la?local:[];
+      const R=ra?remote:[];
+      const prim=function(arr){ return arr.every(function(x){ return x==null || typeof x!=='object'; }); };
+      if(prim(L) && prim(R)) return remoteNewer ? (R.length?R:L) : (L.length?L:R);
+      const hasId=L.concat(R).some(function(x){ return x && x.id!=null; });
+      if(!hasId){
+        const n=Math.max(L.length, R.length);
+        const out=[];
+        for(let i=0;i<n;i++) out.push(any(L[i], R[i]));
+        return out;
+      }
+      const map={};
+      function put(item){
+        if(!item || item.id==null) return;
+        const id=String(item.id);
+        if(!map[id]) map[id]=item;
+        else map[id]=any(map[id], item);
+      }
+      L.forEach(put); R.forEach(put);
+      return Object.keys(map).map(function(k){ return map[k]; });
+    }
+    if(plain(local) || plain(remote)){
+      if(!plain(local)) return remote;
+      if(!plain(remote)) return local;
+      const keys={};
+      Object.keys(local).forEach(function(k){ keys[k]=1; });
+      Object.keys(remote).forEach(function(k){ keys[k]=1; });
+      const out={};
+      Object.keys(keys).forEach(function(k){
+        if(k==='done') return;
+        out[k]=any(local[k], remote[k]);
+      });
+      if(keys.done){
+        const lAt=Number(local.doneAt)||0, rAt=Number(remote.doneAt)||0;
+        if(lAt || rAt) out.done = rAt>=lAt ? !!remote.done : !!local.done;
+        else out.done = !!(local.done || remote.done);
+        if(lAt || rAt) out.doneAt=Math.max(lAt, rAt);
+      }
+      return out;
+    }
+    return leaf(local, remote);
+  }
+  state.removed=mergeRemovedMaps(state.removed, argumentsRemote && argumentsRemote.removed);
+  cloudSyncKeys().forEach(function(k){
+    if(k==='removed' || k==='notifiedKeys' || k==='exerciseHistory') return;
+    const remote=argumentsRemote ? argumentsRemote[k] : undefined;
+    if(remote===undefined && state[k]===undefined) return;
+    let merged=any(state[k], remote);
+    if(Array.isArray(merged)){
+      const tombs=(state.removed && state.removed[k])||{};
+      merged=merged.filter(function(item){
+        if(!item || item.id==null) return true;
+        return !tombs[String(item.id)];
+      });
+    }
+    state[k]=merged;
+  });
+  const histMap={};
+  function addHist(e, prefer){
+    if(!e) return;
+    const key=String(e.date||'')+'|'+String(e.name||'');
+    const prev=histMap[key];
+    if(!prev) histMap[key]=e;
+    else if(prefer) histMap[key]=e;
+  }
+  (Array.isArray(state.exerciseHistory)?state.exerciseHistory:[]).forEach(function(e){ addHist(e, false); });
+  (Array.isArray(argumentsRemote.exerciseHistory)?argumentsRemote.exerciseHistory:[]).forEach(function(e){ addHist(e, remoteNewer); });
+  state.exerciseHistory=Object.keys(histMap).map(function(k){ return histMap[k]; });
+  const seen={};
+  state.notifiedKeys=(state.notifiedKeys||[]).concat(argumentsRemote.notifiedKeys||[]).filter(function(k){
+    if(!k || seen[k]) return false;
+    seen[k]=1;
+    return true;
+  });
+  if(state.notifiedKeys.length>500) state.notifiedKeys=state.notifiedKeys.slice(-300);
+  const statLocal=argumentsStatLocal||{};
+  const statRemote=argumentsRemote.stats||{};
+  if(!state.stats || typeof state.stats!=='object') state.stats={};
+  state.stats.tasksCompletedTotal=Math.max(Number(statLocal.tasksCompletedTotal)||0, Number(statRemote.tasksCompletedTotal)||0, Number(state.stats.tasksCompletedTotal)||0);
+  state.stats.streakDays=Math.max(Number(statLocal.streakDays)||0, Number(statRemote.streakDays)||0, Number(state.stats.streakDays)||0);
+}
+let argumentsRemote=null;
+let argumentsStatLocal=null;
+function cloudDocRef(){
+  return userDocRef() || legacySyncDocRef();
 }
 function syncPayloadFromState(){
   const keys = cloudSyncKeys();
@@ -7536,6 +7751,13 @@ function localHasSharedData(){
     || (Array.isArray(state.studyBlocks) && state.studyBlocks.length)
     || (Array.isArray(state.tasks) && state.tasks.length)
     || (Array.isArray(state.externalBusy) && state.externalBusy.length);
+}
+function stableJson(v){
+  if(Array.isArray(v)) return '['+v.map(stableJson).join(',')+']';
+  if(v && typeof v==='object'){
+    return '{'+Object.keys(v).sort().map(function(k){ return JSON.stringify(k)+':'+stableJson(v[k]); }).join(',')+'}';
+  }
+  return JSON.stringify(v);
 }
 function syncBodyJson(){
   const payload = {};
@@ -7559,44 +7781,17 @@ function applyCloudPayload(payload){
       return;
     }
   }
-  if(_cloudReady && _localRev > remoteAt + 1500){
-    try{ pushCloudSync(); }catch(e){}
-    return;
-  }
   _syncApplying = true;
-  const keepLogs=['sleepLog','mealLog','screenLog','habitLog','exerciseLog'];
-  const beforeLogs={};
-  keepLogs.forEach(function(k){ beforeLogs[k]=state[k]; });
-  const beforeAsked=(state.notifiedKeys||[]).slice();
-  const keys = cloudSyncKeys();
-  keys.forEach(function(k){
-    if(payload[k]===undefined) return;
-    state[k] = payload[k];
-  });
-  function filledAnswer(v){ return v!=null && String(v)!==''; }
-  function mergeLogs(local, remote){
-    const out=Object.assign({}, remote||{});
-    Object.keys(local||{}).forEach(function(k){
-      const a=local[k];
-      const b=out[k];
-      if(a && typeof a==='object' && !Array.isArray(a)){
-        out[k]=mergeLogs(a, (b && typeof b==='object' && !Array.isArray(b)) ? b : {});
-        return;
-      }
-      if(filledAnswer(a) && !filledAnswer(b)) out[k]=a;
-    });
-    return out;
-  }
-  keepLogs.forEach(function(k){ state[k]=mergeLogs(beforeLogs[k], state[k]); });
-  const seenAsk={};
-  state.notifiedKeys=(beforeAsked.concat(state.notifiedKeys||[])).filter(function(k){
-    if(!k || seenAsk[k]) return false;
-    seenAsk[k]=1;
-    return true;
-  });
+  const beforeBody=syncBodyJson();
+  argumentsStatLocal=state.stats;
+  argumentsRemote=payload;
+  const remoteNewer = remoteAt + 1500 >= (_localRev||0);
+  try{ mergeSharedRecords(remoteNewer); }catch(e){ console.warn('merge', e); }
+  argumentsRemote=null;
+  argumentsStatLocal=null;
   if(state.habitAsk && typeof habitAnswered==='function'){
     const a=state.habitAsk;
-    const kind=a.kind==='sleep'?'sleep':(a.log||a.kind||'');
+    const kind=a.log||a.kind||'';
     if(habitAnswered(kind, a.date, a.id)) state.habitAsk=null;
   }
   state.calTwins = [];
@@ -7606,12 +7801,17 @@ function applyCloudPayload(payload){
   saveState();
   _syncApplying = false;
   _cloudReady = true;
-  _cloudRev = remoteAt || Date.now();
+  _cloudRev = Math.max(remoteAt||0, Date.now());
   _localRev = _cloudRev;
   _lastSyncedAt = _cloudRev;
   try{ localStorage.setItem('snapback_last_synced', String(_lastSyncedAt)); }catch(e){}
-  _lastSyncJson = syncBodyJson();
-  if(pruned){
+  const afterBody=syncBodyJson();
+  _lastSyncJson = afterBody;
+  const remoteShared={};
+  cloudSyncKeys().forEach(function(k){ if(payload[k]!==undefined) remoteShared[k]=payload[k]; });
+  const localShared={};
+  cloudSyncKeys().forEach(function(k){ if(state[k]!==undefined) localShared[k]=state[k]; });
+  if(pruned || stableJson(localShared)!==stableJson(remoteShared)){
     _lastSyncJson = '';
     _localRev = Date.now();
     try{ pushCloudSync(); }catch(e){}
@@ -7619,6 +7819,8 @@ function applyCloudPayload(payload){
   try{ nextWakeDate(); }catch(e){}
   render();
   try{ scheduleWakeAlarms(); }catch(e){}
+  try{ dismissAnsweredHabitNotes(); }catch(e){}
+  try{ scheduleHabitPopupsSoon(); }catch(e){}
   try{
     if(native){
       scheduleNativeWakeAlarms();
@@ -10273,6 +10475,42 @@ function taskCard(t){
 function openTasksForModes(){
   return (state.tasks||[]).filter(t=>!t.done && !t.exerciseId);
 }
+function countShownOpenTasks(){
+  let list=(state.tasks||[]).filter(function(t){ return t && !t.done && !t.backburner && !t.exerciseId; });
+  const cf=state.contextFilter||'all';
+  if(cf==='school') list=list.filter(function(t){ return (t.context||'school')!=='personal'; });
+  if(cf==='personal') list=list.filter(function(t){ return (t.context||'school')==='personal'; });
+  return list.length;
+}
+function completedTaskList(){
+  let list=(state.tasks||[]).filter(function(t){ return t && t.done; });
+  const from=state.completedFrom||'';
+  const to=state.completedTo||'';
+  if(from || to){
+    const ranged=list.filter(function(t){
+      const d=String(t.completedDate||t.date||'');
+      if(!d) return true;
+      if(from && d<from) return false;
+      if(to && d>to) return false;
+      return true;
+    });
+    if(ranged.length) list=ranged;
+  }
+  const q=(state.tasksPanel==='done' ? String(state.taskSearch||'') : '').trim().toLowerCase();
+  if(q){
+    list=list.filter(function(t){
+      const hay=((t.title||'')+' '+(t.notes||'')+' '+(t.subject||'')).toLowerCase();
+      return hay.indexOf(q)>=0;
+    });
+  }
+  list.sort(function(a,b){
+    const da=String(a.completedDate||a.date||'');
+    const db=String(b.completedDate||b.date||'');
+    if(da!==db) return da<db?1:-1;
+    return (b.created||0)-(a.created||0);
+  });
+  return list;
+}
 function tasksViewToolbar(){
   const mode=state.listMode||'all';
   const labels={all:'Full list',spotlight:'Spotlight',batch:'Small Batch',wall:'Tile Wall',one:'One at a time',jar:'Grab Bag',pool:'Pop Pool',spin:'Spin Pick'};
@@ -10344,6 +10582,7 @@ function viewTasks(){
   const cf = state.contextFilter || 'all';
   if(cf==='school') list=list.filter(t=>(t.context||'school')!=='personal');
   if(cf==='personal') list=list.filter(t=>(t.context||'school')==='personal');
+  if(f==='done') list=completedTaskList();
   if(f!=='done'){
     list.sort(function(a,b){
       const da=a.date||'9999-99-99';
@@ -10516,7 +10755,9 @@ function viewTasks(){
   }
 
   const items = list.length ? list.map(taskCard).join('') : (f==='done'
-    ? `<div class="empty">No completed tasks yet. Mark a task done (checkbox or More → Mark as done), then open Show completed tasks again.</div>`
+    ? ((state.tasks||[]).some(function(t){ return t && t.done; })
+      ? `<div class="empty">No completed tasks match this search or date range.</div>`
+      : `<div class="empty">No completed tasks yet. Mark a task done, then open Completed again.</div>`)
     : `<div class="empty">Nothing here. Add a task above, or pick a different filter.</div>`);
   if(mode === 'one'){
     const open = list.filter(t=>!t.done);
@@ -10655,13 +10896,13 @@ function viewTasks(){
 
   <div class="card" style="padding:0;overflow:hidden;margin-bottom:8px">
     <button type="button" class="btn ghost" data-action="tasks-panel" data-panel="open" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
-      <span style="font-weight:800">Open (${(state.tasks||[]).filter(t=>!t.done&&!t.backburner).length})</span>
+      <span style="font-weight:800">Open (${countShownOpenTasks()})</span>
       <span style="color:var(--muted)">${tasksPanelOpen('open')?'▾':'▸'}</span>
     </button>
   </div>
   <div class="card" style="padding:0;overflow:hidden;margin-bottom:8px">
     <button type="button" class="btn ghost" data-action="tasks-panel" data-panel="done" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
-      <span style="font-weight:800">Completed (${(state.tasks||[]).filter(t=>t.done).length})</span>
+      <span style="font-weight:800">Completed (${completedTaskList().length})</span>
       <span style="color:var(--muted)">${tasksPanelOpen('done')?'▾':'▸'}</span>
     </button>
   </div>
@@ -16011,6 +16252,7 @@ function fileJournalEntry(id, bucket){
   const copy = {...item, filed:true, bucket, filedAt:todayStr()};
   state.journalFiled[bucket]=state.journalFiled[bucket]||[];
   state.journalFiled[bucket].unshift(copy);
+  noteRemoved('journal', id);
   state.journal = (state.journal||[]).filter(j=>j.id!==id);
   if(bucket==='do'){
     const task={
@@ -17167,7 +17409,7 @@ function viewSettings(){
       <button class="btn sm" id="startTourBtn" type="button">Take a tour</button>
       <button class="btn ghost sm" id="gotoHelpBtn" type="button">Help &amp; FAQ</button>
     </p>
-    <details class="setgroup" id="settingsSeeDetails" open>
+    <details class="setgroup" id="settingsSeeDetails">
       <summary>Personalize your screen</summary>
       <div class="setgroup-body">
         <p style="font-size:.85rem;color:var(--muted);margin:0 0 10px">Hide a page or a block you do not use. Your answers stay. Today and Settings always stay.</p>
@@ -17762,8 +18004,8 @@ function wireView(){
     else if(action==='task-complete') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
       const t=findTask(id); if(!t) return;
-      if(!t.done){ t.done=true; offerCelebration(); }
-      else t.done=false;
+      if(t.done && !wasDone){ t.done=true; t.doneAt=Date.now(); offerCelebration(); }
+      else { t.done=false; t.doneAt=Date.now(); }
       persistRender();
     });
     else if(action==='hard-one') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); setHardOne(id); });
@@ -18131,6 +18373,7 @@ function wireView(){
       const noteEl=document.getElementById('projItemNote');
       if(noteEl) ph.items[idx].note=(noteEl.value||'').trim();
       ph.items[idx].done=!ph.items[idx].done;
+      ph.items[idx].doneAt=Date.now();
       try{saveState();}catch(e){}
       showAppMessage(ph.items[idx].done?'Step done':'Step reopened', ph.items[idx].text||'');
       persistRender();
@@ -18363,10 +18606,24 @@ function wireView(){
     else if(action==='close-project') el.addEventListener('click', ()=>{ state.projectId=null; persistRender(); });
     else if(action==='proj-pick-stream') el.addEventListener('click', ()=>{ if(!state.projectWizard) state.projectWizard={}; state.projectWizard.stream=el.dataset.stream; state.projectWizard.step='details'; persistRender(); });
     else if(action==='proj-step') el.addEventListener('click', ()=>{ const pr=getProject(state.projectId); if(!pr) return; pr.currentStep=Number(el.dataset.idx)||0; try{saveState();}catch(e){} persistRender(); });
-    else if(action==='proj-item') el.addEventListener('change', ()=>{ const pr=getProject(state.projectId); if(!pr) return; const s=pr.steps[Number(el.dataset.step)]; if(s&&s.items[Number(el.dataset.idx)]) s.items[Number(el.dataset.idx)].done=!!el.checked; try{saveState();}catch(e){} persistRender(); });
-    else if(action==='proj-custom-item') el.addEventListener('change', ()=>{ const pr=getProject(state.projectId); if(!pr||!pr.customItems) return; if(pr.customItems[Number(el.dataset.idx)]) pr.customItems[Number(el.dataset.idx)].done=!!el.checked; try{saveState();}catch(e){} persistRender(); });
+    else if(action==='proj-item') el.addEventListener('change', ()=>{ const pr=getProject(state.projectId); if(!pr) return; const s=pr.steps[Number(el.dataset.step)]; if(s&&s.items[Number(el.dataset.idx)]){ s.items[Number(el.dataset.idx)].done=!!el.checked; s.items[Number(el.dataset.idx)].doneAt=Date.now(); } try{saveState();}catch(e){} persistRender(); });
+    else if(action==='proj-custom-item') el.addEventListener('change', ()=>{ const pr=getProject(state.projectId); if(!pr||!pr.customItems) return; if(pr.customItems[Number(el.dataset.idx)]){ pr.customItems[Number(el.dataset.idx)].done=!!el.checked; pr.customItems[Number(el.dataset.idx)].doneAt=Date.now(); } try{saveState();}catch(e){} persistRender(); });
     else if(action==='proj-custom-del') el.addEventListener('click', ()=>{ const pr=getProject(state.projectId); if(!pr||!pr.customItems) return; pr.customItems.splice(Number(el.dataset.idx),1); try{saveState();}catch(e){} persistRender(); });
-    else if(action==='delete-project') el.addEventListener('click', ()=>{ if(!confirm('Delete this project permanently? This cannot be undone.')) return; const id=el.dataset.id; state.projects=(state.projects||[]).filter(x=>x.id!==id); if(state.projectId===id) state.projectId=null; try{saveState();}catch(e){} persistRender(); });
+    else if(action==='delete-project') el.addEventListener('click', (ev)=>{
+      try{ ev.preventDefault(); ev.stopPropagation(); }catch(e){}
+      const id=el.getAttribute('data-id')||el.dataset.id;
+      showAppMessage('Delete this project?', 'This cannot be undone.', {
+        ok:'Delete',
+        cancel:'Cancel',
+        onOk:function(){
+          state.projects=(state.projects||[]).filter(function(x){ return String(x.id)!==String(id); });
+          noteRemoved('projects', id);
+          if(String(state.projectId)===String(id)) state.projectId=null;
+          try{ saveState(); }catch(e){}
+          persistRender();
+        }
+      });
+    });
     else if(action==='nav') el.addEventListener('click', ()=>{ const v=el.getAttribute('data-view')||'today'; state.view=v; try{persistRender();}catch(e){render();} });
     else if(action==='accept-terms') el.addEventListener('click', ()=>{ acceptTermsAndContinue(); });
     else if(action==='go-back') el.addEventListener('click', (e)=>{ e.preventDefault(); goBack(); });
@@ -18398,6 +18655,7 @@ function wireView(){
     });
     else if(action==='nudge-del') el.addEventListener('click', ()=>{
       state.nudges=(state.nudges||[]).filter(function(n){ return String(n.id)!==String(el.dataset.id); });
+      noteRemoved('nudges', el.dataset.id);
       if(String(state.nudgeEditId)===String(el.dataset.id)) state.nudgeEditId='';
       if(!(state.nudges||[]).length){
         if(!state.wakeAlarm) state.wakeAlarm={};
@@ -20303,6 +20561,7 @@ function wireView(){
       const kind=resetKind.value;
       showAppMessage('Delete '+picks.length+' item(s)?', 'From: '+kind, { ok:'Delete', cancel:'Cancel', onOk:()=>{
         const ids=new Set(picks.map(p=>String(p.value)));
+        ids.forEach(function(id){ noteRemoved(kind, id); });
         if(kind==='tasks') state.tasks=(state.tasks||[]).filter(t=>!ids.has(String(t.id)));
         else if(kind==='classes') state.classes=(state.classes||[]).filter(t=>!ids.has(String(t.id)));
         else if(kind==='studyBlocks') state.studyBlocks=(state.studyBlocks||[]).filter(t=>!ids.has(String(t.id)));
