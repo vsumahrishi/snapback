@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="384">
+<meta name="snapback-build" content="385">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -4803,6 +4803,18 @@ function applyNativeHabitReply(r){
   if(r.answer==='yes' || r.answer==='no'){ answerHabitAsk(r.answer); return; }
   if(String(r.answer).indexOf('mood')===0){ answerMoodAsk(Number(String(r.answer).slice(4))||0); }
 }
+async function consumeOpenHabit(){
+  if(typeof isNativeApp!=='function' || !isNativeApp()) return;
+  const plug=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+  if(!plug || !plug.consumeOpenHabit) return;
+  let res=null;
+  try{ res=await plug.consumeOpenHabit(); }catch(e){ return; }
+  if(!res || !res.extra) return;
+  let extra=null;
+  try{ extra=JSON.parse(res.extra); }catch(e){ return; }
+  if(!extra || (!extra.hkey && !extra.text)) return;
+  openHabitFromNotif(extra);
+}
 async function drainHabitReplies(){
   if(typeof isNativeApp!=='function' || !isNativeApp()) return;
   const plug=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
@@ -5220,6 +5232,7 @@ function wireNudgeForegroundHooks(){
   document.addEventListener('visibilitychange', function(){
     if(document.visibilityState==='visible'){
       try{ drainHabitReplies(); }catch(e){}
+      try{ consumeOpenHabit(); }catch(e){}
       try{ drainNoteEdits(); }catch(e){}
       try{ consumePendingNudge(); }catch(e){}
       try{ armPhoneCloudNudgeSync(); }catch(e){}
@@ -5233,7 +5246,7 @@ function wireNudgeForegroundHooks(){
     const App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
     if(App && App.addListener){
       App.addListener('appStateChange', function(s){
-        if(s && s.isActive){ try{ drainHabitReplies(); }catch(e){} try{ drainNoteEdits(); }catch(e){} try{ consumePendingNudge(); }catch(e){} try{ armPhoneCloudNudgeSync(); }catch(e){} }
+        if(s && s.isActive){ try{ drainHabitReplies(); }catch(e){} try{ consumeOpenHabit(); }catch(e){} try{ drainNoteEdits(); }catch(e){} try{ consumePendingNudge(); }catch(e){} try{ armPhoneCloudNudgeSync(); }catch(e){} }
       });
     }
   }catch(e){}
@@ -7228,6 +7241,7 @@ function navigateTo(view){
     state.returnChallengeId=state.challengeId;
   }
   if(view==='calendar' && state.view!=='calendar') calendarBrowsing=false;
+  if(view==='habits' && state.view!=='habits') state.workoutAnchor=todayStr();
   if(view==='money' && state.view!=='money') state.moneyMonth=todayStr().slice(0,7);
   if(view==='stats' && state.view!=='stats') applyStatsThisWeek();
   const loader=document.getElementById('viewLoader');
@@ -8172,7 +8186,7 @@ function persistRender(){
     if(state.profile && !state.profile.audience){
       state.profile.audience = 'student';
     }
-  }catch(e){} try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ wireNudgeForegroundHooks(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} try{ if(typeof isNativeApp==='function'&&isNativeApp()){ ensureNativeNotifListeners(); scheduleNativeWakeAlarms(); drainHabitReplies(); drainNoteEdits(); } }catch(e){} try{ consumePendingNudge(); }catch(e){} try{ scheduleHabitPopupsSoon(); }catch(e){} }
+  }catch(e){} try{ pushCloudSync(); }catch(e){} try{ syncNativeClassReminders(); }catch(e){} try{ wireNudgeForegroundHooks(); }catch(e){} try{ scheduleWakeAlarms(); }catch(e){} try{ if(typeof isNativeApp==='function'&&isNativeApp()){ ensureNativeNotifListeners(); scheduleNativeWakeAlarms(); drainHabitReplies(); consumeOpenHabit(); drainNoteEdits(); } }catch(e){} try{ consumePendingNudge(); }catch(e){} try{ scheduleHabitPopupsSoon(); }catch(e){} }
 
 /* ============================================================
    First-launch login gate (Google and/or simple local account)
@@ -16301,10 +16315,13 @@ function workoutDurText(start, end){
 }
 function workoutDates(){
   const today=todayStr();
-  const anchor=(state.workoutAnchor||today).slice(0,10);
+  let anchor=String(state.workoutAnchor||today).slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(anchor)) anchor=today;
+  const parts=anchor.split('-').map(Number);
+  const local=new Date(parts[0], (parts[1]||1)-1, parts[2]||1, 12, 0, 0, 0);
   if((state.workoutView||'week')!=='month'){
-    const dow=mondayIndex(new Date(anchor+'T12:00:00'));
-    const monday=icsAddDays(anchor, -dow);
+    const dow=mondayIndex(local);
+    const monday=icsAddDays(toDateStr(local), -dow);
     const out=[];
     for(let i=0;i<7;i++) out.push(icsAddDays(monday, i));
     return out;
@@ -20682,6 +20699,7 @@ if (typeof isNativeApp === 'function' && isNativeApp()) {
     if(!Array.isArray(state.strategicPlans)) state.strategicPlans=[];
     if(!Array.isArray(state.flipScripts)) state.flipScripts=[];
     applyStatsThisWeek();
+    state.workoutAnchor=todayStr();
   }
   if(state.settings.quoteOnLoad && state.lastQuoteShownDate!==todayStr() && !state.habitAsk){
     state.lastQuoteShownDate=todayStr();
@@ -20700,6 +20718,7 @@ if (typeof isNativeApp === 'function' && isNativeApp()) {
     }
   }
   render();
+  setTimeout(function(){ try{ consumeOpenHabit(); }catch(e){} }, 500);
   try{ startAuthListener(); }catch(e){}
   try{ wirePhoneBack(); }catch(e){}
   try{ if(typeof completeRedirectSignIn==='function') await completeRedirectSignIn(); }catch(e){}
