@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="390">
+<meta name="snapback-build" content="391">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -7196,8 +7196,8 @@ function renderModal(){
       <button type="button" id="fabX" aria-label="Close" style="position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.4rem">×</button>
       <div style="font-weight:800;margin:0 28px 8px 0">Add a task</div>
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Hold and speak, or type. Nothing is saved until you add it.</p>
-      <button type="button" class="btn" id="fabHold" data-voice="fab" style="touch-action:none">Hold and speak</button>
-      <div id="fabStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0">Click Hold and speak, say the task, then add it.</div>
+      <button type="button" class="btn" id="fabHold" data-voice="fab" style="touch-action:none;user-select:none;-webkit-user-select:none">Hold and speak</button>
+      <div id="fabStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0">Tap Hold and speak, say the task, then tap Done speaking. You do not have to keep your finger down.</div>
       <textarea id="fabHeard" rows="3" placeholder="What needs doing?" style="width:100%"></textarea>
       <div class="field" style="margin-top:8px"><label>Name</label><input id="fabTitle" style="width:100%"></div>
       <div class="row">
@@ -14453,22 +14453,33 @@ let _micStartPromise = null;
 function ensureVoiceClicks(){
   if(window._voiceClicks) return;
   window._voiceClicks=true;
+  let fingerDown=false;
+  let pointerId=0;
+  function onPhone(){
+    return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  }
   document.addEventListener('pointerdown', function(e){
     const btn=e.target && e.target.closest && e.target.closest('[data-voice]');
     if(!btn) return;
+    if(onPhone() && e.pointerType==='mouse') return;
     if(e.pointerType==='mouse' && e.button!==0) return;
+    try{ e.preventDefault(); }catch(err){}
+    try{ e.stopPropagation(); }catch(err){}
     const area=document.getElementById(btn.getAttribute('data-area')||'');
     const status=document.getElementById(btn.getAttribute('data-status')||'');
     const kind=btn.getAttribute('data-voice')||'';
     if(btn.dataset.talkClick==='1'){
+      if(Date.now() < Number(btn.dataset.armStopAt||0)) return;
       btn.dataset.talkClick='';
       btn.dataset.justStopped='1';
       btn.style.background='';
       btn.textContent='Hold and speak';
       window._talkBtn=null;
+      fingerDown=false;
       stopHoldTalk(area, status);
       return;
     }
+    if(fingerDown) return;
     if(_talkBusy){
       if(status) status.textContent='Still turning the last recording into text…';
       return;
@@ -14476,18 +14487,35 @@ function ensureVoiceClicks(){
     btn.dataset.justStopped='';
     btn.dataset.downAt=String(Date.now());
     window._talkBtn=btn;
+    fingerDown=true;
+    pointerId=e.pointerId;
+    try{ btn.setPointerCapture(e.pointerId); }catch(err){}
     btn.style.background='var(--amber)';
     btn.textContent='Listening…';
+    if(status) status.textContent='Listening… say it, then tap Done speaking.';
     startHoldTalk(area, status, kind);
-  });
-  document.addEventListener('pointerup', function(){
+  }, true);
+  function releaseFinger(e){
     const btn=window._talkBtn;
-    if(!btn) return;
+    if(!btn || !fingerDown) return;
+    if(onPhone() && e && e.pointerType==='mouse') return;
+    if(e && pointerId && e.pointerId!=null && e.pointerId!==pointerId) return;
+    fingerDown=false;
+    try{ if(e && btn.hasPointerCapture && btn.hasPointerCapture(e.pointerId)) btn.releasePointerCapture(e.pointerId); }catch(err){}
     if(btn.dataset.justStopped==='1'){ btn.dataset.justStopped=''; return; }
+    if(onPhone()){
+      btn.dataset.talkClick='1';
+      btn.dataset.armStopAt=String(Date.now()+700);
+      btn.textContent='Done speaking';
+      const status=document.getElementById(btn.getAttribute('data-status')||'');
+      if(status && status.textContent.indexOf('Heard:')!==0) status.textContent='Listening… tap Done speaking when you finish.';
+      return;
+    }
     const held=Date.now()-Number(btn.dataset.downAt||0);
     const status=document.getElementById(btn.getAttribute('data-status')||'');
     if(held<450){
       btn.dataset.talkClick='1';
+      btn.dataset.armStopAt=String(Date.now()+400);
       btn.textContent='Done speaking';
       if(status) status.textContent='Listening… click Done speaking when you finish.';
       return;
@@ -14498,7 +14526,13 @@ function ensureVoiceClicks(){
     const area=document.getElementById(btn.getAttribute('data-area')||'');
     window._talkBtn=null;
     stopHoldTalk(area, status);
-  });
+  }
+  document.addEventListener('pointerup', releaseFinger, true);
+  document.addEventListener('pointercancel', releaseFinger, true);
+  document.addEventListener('contextmenu', function(e){
+    const btn=e.target && e.target.closest && e.target.closest('[data-voice]');
+    if(btn){ try{ e.preventDefault(); }catch(err){} }
+  }, true);
 }
 function wireHoldTalk(btnId, areaId, statusId){
   const btn=document.getElementById(btnId);
