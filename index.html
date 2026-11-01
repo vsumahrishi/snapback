@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="397">
+<meta name="snapback-build" content="399">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://www.gstatic.com https://cdn.jsdelivr.net https://huggingface.co https://cdn-lfs.huggingface.co https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net wss://*.firebaseio.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://open.spotify.com https://w.soundcloud.com https://accounts.google.com https://apis.google.com https://*.firebaseapp.com; media-src 'self' blob: data:; worker-src 'self' blob: https://cdn.jsdelivr.net;">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
@@ -5094,9 +5094,6 @@ function openHabitFromNotif(extra){
     key: key
   };
   state.quoteModalOpen=false;
-  if(state.settings && state.settings.quoteOnLoad && state.lastQuoteShownDate!==todayStr()){
-    state.lastQuoteShownDate=todayStr();
-  }
   state.reminderModalOpen=false;
   state.appMsg=null;
   try{ saveState(); }catch(e){}
@@ -5866,9 +5863,6 @@ function renderSidebar(){
     el.className='sidebar mobile-topbar';
     el.innerHTML=`
       <button id="hamburgerBtn" class="hamburger" type="button" aria-label="Open menu">&#9776;</button>
-      <button type="button" class="btn sm" id="mobToday">Today</button>
-      <button type="button" class="btn sm" id="mobTasks">Tasks</button>
-      <button type="button" class="btn sm" id="mobNext">Next</button>
       <div class="brand-row" id="brandHomeBtnMobile" style="cursor:pointer">
         <img src="icon-192.png" alt="">
         <span class="brand-name">SnapBack</span>
@@ -5876,9 +5870,6 @@ function renderSidebar(){
       <div style="flex:1"></div>
     `;
     document.getElementById('hamburgerBtn').addEventListener('click', ()=>{ mobileMenuOpen=true; renderMobileDrawer(); });
-    document.getElementById('mobToday').addEventListener('click', ()=>setView('today'));
-    document.getElementById('mobTasks').addEventListener('click', ()=>setView('tasks'));
-    document.getElementById('mobNext').addEventListener('click', ()=>{ state.whatsNext=true; state.challengeShowAll=false; if(!state.challengeId && state.lastChallengeId) state.challengeId=state.lastChallengeId; setView('challenges'); });
     document.getElementById('brandHomeBtnMobile').addEventListener('click', ()=>setView('today'));
     renderMobileDrawer();
   }else{
@@ -7339,6 +7330,13 @@ function renderModal(){
     wireStartPopup();
     return;
   }
+  const quoteBlocked=typeof needsLoginScreen==='function' && needsLoginScreen();
+  if(!quoteBlocked && state.lastQuoteShownDate!==todayStr()){
+    state.lastQuoteShownDate=todayStr();
+    state.quoteModalOpen=true;
+    state.quoteIndex=Math.floor(Math.random()*allQuotes().length);
+    try{ saveState(); }catch(e){}
+  }
   if(!state.quoteModalOpen){ root.innerHTML=''; return; }
   const q=allQuotes()[state.quoteIndex]||QUOTE_BANK[0];
   root.innerHTML=`<div class="overlay" id="quoteOverlay">
@@ -7346,14 +7344,12 @@ function renderModal(){
       <div class="qeyebrow">A small nudge</div>
       <div class="qtext">"${escapeHtml(q)}"</div>
       <div class="qactions">
-        <button class="btn ghost sm" id="qNone">No more quotes</button>
         <button class="btn ghost sm" id="qShuffle">Another one</button>
         <button class="btn sm" id="qClose">I'm ready — let's go</button>
       </div>
     </div>
   </div>`;
   document.getElementById('qShuffle').addEventListener('click', shuffleQuote);
-  document.getElementById('qNone').addEventListener('click', function(){ state.settings.quoteOnLoad=false; state.quoteModalOpen=false; try{ saveState(); }catch(e){} renderModal(); });
   document.getElementById('qClose').addEventListener('click', closeQuote);
   document.getElementById('quoteOverlay').addEventListener('click',(e)=>{ if(e.target.id==='quoteOverlay') closeQuote(); });
 }
@@ -7782,6 +7778,7 @@ function mergeSharedRecords(remoteNewer){
     return leaf(local, remote);
   }
   state.removed=mergeRemovedMaps(state.removed, argumentsRemote && argumentsRemote.removed);
+  const quoteSeenLocal=String(state.lastQuoteShownDate||'');
   cloudSyncKeys().forEach(function(k){
     if(k==='removed' || k==='notifiedKeys' || k==='exerciseHistory') return;
     const remote=argumentsRemote ? argumentsRemote[k] : undefined;
@@ -7796,6 +7793,8 @@ function mergeSharedRecords(remoteNewer){
     }
     state[k]=merged;
   });
+  const quoteSeenRemote=String((argumentsRemote&&argumentsRemote.lastQuoteShownDate)||'');
+  state.lastQuoteShownDate=quoteSeenLocal>quoteSeenRemote?quoteSeenLocal:quoteSeenRemote;
   const histMap={};
   function addHist(e, prefer){
     if(!e) return;
@@ -17844,7 +17843,6 @@ ${(state.settings&&state.settings.adminOpen)?`<details style="margin-top:12px" i
       </div>
       ${toggleRow('setGcalWrite','Add dated tasks to Google Calendar', !!s.gcalWrite)}
       <p style="font-size:.8rem;color:var(--muted);margin:0 0 10px">Off until you turn it on. Only a task with a date is sent. SnapBack will ask permission to add events.</p>
-      ${toggleRow('setQuoteOnLoad','Show one quote a day', s.quoteOnLoad !== false)}
       <p style="font-weight:700;margin:12px 0 6px">Install the web app</p>
       ${(typeof isNativeApp==='function' && isNativeApp()) ? `<p style="color:var(--muted);font-size:.85rem">You already have the phone app installed.</p>`
         : isAppInstalled() ? `<p style="color:var(--muted);font-size:.85rem">Already installed on this device.</p>`
@@ -21159,7 +21157,6 @@ function wireView(){
     const tb=document.getElementById('testSoundBtn'); if(tb) tb.addEventListener('click', testAlarm);
     const nb=document.getElementById('setNotifyBrowser'); if(nb) nb.addEventListener('change', ()=>{ updateSetting('notifyBrowser', nb.checked); flashSaved(); });
     const gnb=document.getElementById('grantNotifyBtn'); if(gnb) gnb.addEventListener('click', requestNotifyPermission);
-    const qol=document.getElementById('setQuoteOnLoad'); if(qol) qol.addEventListener('change', ()=>{ updateSetting('quoteOnLoad', qol.checked); flashSaved(); });
     const gcal=document.getElementById('setGcalWrite'); if(gcal) gcal.addEventListener('change', ()=>{ updateSetting('gcalWrite', gcal.checked); if(gcal.checked){ ensureCalendarWriteToken(); } flashSaved(); });
     const dm=document.getElementById('setDarkMode'); if(dm) dm.addEventListener('change', ()=>{ updateSetting('darkMode', dm.checked); applyDarkMode(); flashSaved(); });
     const textStd=document.getElementById('textSizeStd'); if(textStd) textStd.addEventListener('click', ()=>{ updateSetting('textSize','standard'); applyTextSize(); });
@@ -21291,12 +21288,6 @@ if (typeof isNativeApp === 'function' && isNativeApp()) {
     if(!Array.isArray(state.flipScripts)) state.flipScripts=[];
     applyStatsThisWeek();
     state.workoutAnchor=todayStr();
-  }
-  if(state.settings.quoteOnLoad && state.lastQuoteShownDate!==todayStr() && !state.habitAsk){
-    state.lastQuoteShownDate=todayStr();
-    state.quoteModalOpen=true;
-    state.quoteIndex=Math.floor(Math.random()*allQuotes().length);
-    try{ saveState(); }catch(e){}
   }
   if(state.timer && state.timer.running && state.timer.endsAt){
     if(state.timer.endsAt<=Date.now()) completeSegment(typeof isNativeApp==='function' && isNativeApp());
