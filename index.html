@@ -6,7 +6,8 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="391">
+<meta name="snapback-build" content="397">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://www.gstatic.com https://cdn.jsdelivr.net https://huggingface.co https://cdn-lfs.huggingface.co https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net wss://*.firebaseio.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://open.spotify.com https://w.soundcloud.com https://accounts.google.com https://apis.google.com https://*.firebaseapp.com; media-src 'self' blob: data:; worker-src 'self' blob: https://cdn.jsdelivr.net;">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -125,18 +126,21 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 .btn.sm{padding:5px 10px;font-size:.75rem;border-radius:8px}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 
-.chip{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:999px;font-size:.78rem;font-weight:700;border:1px solid transparent;cursor:pointer;user-select:none}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:999px;font-size:.9rem;font-weight:700;border:1px solid transparent;cursor:pointer;user-select:none}
 .chip.off{background:var(--grey-soft);color:var(--muted)}
 .chip.urgent-on{background:var(--brick-soft);color:var(--brick);border-color:#e3b3a8}
 .chip.important-on{background:var(--blue-soft);color:var(--blue);border-color:#b7c6e0}
 .chip.must-on{background:var(--gold-soft);color:#8a6a1a;border-color:#e6cf8f}
 .chip.frog-on{background:var(--gold-soft);color:#8a6a1a;border-color:#e6cf8f;font-weight:800}
-.badge{display:inline-block;padding:3px 8px;border-radius:8px;font-size:.68rem;font-weight:700}
+.badge{display:inline-block;padding:4px 8px;border-radius:8px;font-size:.85rem;font-weight:700}
 .badge.high{background:var(--brick-soft);color:var(--brick)}
 .badge.medium{background:var(--amber-soft);color:#8a5a1f}
 .badge.low{background:var(--pine-soft);color:var(--pine)}
 .badge.overdue{background:var(--brick);color:#fff}
-.badge.dueToday{background:var(--gold);color:#fff}
+.badge.dueToday{background:#E6C56A;color:#1E2422}
+.dark .btn{background:#1B5C4A;color:#fff}
+.dark .btn.danger{background:#8E3A2C;color:#fff}
+.dark .btn.gold,.btn.gold{background:#E6C56A;color:#1E2422}
 
 /* Tasks */
 .tasklist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px}
@@ -242,7 +246,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 .calnav{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}.calnav-title{font-weight:700;flex:1 1 auto;text-align:center;min-width:160px;line-height:1.3;padding:4px 6px}
 .calnav .spacer{flex:1}
 .monthgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
-.dowhead{font-size:.68rem;text-transform:uppercase;color:var(--muted);text-align:center;font-weight:700;padding-bottom:3px}
+.dowhead{font-size:.85rem;text-transform:uppercase;color:var(--muted);text-align:center;font-weight:700;padding-bottom:3px}
 .daycell{border:1px solid var(--line);border-radius:10px;min-height:74px;padding:5px 6px;background:#FDFCFA;cursor:pointer;font-size:.74rem}
 .daycell.otherMonth{opacity:.38}
 .daycell.today{border-color:var(--pine);border-width:2px}
@@ -428,7 +432,7 @@ details.setgroup .setgroup-body{margin-top:12px}
   .ringwrap{width:200px;height:200px}
   .monthgrid{gap:3px}
   .daycell{min-height:72px;padding:4px 4px}
-  .daynum{font-size:.7rem}
+  .daynum{font-size:.85rem}
   .weekgrid{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:130px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:6px}
   table{font-size:.74rem}
   /* Keep action buttons visible above phone chrome / home indicator */
@@ -531,9 +535,9 @@ body.share-only{background:#f7f6f2}
 .share-privacy-text small{font-size:.82rem;color:var(--muted);line-height:1.35;font-weight:400}
 
 </style>
-  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js" integrity="sha384-ZaR6mWzmJtrRibZ1Vm7SoHFr8OXjyAuGAXalGDKqbxFT18oi/z+oZLIRFkpeNor1" crossorigin="anonymous"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js" integrity="sha384-Ke0FJhH7LyRqDxZ0wt+/OXV38yfQVu7g9VPEEGjYmB4RVOY/ta04uecRhsMwT7V3" crossorigin="anonymous"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js" integrity="sha384-I1LYojsZ5RM1cOda44Z2h42Qa6YfsQ1XkXxREnhp4ueYBR/4d1pG1K+NZM537Vsj" crossorigin="anonymous"></script>
 <style id="tour-css">
 .tour-overlay{position:fixed;inset:0;z-index:99999;background:rgba(15,25,20,.55);display:flex;align-items:flex-end;justify-content:center;padding:16px;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 .tour-card{background:var(--card,#fff);border-radius:16px;padding:18px;max-width:420px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25);margin-bottom:max(12px,env(safe-area-inset-bottom))}
@@ -3402,7 +3406,9 @@ function wireSchedForm(){
 }
 
 function addStudyBlock(){
-  const label=document.getElementById('tbLabel').value.trim();
+  const labelEl=document.getElementById('tbLabel');
+  if(!labelEl) return;
+  const label=labelEl.value.trim();
   if(!label){ showAppMessage('What is the block for?', 'Type a name for the time block.'); return; }
   const date=document.getElementById('tbDate').value || todayStr();
   const start=document.getElementById('tbStart').value;
@@ -3459,6 +3465,7 @@ function techniqueTaskPickerHtml(selectedId){
       <option value="">— Choose a task —</option>
       ${opts}
     </select>
+    ${(state.view==='planAhead')?'<button type="button" class="btn" id="techUseTaskBtn" style="margin-top:10px;width:100%">Add this task to the week</button>':''}
     <div class="row" style="margin-top:10px;gap:8px;align-items:center">
       <input id="techNewTaskTitle" placeholder="New task title" style="flex:1;min-width:0">
       <button type="button" class="btn sm" id="techCreateTaskBtn" style="flex:0 0 auto">Create task</button>
@@ -3482,7 +3489,7 @@ function createTechniqueTaskFromInput(){
     id, title, notes:'From technique', date:todayStr(), time:'', priority:'medium',
     urgent:false, important:false, tier:'could', frog:false, context:'school',
     technique:(state.view||''), meetingUrl:'', reminderLeads:[0], reminderTime:'09:00',
-    chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{}, strategic:{}, flip:{}, created:Date.now()
+    chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{}, strategic:{}, flip:{}, planWeek: state.view==='planAhead', created:Date.now()
   });
   applyTechniqueTaskId(id);
   state.filter='all';
@@ -3490,20 +3497,44 @@ function createTechniqueTaskFromInput(){
   showAppMessage('Task created', title+' is on Tasks and selected for this technique.');
   return id;
 }
+function acceptTechniqueTask(id){
+  if(!id){ showAppMessage('Select a task', 'Choose a task from the list, or create one.'); return; }
+  applyTechniqueTaskId(id);
+  if(state.view==='planAhead'){
+    const t=findTask(id);
+    if(t){
+      t.planWeek=true;
+      try{ saveState(); }catch(e){}
+      showAppMessage('Added to this week', t.title+' is in This week. The rest can wait.');
+      return;
+    }
+  }
+  try{ persistRender(); }catch(e){}
+}
 function wireTechniqueTaskPicker(){
   const sel=document.getElementById('techTaskSelect');
   if(sel) sel.onchange=function(){
-    const id=sel.value||'';
-    if(id) applyTechniqueTaskId(id);
-    try{ persistRender(); }catch(e){}
+    if(sel.value) acceptTechniqueTask(sel.value);
+  };
+  const useBtn=document.getElementById('techUseTaskBtn');
+  if(useBtn) useBtn.onclick=function(){
+    const selEl=document.getElementById('techTaskSelect');
+    acceptTechniqueTask(selEl&&selEl.value);
   };
   const btn=document.getElementById('techCreateTaskBtn');
   if(btn) btn.onclick=function(){
     const id=createTechniqueTaskFromInput();
-    if(id) try{ persistRender(); }catch(e){}
+    if(id && state.view==='planAhead') acceptTechniqueTask(id);
+    else if(id) try{ persistRender(); }catch(e){}
   };
   const inp=document.getElementById('techNewTaskTitle');
-  if(inp) inp.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); const id=createTechniqueTaskFromInput(); if(id) try{ persistRender(); }catch(e2){} } };
+  if(inp) inp.onkeydown=function(e){
+    if(e.key!=='Enter') return;
+    e.preventDefault();
+    const id=createTechniqueTaskFromInput();
+    if(id && state.view==='planAhead') acceptTechniqueTask(id);
+    else if(id) try{ persistRender(); }catch(e2){}
+  };
 }
 function getRule135(){
   const key=todayStr();
@@ -3642,8 +3673,11 @@ function statsPreset(preset){
   persistRender();
 }
 function setStatsRangeCustom(){
-  const s=document.getElementById('statsStart').value;
-  const e=document.getElementById('statsEnd').value;
+  const sEl=document.getElementById('statsStart');
+  const eEl=document.getElementById('statsEnd');
+  if(!sEl || !eEl) return;
+  const s=sEl.value;
+  const e=eEl.value;
   if(s) state.statsRangeStart=s;
   if(e) state.statsRangeEnd=e;
   persistRender();
@@ -3755,8 +3789,11 @@ function deleteReminder(id){
    Money
    ============================================================ */
 function addMoney(){
-  const title=document.getElementById('moneyTitle').value.trim();
-  const amount=Number(document.getElementById('moneyAmt').value||0);
+  const titleEl=document.getElementById('moneyTitle');
+  const amtEl=document.getElementById('moneyAmt');
+  if(!titleEl || !amtEl) return;
+  const title=titleEl.value.trim();
+  const amount=Number(amtEl.value||0);
   if(!title||!amount) return;
   const type=document.getElementById('moneyType').value;
   const category=document.getElementById('moneyCat').value.trim()||'General';
@@ -3870,18 +3907,46 @@ function resetAllDataConfirmed(){
   persistRender();
 }
 async function deleteMySnapBackData(){
-  try{
-    const ref = cloudDocRef();
-    if(ref) await ref.delete();
-  }catch(e){}
-  try{ if(_auth) await _auth.signOut(); }catch(e){}
-  _currentUser=null;
-  _cloudReady=false;
-  try{ stopCloudSync(); }catch(e){}
-  try{ localStorage.removeItem('snapback_last_synced'); }catch(e){}
+  const user = (_auth && _auth.currentUser) || null;
+  const ref = (typeof cloudDocRef==='function') ? cloudDocRef() : null;
+  if(user || ref){
+    if(typeof navigator!=='undefined' && navigator.onLine===false){
+      showAppMessage('Not deleted', 'You are offline. The cloud copy is still there. Connect, then try again. Nothing on this device was removed.');
+      return;
+    }
+    if(ref){
+      try{ await ref.delete(); }
+      catch(e){
+        showAppMessage('Not deleted', 'The cloud copy is still there. Check the connection and try again. Nothing on this device was removed.');
+        return;
+      }
+    }
+    var authNote='';
+    if(user && typeof user.delete==='function'){
+      try{ await user.delete(); }
+      catch(e){
+        const code=(e && e.code) || '';
+        authNote = code==='auth/requires-recent-login'
+          ? ' The SnapBack data was removed. The Google login itself is still there. Sign in again, then tap Delete my account once more to remove that login.'
+          : ' The SnapBack data was removed. The Google login could not be removed. Sign in again and try once more.';
+        try{ if(_auth) await _auth.signOut(); }catch(e2){}
+      }
+    } else {
+      try{ if(_auth) await _auth.signOut(); }catch(e){}
+    }
+    _currentUser=null;
+    _cloudReady=false;
+    try{ stopCloudSync(); }catch(e){}
+    try{ localStorage.removeItem('snapback_last_synced'); }catch(e){}
+    state=emptyState();
+    try{ saveState(); }catch(e){}
+    showAppMessage('Deleted', 'SnapBack data on this device and the cloud copy were removed. Your Gmail account was not deleted.'+authNote);
+    try{ render(); }catch(e){}
+    return;
+  }
   state=emptyState();
   try{ saveState(); }catch(e){}
-  showAppMessage('Deleted', 'The SnapBack copy for this Google account was removed. Your Gmail account was not deleted.');
+  showAppMessage('Deleted', 'SnapBack data on this device was removed. There was no Google sign-in to delete.');
   try{ render(); }catch(e){}
 }
 function addCustomQuote(){
@@ -4192,18 +4257,38 @@ function answerHabitAsk(which){
   try{ saveState(); }catch(e){}
   persistRender();
 }
+function recentLowMoodDays(){
+  const log=state.moodLog||{};
+  const today=new Date();
+  today.setHours(12,0,0,0);
+  let n=0;
+  for(let i=0;i<7;i++){
+    const d=new Date(today);
+    d.setDate(today.getDate()-i);
+    const v=Number(log[toDateStr(d)]);
+    if(v>0 && v<=2) n++;
+  }
+  return n;
+}
+function offerMoodSupport(mood){
+  if(!(mood && Number(mood)<=2)) return false;
+  if(recentLowMoodDays()<3) return false;
+  if(state.safetyPopOn===todayStr()) return false;
+  state.safetyPopOn=todayStr();
+  return true;
+}
+const MOOD_SUPPORT_TEXT='This has been heavy on 3 of the last 7 days. Talk to a school counsellor, a parent, or another adult you trust. SnapBack cannot make that call for you.';
 function answerMoodAsk(mood){
   const a=state.habitAsk;
   if(!state.moodLog) state.moodLog={};
   const date=(a&&a.date)||todayStr();
   state.moodLog[date]=Number(mood)||0;
   state.habitAsk=null;
-  const lows=Object.keys(state.moodLog).filter(function(d){ return Number(state.moodLog[d])>0 && Number(state.moodLog[d])<=2; });
+  const lows=recentLowMoodDays();
   try{ saveState(); }catch(e){}
-  if(mood && Number(mood)<=2 && lows.length>=3 && state.safetyPopOn!==todayStr()){
-    state.safetyPopOn=todayStr();
+  if(offerMoodSupport(mood)){
     persistRender();
-    showAppMessage('Talk to someone', 'This has been heavy for a few days. Talk to your therapist, a friend, or someone you trust. SnapBack cannot make that call for you.');
+    showAppMessage('Talk to someone', MOOD_SUPPORT_TEXT, {support:true});
     return;
   }
   persistRender();
@@ -5780,7 +5865,10 @@ function renderSidebar(){
   if(isMobileViewport()){
     el.className='sidebar mobile-topbar';
     el.innerHTML=`
-      <button id="hamburgerBtn" class="hamburger">&#9776;</button>
+      <button id="hamburgerBtn" class="hamburger" type="button" aria-label="Open menu">&#9776;</button>
+      <button type="button" class="btn sm" id="mobToday">Today</button>
+      <button type="button" class="btn sm" id="mobTasks">Tasks</button>
+      <button type="button" class="btn sm" id="mobNext">Next</button>
       <div class="brand-row" id="brandHomeBtnMobile" style="cursor:pointer">
         <img src="icon-192.png" alt="">
         <span class="brand-name">SnapBack</span>
@@ -5788,6 +5876,9 @@ function renderSidebar(){
       <div style="flex:1"></div>
     `;
     document.getElementById('hamburgerBtn').addEventListener('click', ()=>{ mobileMenuOpen=true; renderMobileDrawer(); });
+    document.getElementById('mobToday').addEventListener('click', ()=>setView('today'));
+    document.getElementById('mobTasks').addEventListener('click', ()=>setView('tasks'));
+    document.getElementById('mobNext').addEventListener('click', ()=>{ state.whatsNext=true; state.challengeShowAll=false; if(!state.challengeId && state.lastChallengeId) state.challengeId=state.lastChallengeId; setView('challenges'); });
     document.getElementById('brandHomeBtnMobile').addEventListener('click', ()=>setView('today'));
     renderMobileDrawer();
   }else{
@@ -6710,7 +6801,8 @@ function renderModal(){
       <div class="quotecard" style="max-width:400px;text-align:left">
         <div class="qeyebrow">SnapBack</div>
         <div style="font-weight:800;font-size:1.1rem;margin-bottom:8px">${escapeHtml(m.title)}</div>
-        ${m.body?`<p style="font-size:.95rem;line-height:1.45;margin:0 0 16px;white-space:pre-wrap">${escapeHtml(m.body)}</p>`:''}
+        ${m.body?`<p style="font-size:.95rem;line-height:1.45;margin:0 0 12px;white-space:pre-wrap">${escapeHtml(m.body)}</p>`:''}
+        ${m.support?supportLinksHtml():''}
         <div style="display:flex;flex-direction:column;gap:8px">
           <button class="btn" id="appMsgOk">${escapeHtml(m.ok||'OK')}</button>
           ${m.cancel?`<button class="btn ghost" id="appMsgCancel">${escapeHtml(m.cancel)}</button>`:''}
@@ -8132,23 +8224,16 @@ function parseIcsEvents(icsText){
 }
 
 async function fetchIcsText(url){
-  const attempts = [url];
-  if(/^https?:/i.test(url)){
-    attempts.push('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
-    attempts.push('https://corsproxy.io/?' + encodeURIComponent(url));
-  }
-  for(let i=0;i<attempts.length;i++){
-    const ctrl = (typeof AbortController!=='undefined') ? new AbortController() : null;
-    const timer = ctrl ? setTimeout(function(){ try{ ctrl.abort(); }catch(e){} }, 8000) : null;
-    try{
-      const res = await fetch(attempts[i], ctrl?{signal:ctrl.signal}:{});
-      if(timer) clearTimeout(timer);
-      if(!res.ok) continue;
-      const text = await res.text();
-      if(text && text.indexOf('BEGIN:VEVENT')>=0) return text;
-    }catch(e){
-      if(timer) clearTimeout(timer);
-    }
+  const ctrl = (typeof AbortController!=='undefined') ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(function(){ try{ ctrl.abort(); }catch(e){} }, 8000) : null;
+  try{
+    const res = await fetch(url, ctrl?{signal:ctrl.signal}:{});
+    if(timer) clearTimeout(timer);
+    if(!res.ok) throw new Error('blocked');
+    const text = await res.text();
+    if(text && text.indexOf('BEGIN:VEVENT')>=0) return text;
+  }catch(e){
+    if(timer) clearTimeout(timer);
   }
   throw new Error('blocked');
 }
@@ -8363,7 +8448,7 @@ function authStatusHtml(){
         + (email ? '<div style="font-size:.9rem;margin-top:6px">Gmail: <b>' + email + '</b></div>' : '<div style="font-size:.85rem;margin-top:6px">Google account connected</div>')
         + '<p style="font-size:.8rem;color:var(--muted);margin:8px 0 0">Live sync is on. Use this same Gmail on the laptop and the phone. While both are online, a change on one shows on the other. With no internet, each device keeps the last copy, then catches up.</p>'
         + '<button type="button" class="btn ghost sm" id="googleSignOutBtn" style="margin-top:10px;width:100%">Sign out of Google</button>'
-        + '<button type="button" class="btn danger sm" id="deleteAccountBtn" style="margin-top:8px;width:100%">Delete my SnapBack data</button>'
+        + '<button type="button" class="btn danger sm" id="deleteAccountBtn" style="margin-top:8px;width:100%">Delete my account</button>'
         + '</div>';
     }
     return '<div style="padding:12px;border-radius:12px;border:1px solid var(--line);margin-bottom:12px">'
@@ -8600,8 +8685,62 @@ function wireLoginScreen(){
   });
 }
 
-function maybeOfferTour(){
-  return;
+function tidyA11y(){
+  const names={'☰':'Open menu','✕':'Close','×':'Close','←':'Back','→':'Next','+':'Add','‹':'Previous','›':'Next'};
+  document.querySelectorAll('button').forEach(function(b){
+    if(b.getAttribute('aria-label')) return;
+    const t=(b.textContent||'').replace(/\s+/g,' ').trim();
+    const bare=t.replace(/\s/g,'');
+    if(names[bare]) b.setAttribute('aria-label', names[bare]);
+    else if(b.getAttribute('title')) b.setAttribute('aria-label', b.getAttribute('title'));
+    else if(bare.length>0 && bare.length<=2) b.setAttribute('aria-label', t);
+  });
+  function tie(lab, input){
+    if(!lab || !input || lab.getAttribute('for') || lab.contains(input)) return;
+    if(!input.id) input.id='fld'+Math.random().toString(36).slice(2,8);
+    lab.setAttribute('for', input.id);
+  }
+  document.querySelectorAll('.field').forEach(function(field){
+    tie(field.querySelector('label'), field.querySelector('input,select,textarea'));
+  });
+  document.querySelectorAll('label').forEach(function(lab){
+    const n=lab.nextElementSibling;
+    if(n && n.matches && n.matches('input,select,textarea')) tie(lab, n);
+  });
+  document.querySelectorAll('details').forEach(function(d){
+    const s=d.querySelector('summary');
+    if(!s) return;
+    s.setAttribute('aria-expanded', d.open ? 'true' : 'false');
+    if(!d.dataset.axToggle){
+      d.dataset.axToggle='1';
+      d.addEventListener('toggle', function(){ s.setAttribute('aria-expanded', d.open ? 'true' : 'false'); });
+    }
+  });
+  document.querySelectorAll('[data-action="home-toggle"]').forEach(function(b){
+    const key=b.getAttribute('data-key')||'';
+    const open=typeof homeSectionOpen==='function' ? !!homeSectionOpen(key) : false;
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  document.querySelectorAll('#modalRoot .overlay').forEach(function(ov){
+    ov.setAttribute('role','dialog');
+    ov.setAttribute('aria-modal','true');
+    ov.tabIndex=-1;
+    const inside=ov.contains(document.activeElement);
+    if(!inside){
+      const btn=ov.querySelector('button, a, input, select, textarea');
+      if(btn && document.activeElement===document.body) btn.focus();
+    }
+  });
+  if(!window._axEsc){
+    window._axEsc=true;
+    document.addEventListener('keydown', function(e){
+      if(e.key!=='Escape') return;
+      const ov=document.querySelector('#modalRoot .overlay');
+      if(!ov) return;
+      const cancel=document.getElementById('appMsgCancel')||document.getElementById('appMsgOk');
+      if(cancel) cancel.click();
+    });
+  }
 }
 
 
@@ -8609,19 +8748,28 @@ function maybeOfferTour(){
 
 function hasLaunchConsent(){
   try{
-    return !!(state.settings && state.settings.termsAccepted && state.settings.privacyAccepted);
+    return !!(state.settings && state.settings.termsAccepted && state.settings.privacyAccepted && state.settings.ageBand);
   }catch(e){ return false; }
 }
 function launchConsentHtml(){
-  return `<div class="overlay" id="launchConsentOverlay" style="background:rgba(20,24,22,.82);z-index:80">
+  return `<div class="overlay" id="launchConsentOverlay" role="dialog" aria-modal="true" aria-label="Before you use SnapBack" style="background:rgba(20,24,22,.82);z-index:80">
     <div class="quotecard" style="max-width:480px;text-align:left;max-height:88vh;overflow:auto">
       <div class="qeyebrow">Before you use SnapBack</div>
-      <div class="qtext" style="font-size:1.15rem;margin:6px 0 8px">Privacy Policy and Terms of Use</div>
+      <div class="qtext" style="font-size:1.15rem;margin:6px 0 8px">Privacy, terms, and age</div>
       <div style="font-size:.88rem;line-height:1.45;max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:12px">
-        <p style="margin:0 0 8px"><b>Privacy Policy.</b> SnapBack stores your tasks, schedule, nudges, ideas, and habits on this device. If you sign in with Google, that same copy is saved to your Google account so the laptop and the phone stay matched. SnapBack does not sell your information. SnapBack does not require your phone number.</p>
-        <p style="margin:0 0 8px"><b>Terms of Use.</b> SnapBack is for your personal use. You may not copy the app and publish it as another product. Alarms depend on this device allowing notifications and exact alarms. SnapBack is not a medical service.</p>
-        <p style="margin:0">You can delete the SnapBack copy from Settings → Account → Delete my SnapBack data. That does not delete your Google account.</p>
+        <p style="margin:0 0 8px"><b>What stays here.</b> Tasks, schedule, nudges, notes, and habits stay on this device. If you sign in with Google, that copy is also saved with Firebase under your Google account so the laptop and the phone match. SnapBack does not sell your information.</p>
+        <p style="margin:0 0 8px"><b>What else can be used.</b> The microphone is used only when you tap Hold and speak. Some screens can open another site, such as an AI chat, and only the subject or task text you choose is sent. Music, if you play it, comes from that music site. Those sites have their own age rules.</p>
+        <p style="margin:0"><b>Not medical care.</b> SnapBack is a planning aid. You can delete the SnapBack account from Settings. That does not delete your Gmail account.</p>
       </div>
+      <fieldset style="border:0;padding:0;margin:0 0 10px">
+        <legend style="font-weight:700;margin-bottom:6px">Age</legend>
+        <label style="display:flex;gap:8px;align-items:center;margin:0 0 6px"><input type="radio" name="launchAge" value="18plus"> I am 18 or older</label>
+        <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="radio" name="launchAge" value="under18"> I am under 18</label>
+      </fieldset>
+      <label id="launchGuardianRow" style="display:none;gap:10px;align-items:flex-start;margin:0 0 12px">
+        <input type="checkbox" id="launchGuardian" style="width:22px;height:22px;margin-top:2px">
+        <span>A parent or guardian knows I am using SnapBack and agrees.</span>
+      </label>
       <label style="display:flex;gap:10px;align-items:flex-start;margin:8px 0 12px;cursor:pointer">
         <input type="checkbox" id="launchAgree" style="width:22px;height:22px;margin-top:2px">
         <span>I agree to the Terms of Use and the Privacy Policy.</span>
@@ -8883,18 +9031,32 @@ async function autoCalendarSyncIfConfigured(){
   }catch(e){}
 }
 
-function render(){ if(state.view==='checkin') state.view='today'; applyDarkMode(); applyTextSize(); renderSidebar(); renderMain(); renderModal(); checkNotifications();
+function render(){ if(state.view==='checkin') state.view='today'; applyDarkMode(); applyTextSize(); renderSidebar(); renderMain(); renderModal(); tidyA11y(); checkNotifications();
   try{ consumePendingNudge(); }catch(e){}
   try{
     
     const launchBtn=document.getElementById('launchConsentBtn');
     if(launchBtn){
+      document.querySelectorAll('input[name="launchAge"]').forEach(function(r){
+        r.addEventListener('change', function(){
+          const row=document.getElementById('launchGuardianRow');
+          if(row) row.style.display=r.value==='under18' && r.checked ? 'flex' : (document.querySelector('input[name="launchAge"][value="under18"]:checked') ? 'flex' : 'none');
+        });
+      });
       launchBtn.addEventListener('click', ()=>{
         const agreed=!!(document.getElementById('launchAgree')&&document.getElementById('launchAgree').checked);
+        const ageEl=document.querySelector('input[name="launchAge"]:checked');
+        if(!ageEl){ showAppMessage('Age needed', 'Choose 18 or older, or under 18.'); return; }
+        if(ageEl.value==='under18' && !(document.getElementById('launchGuardian')&&document.getElementById('launchGuardian').checked)){
+          showAppMessage('A guardian is needed', 'Under 18, a parent or guardian needs to know and agree.');
+          return;
+        }
         if(!agreed){ showAppMessage('Agreement needed', 'Tick “I agree to the Terms of Use and the Privacy Policy.”'); return; }
         if(!state.settings||typeof state.settings!=='object') state.settings={};
         state.settings.termsAccepted=true;
         state.settings.privacyAccepted=true;
+        state.settings.ageBand=ageEl.value;
+        state.settings.guardianAck=ageEl.value==='under18';
         state.settings.termsAcceptedAt=Date.now();
         try{ saveState(); }catch(e){}
         try{ persistRender(); }catch(e){ render(); }
@@ -9401,28 +9563,33 @@ function viewChallenges(){
   if(open && (CHALLENGE_PATHS[open] || open)){
     const ch = CHALLENGES.find(c=>c.id===open) || {title:'Challenge', ico:'🎯'};
     const paths = challengePathsFor(open);
+    const showAll = !state.whatsNext || state.challengeShowAll;
+    const shown = showAll ? paths : paths.slice(0, 3);
     return `
     <div class="pagehead">
       <button class="btn ghost sm" data-action="challenge-back" style="margin-bottom:8px">← All challenges</button>
-      <div class="eyebrow">Pick one path — you do not need all of them</div>
+      <div class="eyebrow">${state.whatsNext?'Three tools. Start with the first.':'Pick one path — you do not need all of them'}</div>
       <h1>${ch.ico||''} ${escapeHtml(ch.title)}</h1>
       <p>${escapeHtml(ch.blurb||'')}</p>
     </div>
     <div style="display:grid;gap:12px">
-      ${paths.map((p,i)=>`
+      ${shown.map((p,i)=>`
         <button class="card" data-action="challenge-path" data-idx="${i}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line);background:var(--card)">
           <span style="display:block;font-size:1.6rem">${p.ico||''}</span>
-          <span style="display:block;font-weight:700;margin-top:6px">${escapeHtml(p.title)}</span>
-          <span style="display:block;font-size:.88rem;color:var(--muted);margin-top:4px">${escapeHtml(p.desc)}</span>
+          <span style="display:block;font-weight:700;margin-top:6px">${i===0&&state.whatsNext?'Start here · ':''}${escapeHtml(p.title)}</span>
+          <span style="display:block;font-size:.9rem;color:var(--muted);margin-top:4px">${escapeHtml(p.desc)}</span>
         </button>`).join('')}
-    </div>`;
+    </div>
+    ${(!showAll && paths.length>3)?'<button type="button" class="btn ghost" data-action="challenge-more" style="margin-top:12px;width:100%">Show the rest</button>':''}`;
   }
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">What feels hard right now?</div>
     <h1>Challenges</h1>
+    <p>Tap the feeling. You will get three tools, not the whole list. The first one is the one to start.</p>
   </div>
+  <button type="button" class="btn" data-action="whats-next" style="width:100%;margin-bottom:12px">Just tell me what's next</button>
   <div style="display:grid;gap:10px">
     ${CHALLENGES.map(c=>`
       <button class="card" data-action="challenge-open" data-id="${c.id}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line);background:var(--card)">
@@ -9447,9 +9614,17 @@ function setPreferredAI(v){
   try{ localStorage.setItem('snapback_ai', v); }catch(e){}
 }
 
+function aiChoices(){
+  const under=!!(state.settings && state.settings.ageBand==='under18');
+  const all=[['grok','Grok'],['chatgpt','ChatGPT'],['gemini','Gemini'],['claude','Claude'],['perplexity','Perplexity']];
+  if(!under) return all;
+  return all.filter(function(x){ return x[0]!=='claude' && x[0]!=='perplexity'; });
+}
 function preferredAI(){
   try{
-    return (state.settings && state.settings.preferredAI) || localStorage.getItem('snapback_preferred_ai') || localStorage.getItem('snapback_ai') || 'grok';
+    let v=(state.settings && state.settings.preferredAI) || localStorage.getItem('snapback_preferred_ai') || localStorage.getItem('snapback_ai') || 'grok';
+    if(state.settings && state.settings.ageBand==='under18' && (v==='claude' || v==='perplexity')) v='grok';
+    return v;
   }catch(e){ return 'grok'; }
 }
 function setPreferredAI(v){
@@ -9461,18 +9636,21 @@ function setPreferredAI(v){
 }
 function aiPickerHtml(idPrefix){
   const cur=preferredAI();
-  return '<select id="'+idPrefix+'AiSelect" style="max-width:140px">'
-    +'<option value="grok"'+(cur==='grok'?' selected':'')+'>Grok</option>'
-    +'<option value="chatgpt"'+(cur==='chatgpt'?' selected':'')+'>ChatGPT</option>'
-    +'<option value="claude"'+(cur==='claude'?' selected':'')+'>Claude</option>'
-    +'<option value="gemini"'+(cur==='gemini'?' selected':'')+'>Gemini</option>'
-    +'<option value="perplexity"'+(cur==='perplexity'?' selected':'')+'>Perplexity</option>'
-    +'</select>';
+  const under=!!(state.settings && state.settings.ageBand==='under18');
+  const opts=aiChoices().map(function(x){
+    return '<option value="'+x[0]+'"'+(cur===x[0]?' selected':'')+'>'+x[1]+'</option>';
+  }).join('');
+  const note=under?'<p style="font-size:.8rem;color:var(--muted);margin:6px 0 0">Claude and Perplexity are 18+, so they are hidden.</p>':'';
+  return '<select id="'+idPrefix+'AiSelect" style="max-width:180px">'+opts+'</select>'+note;
 }
 function openAIWithPrompt(prompt, ai){
   const q = String(prompt||'').trim();
   if(!q) return;
   const which = ai || preferredAI();
+  if(state.settings && state.settings.ageBand==='under18' && (which==='claude' || which==='perplexity')){
+    showAppMessage('Not for under 18', 'Claude and Perplexity are 18+. Grok, ChatGPT, and Gemini stay available.');
+    return;
+  }
   // Keep prompt for user to paste if the AI site ignores ?q=
   try{ sessionStorage.setItem('snapback_last_ai_prompt', q); }catch(e){}
   try{ navigator.clipboard.writeText(q); }catch(e){}
@@ -9562,6 +9740,13 @@ ${note||''}
 Kind tone. Short.`;
 }
 
+function supportLinksHtml(){
+  const region=(state.settings&&state.settings.supportRegion)||'IN';
+  if(region==='other'){
+    return '<p style="font-size:.9rem;line-height:1.45;margin:0 0 12px">If you are not in India, use a local helpline. In India, Tele-MANAS is free and overseen by NIMHANS in Bengaluru. <a href="tel:14416">Call 14416</a> or <a href="tel:18008914416">1-800-891-4416</a>.</p>';
+  }
+  return '<p style="font-size:.9rem;line-height:1.45;margin:0 0 12px">This number works in every city in India. You do not pick a city. The call is free, 24 hours, and is answered by a Tele-MANAS centre near you. NIMHANS in Bengaluru oversees it.<br><a href="tel:14416">Call 14416</a><br><a href="tel:18008914416">Call 1-800-891-4416</a></p>';
+}
 function showAppMessage(title, body, opts){
   opts = opts || {};
   state.appMsg = {
@@ -9570,7 +9755,8 @@ function showAppMessage(title, body, opts){
     ok: opts.ok || 'OK',
     cancel: opts.cancel || null,
     onOk: opts.onOk || null,
-    onCancel: opts.onCancel || null
+    onCancel: opts.onCancel || null,
+    support: !!opts.support
   };
   persistRender();
 }
@@ -10964,10 +11150,10 @@ function viewTasks(){
         </div>
       </div>
       <div class="row" style="margin-top:10px;align-items:center">
-        <select id="aiHelperSelect" style="max-width:140px">
-          <option value="grok">Grok</option><option value="chatgpt">ChatGPT</option>
-          <option value="claude">Claude</option><option value="gemini">Gemini</option>
+        <select id="aiHelperSelect" style="max-width:180px">
+          ${aiChoices().map(function(x){ return '<option value="'+x[0]+'">'+x[1]+'</option>'; }).join('')}
         </select>
+        ${state.settings&&state.settings.ageBand==='under18'?'<p style="font-size:.8rem;color:var(--muted);margin:6px 0 0">Claude and Perplexity are 18+, so they are hidden.</p>':''}
         <button class="btn sm ghost" id="askAiBtn">Ask AI ↗</button>
       </div>
     </details>
@@ -12005,6 +12191,8 @@ async function shortenUrl(longUrl){
       fb: parts[1],
       created: Date.now()
     });
+    state.lastShareId=id;
+    try{ saveState(); }catch(e){}
     return parts[0]+'?s='+id;
   }catch(e){
     return longUrl;
@@ -12019,7 +12207,14 @@ async function resolveShortShare(){
     if(typeof initFirebase==='function') initFirebase();
     if(typeof _db==='undefined' || !_db) return;
     const snap=await _db.collection('publicShares').doc(id).get();
-    if(!snap.exists) return;
+    if(!snap.exists){
+      state.freeBusyPublic=null;
+      state.shareStopped=true;
+      state.view='freebusy';
+      state._shareResolved=id;
+      try{ persistRender(); }catch(e){}
+      return;
+    }
     const fb=snap.data()&&snap.data().fb;
     if(!fb) return;
     const json=b64urlDecode(fb);
@@ -12086,6 +12281,9 @@ function parseFreeBusyFromHash(){
   }catch(e){ return null; }
 }
 function viewFreeBusyPublic(data){
+  if(state.shareStopped && (!data || !data.days)){
+    return `<div class="pagehead"><h1>Link stopped</h1><p>The person who shared this link has stopped it. Ask them for a new one.</p></div>`;
+  }
   if(!data || !data.days){
     return `<div class="pagehead"><h1>Shared availability</h1><p class="empty">This link is missing or invalid.</p></div>`;
   }
@@ -12157,10 +12355,11 @@ function viewFreeBusyPreview(){
   <div class="card" style="margin-bottom:14px">
     <div style="font-size:.8rem;font-weight:600;margin-bottom:6px">Your link ${state.shareWeekShortening?'(updating…)':(link && state.shareWeekLongLink && link!==state.shareWeekLongLink)?'(short)':''}</div>
     <input type="text" id="shareWeekLinkBox" readonly value="${escapeHtml(link)}" style="width:100%;box-sizing:border-box;font-size:.9rem;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--input-bg)">
-    <div style="font-size:.78rem;color:var(--muted);margin-top:8px">A short link is created when online. Switching options creates a new link.</div>
+    <div style="font-size:.85rem;color:var(--muted);margin-top:8px">Share the short link. You can stop that one later. A long link has the week inside it, so a copy that was already sent cannot be pulled back.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
       <button type="button" class="btn" id="copyShareWeekBtn">Copy link</button>
       <button type="button" class="btn ghost" id="nativeShareWeekBtn">Share…</button>
+      <button type="button" class="btn danger" id="stopShareWeekBtn">Stop this link</button>
     </div>
   </div>
 
@@ -13471,7 +13670,9 @@ function loadTesseract(){
   return new Promise((resolve, reject)=>{
     if(window.Tesseract){ resolve(window.Tesseract); return; }
     const s=document.createElement('script');
-    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    s.crossOrigin='anonymous';
+    s.integrity='sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F';
+    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
     s.onload=()=>resolve(window.Tesseract);
     s.onerror=()=>reject(new Error('Could not load OCR library (need internet once)'));
     document.head.appendChild(s);
@@ -13611,21 +13812,40 @@ function armNativeHeard(area, statusEl){
         return;
       }
       if(_talkPartial || _talkTranscript){
+        if(_talkHeld){ keepListening(); return; }
         _talkWaitFinal = false;
         if(_talkFinishTimer){ clearTimeout(_talkFinishTimer); _talkFinishTimer = null; }
         finishHeard(_talkArea, _talkStatus);
+      } else if(_talkHeld){
+        keepListening();
       }
       return;
     }
     if(text) noteHeard(text, !!fin);
-    const shown = _talkTranscript || _talkPartial;
+    const shown = ((_talkTranscript||'')+' '+(_talkPartial||'')).replace(/\s+/g,' ').trim();
     if(_talkStatus && shown) _talkStatus.textContent = 'Heard: '+shown;
+    if(_talkArea && shown && _talkHeld) _talkArea.value = shown;
+    if(fin && _talkHeld){
+      keepListening();
+      return;
+    }
     if(fin){
       _talkWaitFinal = false;
       if(_talkFinishTimer){ clearTimeout(_talkFinishTimer); _talkFinishTimer = null; }
       finishHeard(_talkArea, _talkStatus);
     }
   };
+}
+let _talkRestartAt=0;
+function keepListening(){
+  if(!_talkHeld) return;
+  const now=Date.now();
+  if(now < _talkRestartAt) return;
+  _talkRestartAt=now+800;
+  try{
+    const plug=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.NudgeAlarm;
+    if(plug && plug.startListen) plug.startListen().catch(function(){});
+  }catch(e){}
 }
 function spokenClockList(text){
   let s = normalizeSpokenClockText(text).toLowerCase();
@@ -13645,7 +13865,8 @@ function spokenClockList(text){
     const ap=(m[3]||'').replace(/\./g,'');
     const before=s.slice(Math.max(0,m.index-16), m.index);
     const after=s.slice(m.index, m.index+m[0].length+4);
-    const looks=!!ap || !!m[2] || /(?:\bat|\bfrom|\buntil|\btill|\bto|\baround)\s*$/.test(before) || /^\d{1,2}:\d{2}\s+at\b/.test(after);
+    const atStart=m.index===0 || /^\s*$/.test(s.slice(0, m.index)) || /(?:^|\s)(?:and then|then|also|and)\s+$/i.test(before);
+    const looks=!!ap || !!m[2] || atStart || /(?:\bat|\bfrom|\buntil|\btill|\bto|\baround)\s*$/.test(before) || /^\d{1,2}:\d{2}\s+at\b/.test(after);
     if(!looks) continue;
     if(h>12 && !m[2] && !ap) continue;
     if(ap.indexOf('p')===0 && h<12) h+=12;
@@ -13798,7 +14019,7 @@ function tidySpokenName(text){
   cuts.forEach(function(re){ s=s.replace(re,' '); });
   s=s.replace(/[^a-z0-9' ]+/gi,' ');
   s=s.replace(/\s+/g,' ').trim();
-  s=s.replace(/^(?:and|to|for|at|on|the|a|my|me|please)\b\s*/i,'').trim();
+  s=s.replace(/^(?:and|then|also|to|for|at|on|the|a|my|me|please)\b\s*/i,'').trim();
   s=s.replace(/\s+\b(?:and|at|on|to|for|a|by)$/i,'').trim();
   return s;
 }
@@ -13820,7 +14041,8 @@ function clockSpans(text){
     if(/^(st|nd|rd|th)\b/i.test(ord)) continue;
     const ap=(m[3]||'').replace(/\./g,'');
     const before=s.slice(Math.max(0,m.index-16), m.index).toLowerCase();
-    const looks=!!ap || !!m[2] || /(?:\bat|\bfrom|\buntil|\btill|\bto|\baround)\s*$/.test(before);
+    const atStart=m.index===0 || /^\s*$/.test(s.slice(0, m.index)) || /(?:^|\s)(?:and then|then|also|and)\s+$/i.test(before);
+    const looks=!!ap || !!m[2] || atStart || /(?:\bat|\bfrom|\buntil|\btill|\bto|\baround)\s*$/.test(before);
     if(!looks) continue;
     spans.push(m.index);
   }
@@ -13873,6 +14095,7 @@ function splitSpokenItems(text){
       const parts=dated.split(/\s*(?:and then|then|also)\s+|\s+\band\b\s+|,\s*/i).map(function(p){ return p.trim(); }).filter(Boolean);
       const rich=parts.filter(function(p){ return spokenClockList(p).length || spokenDateList(p).length; });
       if(parts.length>1 && rich.length>=2) parts.forEach(function(p){ bits.push(p); });
+      else if(parts.length===1 && parts[0] && parts[0]!==dated.trim()) bits.push(parts[0]);
       else if(dated.trim()) bits.push(dated.trim());
     });
   });
@@ -13943,35 +14166,49 @@ function spokenAppointments(text){
   const lines=splitSpokenItems(text);
   const items=[];
   let lastTitle='';
+  let lastMins=-1;
+  let inheritDate='';
+  const pendingDates=[];
+  const prepared=[];
   lines.forEach(function(line){
-    const clocks=spokenClockList(line);
     const dates=spokenDateList(line);
-    if(!clocks.length && !dates.length && line.split(/\s+/).length<3) return;
+    const tail=String(line||'').match(/\s+(today|tonight|tomorrow|tommorow|tommorrow|tmrw|2morrow)\s*$/i);
+    if(tail && dates.length>=2){
+      prepared.push(line.slice(0, tail.index).trim());
+      const carried=spokenDate(tail[1]);
+      if(carried) pendingDates.push(carried);
+    } else prepared.push(line);
+  });
+  prepared.forEach(function(line){
+    if(!line) return;
+    const clocks=spokenClockList(line);
+    let dates=spokenDateList(line);
+    if(!clocks.length && !dates.length && !pendingDates.length && line.split(/\s+/).length<3) return;
     let title=niceSpokenTitle(line);
-    if(title==='Appointment' && lastTitle) title=lastTitle;
-    else if(title!=='Appointment') lastTitle=title;
-    const start=clocks[0]||'';
-    const useDates=dates.length?dates:[''];
-    useDates.forEach(function(date){
-      let heard=line;
-      if(useDates.length>1 && date){
-        const day=Number(String(date).slice(8));
-        const suf=(day%10===1&&day!==11)?'st':(day%10===2&&day!==12)?'nd':(day%10===3&&day!==13)?'rd':'th';
-        const hh=parseInt(String(start).slice(0,2),10)||0;
-        const mi=String(start).slice(3);
-        const ap=hh>=12?'pm':'am';
-        const h12=((hh+11)%12)+1;
-        const clock=mi==='00'?(h12+' '+ap):(h12+':'+mi+' '+ap);
-        heard=title+' at '+clock+' on the '+day+suf;
-      }
-      if(title && title!=='Appointment' && heard.toLowerCase().indexOf(title.toLowerCase())<0) heard=title+' '+heard;
-      const item={title:title, start:start, end:(clocks.length>1 && clocksAreOneRange(line) ? clocks[1] : (start?addClockMinutes(start, 60):'')), heard:heard, room:'', oneOff:true, ambiguous:false, scope:'session'};
-      if(date){
-        item.date=date;
-        item.day=(new Date(date+'T12:00:00').getDay()+6)%7;
-      }
-      items.push(item);
-    });
+    title=title.replace(/^\d{1,2}\b/,'').replace(/^(?:and|then|also)\b/i,'').trim();
+    if((!title || title==='Appointment') && lastTitle) title=lastTitle;
+    else if(title && title!=='Appointment') lastTitle=title;
+    let start=clocks[0]||'';
+    if(start && !/\b(a\.?m\.?|morning)\b/i.test(line)){
+      const hh=parseInt(start.slice(0,2),10)||0;
+      if(hh>=1 && hh<=11 && lastMins>=12*60) start=String(hh+12).padStart(2,'0')+start.slice(2);
+    }
+    if(start){
+      const bits=start.split(':');
+      lastMins=(Number(bits[0])||0)*60+(Number(bits[1])||0);
+    }
+    let date=dates[0]||'';
+    if(!date && pendingDates.length) date=pendingDates.shift();
+    if(!date && inheritDate) date=inheritDate;
+    if(date) inheritDate=date;
+    const heard=line;
+    const item={title:title, start:start, end:(clocks.length>1 && clocksAreOneRange(line) ? clocks[1] : (start?addClockMinutes(start, 60):'')), heard:heard, room:'', oneOff:true, ambiguous:false, scope:'session'};
+    if(date){
+      item.date=date;
+      item.day=(new Date(date+'T12:00:00').getDay()+6)%7;
+    }
+    if(title && title!=='Appointment' && item.heard.toLowerCase().indexOf(title.toLowerCase())<0) item.heard=title+' '+item.heard;
+    items.push(item);
   });
   return items;
 }
@@ -14115,16 +14352,26 @@ function applySpokenForm(kind, text, statusEl){
 }
 let _talkKind='';
 let _talkTranscript='';
+function mergeHeard(prev, text){
+  prev=String(prev||'').replace(/\s+/g,' ').trim();
+  text=String(text||'').replace(/\s+/g,' ').trim();
+  if(!prev) return text;
+  if(!text) return prev;
+  const pl=prev.toLowerCase();
+  const tl=text.toLowerCase();
+  if(tl.indexOf(pl)===0 || pl.indexOf(tl)===0) return text.length>=prev.length ? text : prev;
+  if(pl.indexOf(tl)>=0) return prev;
+  if(tl.indexOf(pl)>=0) return text;
+  if(prev.toLowerCase().endsWith(tl)) return prev;
+  return prev+' '+text;
+}
 function noteHeard(text, fin){
   text=String(text||'').replace(/\s+/g,' ').trim();
   if(!text) return;
-  if(fin){
-    const prev=_talkTranscript.trim();
-    if(!prev) _talkTranscript=text;
-    else if(text.indexOf(prev)===0 || prev.indexOf(text)===0) _talkTranscript = text.length>=prev.length ? text : prev;
-    else if(!prev.endsWith(text)) _talkTranscript = prev+' '+text;
-    _talkPartial='';
-  } else _talkPartial=text;
+  const prev=((_talkTranscript||'')+' '+(_talkPartial||'')).replace(/\s+/g,' ').trim();
+  const next=mergeHeard(prev, text);
+  if(fin){ _talkTranscript=next; _talkPartial=''; }
+  else { _talkTranscript=next; _talkPartial=''; }
 }
 function finishHeard(area, statusEl){
   if(_talkPartial) noteHeard(_talkPartial, true);
@@ -14135,6 +14382,13 @@ function finishHeard(area, statusEl){
     return;
   }
   if(kind==='fab'){
+    const many=spokenAppointments(said);
+    if(many && many.length>1){
+      state.apptWizard={pending:many, done:[], phase:'one', kind:'task'};
+      if(statusEl) statusEl.textContent='Check the first one, then confirm. Nothing is saved yet.';
+      try{ renderModal(); }catch(e){}
+      return;
+    }
     appendHeardText(area, said);
     try{ if(area) area.dispatchEvent(new Event('input', {bubbles:true})); }catch(e){}
     if(statusEl) statusEl.textContent='The words are in the box. Check the name, date, and time, then add it.';
@@ -17443,6 +17697,18 @@ function viewSettings(){
       <button class="btn sm" id="startTourBtn" type="button">Take a tour</button>
       <button class="btn ghost sm" id="gotoHelpBtn" type="button">Help &amp; FAQ</button>
     </p>
+    <details class="setgroup" id="settingsSupport">
+      <summary>Get support</summary>
+      <div class="setgroup-body">
+        <p style="font-size:.88rem;line-height:1.45;margin:0 0 8px">If a day feels heavy, talk to a school counsellor, a parent, or another adult you trust. SnapBack cannot make that call for you.</p>
+        <label for="supportRegionSel">Where you are</label>
+        <select id="supportRegionSel">
+          <option value="IN" ${((s.supportRegion)||'IN')==='IN'?'selected':''}>India</option>
+          <option value="other" ${s.supportRegion==='other'?'selected':''}>Somewhere else</option>
+        </select>
+        <div style="margin-top:10px">${supportLinksHtml()}</div>
+      </div>
+    </details>
     <details class="setgroup" id="settingsSeeDetails">
       <summary>Personalize your screen</summary>
       <div class="setgroup-body">
@@ -17895,6 +18161,24 @@ function wireView(){
         try{ await navigator.clipboard.writeText(val); showAppMessage('Copied','Link copied.'); }catch(e){}
       }
     };
+    const stopShare=document.getElementById('stopShareWeekBtn');
+    if(stopShare) stopShare.onclick=async function(){
+      const id=state.lastShareId;
+      if(!id || typeof _db==='undefined' || !_db){
+        showAppMessage('This link cannot be stopped', 'Only a short link can be stopped. A long link already sent still opens, because the week is inside it.');
+        return;
+      }
+      try{
+        await _db.collection('publicShares').doc(id).delete();
+        state.lastShareId='';
+        state.shareWeekLink='';
+        try{ saveState(); }catch(e){}
+        showAppMessage('Link stopped', 'The short link no longer opens. A long link that was already copied still works.');
+        try{ persistRender(); }catch(e){}
+      }catch(e){
+        showAppMessage('Could not stop the link', 'Check the connection and try again. Nothing was changed.');
+      }
+    };
   }catch(e){ console.warn('share wire', e); }
 
   const _ts=document.getElementById('taskSearchInput');
@@ -18102,11 +18386,10 @@ function wireView(){
       if(!state.moodLog) state.moodLog={};
       const mood=Number(el.dataset.mood)||0;
       state.moodLog[todayStr()]=mood;
-      const lows=Object.keys(state.moodLog).filter(function(d){ return Number(state.moodLog[d])>0 && Number(state.moodLog[d])<=2; });
-      if(mood && mood<=2 && lows.length>=3 && state.safetyPopOn!==todayStr()){
-        state.safetyPopOn=todayStr();
+      const lows=recentLowMoodDays();
+      if(offerMoodSupport(mood)){
         persistRender();
-        showAppMessage('Talk to someone', 'This has been heavy for a few days. Talk to your therapist, a friend, or someone you trust. SnapBack cannot make that call for you.');
+        showAppMessage('Talk to someone', MOOD_SUPPORT_TEXT, {support:true});
       } else persistRender();
     });
     else if(action==='hide-ios') el.addEventListener('click', ()=>{ state.iosHintHidden=true; persistRender(); });
@@ -18901,7 +19184,15 @@ function wireView(){
       persistRender();
     });
     else if(action==='challenge-tool') el.addEventListener('click', ()=>{ applyChallengeTool(el.dataset.tool||el.dataset.id, state.challengeId); });
-    else if(action==='challenge-open') el.addEventListener('click', ()=>{ state.challengeId=el.dataset.id; persistRender(); });
+    else if(action==='challenge-open') el.addEventListener('click', ()=>{ state.challengeId=el.dataset.id; state.lastChallengeId=el.dataset.id; state.challengeShowAll=false; persistRender(); });
+    else if(action==='challenge-more') el.addEventListener('click', ()=>{ state.challengeShowAll=true; persistRender(); });
+    else if(action==='whats-next') el.addEventListener('click', ()=>{
+      state.whatsNext=true;
+      state.challengeShowAll=false;
+      state.view='challenges';
+      if(!state.challengeId && state.lastChallengeId) state.challengeId=state.lastChallengeId;
+      persistRender();
+    });
     else if(action==='challenge-back') el.addEventListener('click', ()=>{ state.challengeId=null; persistRender(); });
     else if(action==='challenge-path') el.addEventListener('click', ()=>{
       const paths = challengePathsFor(state.challengeId);
@@ -20384,6 +20675,13 @@ function wireView(){
 
   if(state.view==='settings'){
     const gh=document.getElementById('gotoHelpBtn'); if(gh) gh.addEventListener('click', ()=>navigateTo('help'));
+    const supportRegionSel=document.getElementById('supportRegionSel');
+    if(supportRegionSel) supportRegionSel.addEventListener('change', function(){
+      if(!state.settings) state.settings={};
+      state.settings.supportRegion=supportRegionSel.value==='other'?'other':'IN';
+      try{ saveState(); }catch(e){}
+      persistRender();
+    });
     const stBtn=document.getElementById('startTourBtn'); if(stBtn) stBtn.addEventListener('click', ()=>startTour(0));
     const settingsTitle=document.getElementById('settingsTitle');
     if(settingsTitle){
