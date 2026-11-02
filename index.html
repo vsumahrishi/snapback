@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="399">
+<meta name="snapback-build" content="406">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://www.gstatic.com https://cdn.jsdelivr.net https://huggingface.co https://cdn-lfs.huggingface.co https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net wss://*.firebaseio.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://open.spotify.com https://w.soundcloud.com https://accounts.google.com https://apis.google.com https://*.firebaseapp.com; media-src 'self' blob: data:; worker-src 'self' blob: https://cdn.jsdelivr.net;">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
@@ -108,6 +108,7 @@ h1{font-size:1.6rem}
 
 label{font-size:.77rem;color:var(--muted);font-weight:600;display:block;margin-bottom:4px}
 input,select,textarea{width:100%;padding:9px 11px;border-radius:10px;border:1px solid var(--line);background:var(--input-bg);font:inherit;font-size:.9rem;color:var(--ink)}
+input::placeholder,textarea::placeholder{color:#8A938E;opacity:1}
 input[type="checkbox"],input[type="radio"]{width:auto;padding:0;margin:0 8px 0 0;vertical-align:middle;flex:0 0 auto}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-offset:1px;border-color:var(--pine)}
 .field{margin-bottom:9px}
@@ -368,7 +369,7 @@ details.setgroup .setgroup-body{margin-top:12px}
   -webkit-appearance:none; appearance:none;
 }
 .fab-task .fab-squirrel{ width:72px; height:72px; display:block; overflow:visible; }
-.fab-task.fab-run{ z-index:80; animation:fabDash 8.6s linear 1; }
+.fab-task.fab-run{ z-index:80; animation:fabDash 8.6s linear 1; pointer-events:none; }
 @keyframes fabDash{
   0%{ transform:translate(0,0) rotate(0deg); }
   8%{ transform:translate(-22vw, 26vh) rotate(-16deg); }
@@ -386,6 +387,10 @@ details.setgroup .setgroup-body{margin-top:12px}
 }
 @media (prefers-reduced-motion: reduce){ .fab-task.fab-run{ animation:none; } }
 @media (min-width:821px){ .fab-task{ bottom:18px; right:18px; } }
+.task-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+@media(max-width:820px){
+  .task-actions{grid-template-columns:1fr 1fr}
+}
 
 .qmini{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:7px 10px;margin-bottom:6px;font-size:.85rem}
 
@@ -405,7 +410,7 @@ details.setgroup .setgroup-body{margin-top:12px}
   }
   .sidebar.mobile-topbar .brand,.sidebar.mobile-topbar .navfoot,.sidebar.mobile-topbar .navsection,.sidebar.mobile-topbar .navbtn{display:none}
   .hamburger{background:none;border:0;color:#F2EFE7;font-size:1.4rem;cursor:pointer;padding:2px 6px;line-height:1}
-  .main{padding:16px}
+  .main{padding:16px 16px calc(120px + env(safe-area-inset-bottom, 0px))}
 }
 .drawer-backdrop{position:fixed;inset:0;background:rgba(20,24,22,.5);z-index:40}
 .drawer-panel{
@@ -419,7 +424,7 @@ details.setgroup .setgroup-body{margin-top:12px}
 /* Phones: prevent iOS Safari's zoom-on-focus (needs >=16px inputs), bigger tap targets, single-column forms */
 @media(max-width:480px){
   input,select,textarea{font-size:16px!important}
-  .main{padding:12px 12px calc(48px + env(safe-area-inset-bottom, 0px))}
+  .main{padding:12px 12px calc(120px + env(safe-area-inset-bottom, 0px))}
   .pagehead h1{font-size:1.35rem}
   .card{padding:14px 14px}
   .row{flex-direction:column}
@@ -2973,6 +2978,34 @@ function toMinutes(hhmm){
 function rangesOverlap(a0,a1,b0,b1){
   return a0 < b1 && b0 < a1;
 }
+function nudgeCalendarSlot(n, dateStr){
+  if(!n || n.enabled===false || !n.time || !dateStr) return null;
+  let on=false;
+  if(n.onceDate) on=String(n.onceDate).slice(0,10)===String(dateStr).slice(0,10);
+  else if(Array.isArray(n.days) && n.days.length){
+    const dow=mondayIndex(new Date(String(dateStr).slice(0,10)+'T12:00:00'));
+    on=n.days.indexOf(dow)>=0;
+  }
+  if(!on) return null;
+  const ring=String(n.time).slice(0,5);
+  let meet=String(n.eventTime||'').slice(0,5);
+  if(!meet){
+    const found=String(n.name||'').match(/\bat\s+(\d{1,2}):(\d{2})\s*(am|pm)?/i);
+    if(found){
+      let h=Number(found[1]);
+      const ap=(found[3]||'').toLowerCase();
+      if(ap==='pm' && h<12) h+=12;
+      if(ap==='am' && h===12) h=0;
+      meet=String(h).padStart(2,'0')+':'+found[2];
+    }
+  }
+  const remindOnly=!!(meet && meet!==ring);
+  const when=remindOnly ? meet : ring;
+  const label=remindOnly
+    ? (String(n.name||'Meeting').replace(/\s+at\s+\d{1,2}:\d{2}\s*(am|pm)?/i,'').trim()||'Meeting')
+    : (n.name||'Alarm');
+  return {time:when, end:remindOnly ? addClockMinutes(when, 60) : '', label:label};
+}
 /** conflicts for a weekly day index OR a concrete dateStr */
 function findScheduleConflicts({day, dateStr, start, end, ignoreId}){
   const s=toMinutes(start), e=toMinutes(end||start);
@@ -3002,6 +3035,27 @@ function findScheduleConflicts({day, dateStr, start, end, ignoreId}){
       if(bs==null) return;
       const bEnd = (be==null || be<=bs) ? bs+60 : be;
       if(rangesOverlap(s,endM,bs,bEnd)) hits.push({kind:'block', title:b.label, start:b.start, end:b.end||''});
+    });
+    (state.tasks||[]).forEach(function(t){
+      if(!t || t.done || t.exerciseId || !t.time) return;
+      if(String(t.date||'').slice(0,10)!==String(dateStr).slice(0,10)) return;
+      if(ignoreId!=null && String(t.id)===String(ignoreId)) return;
+      const ts=toMinutes(t.time);
+      if(ts==null) return;
+      if(rangesOverlap(s,endM,ts,ts+60)) hits.push({kind:'task', title:t.title, start:t.time, end:''});
+    });
+    (state.nudges||[]).forEach(function(n){
+      const slot=nudgeCalendarSlot(n, dateStr);
+      if(!slot) return;
+      if(ignoreId!=null && String(n.id)===String(ignoreId)) return;
+      const covered=(state.studyBlocks||[]).some(function(b){
+        return b && String(b.date||'')===String(dateStr) && String(b.start||'').slice(0,5)===slot.time && meetingKey(b.label||'')===meetingKey(slot.label);
+      });
+      if(covered) return;
+      const ns=toMinutes(slot.time);
+      if(ns==null) return;
+      const nEnd=slot.end ? toMinutes(slot.end) : ns+60;
+      if(rangesOverlap(s,endM,ns,(nEnd==null||nEnd<=ns)?ns+60:nEnd)) hits.push({kind:'nudge', title:slot.label, start:slot.time, end:slot.end||''});
     });
   }
   return hits;
@@ -4451,6 +4505,7 @@ function saveWakeAlarmFromForm(){
       enabled: true,
       name: nameEl && nameEl.value ? String(nameEl.value).trim() : '',
       time: (tm && tm.value) ? tm.value : '07:00',
+      eventTime: state.nudgeVoiceMeet && state.nudgeVoiceMeet!==((tm && tm.value) ? tm.value : '') ? state.nudgeVoiceMeet : '',
       onceDate: repeating ? '' : ((once && once.value) ? once.value : todayStr()),
       days: repeating ? days : [],
       sound: (snd && snd.value) || 'chime',
@@ -4485,6 +4540,7 @@ function saveWakeAlarmFromForm(){
     }
     state.nudgeEditId='';
     state.nudgeFormDraft=null;
+    state.nudgeVoiceMeet='';
     state.wakeAlarm=item;
     if(!state.settings) state.settings={};
     state.settings.alarmSound=item.sound;
@@ -5256,7 +5312,7 @@ function statsHabitLines(days){
     const nums=sleepDays.map(function(d){ return parseFloat(String(state.sleepLog[d])); }).filter(function(n){ return !isNaN(n); });
     let summary='No answers in this range';
     if(sleepDays.length){
-      summary = nums.length ? ('avg '+(nums.reduce(function(a,b){ return a+b; },0)/nums.length).toFixed(1)+' h · '+sleepDays.length+' days') : (sleepDays.length+' days');
+      summary = nums.length ? ('avg '+(nums.reduce(function(a,b){ return a+b; },0)/nums.length).toFixed(1)+' h/day · '+(sleepDays.length===1?'1 day':sleepDays.length+' days')) : (sleepDays.length===1?'1 day':sleepDays.length+' days');
     }
     lines.push({name:'Sleep', summary:summary});
   }
@@ -6225,13 +6281,18 @@ function saveWizardAppointments(list){
     if(kind==='task'){
       if(!Array.isArray(state.tasks)) state.tasks=[];
       const ctx=(document.getElementById('newContext')&&document.getElementById('newContext').value)||'other';
-      state.tasks.unshift({id:uid(), title:p.title, notes:'', date:date||'', time:p.start||'', priority:'medium', urgent:false, important:false, eisSet:false, tier:'could', frog:false, context:ctx, technique:'', meetingUrl:'', nudgeWhen:'none', reminderLeads:[], reminderTime:p.start||'', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{avoid:p.title}, strategic:{what:p.title}, flip:{}, created:Date.now()});
+      const when=p.start||p.eventTime||'';
+      const ring=(p.alarmTime && when && String(p.alarmTime).slice(0,5)!==String(when).slice(0,5)) ? p.alarmTime : '';
+      state.tasks.unshift({id:uid(), title:p.title, notes:'', date:date||'', time:when, priority:'medium', urgent:false, important:false, eisSet:false, tier:'could', frog:false, context:ctx, technique:'', meetingUrl:'', nudgeWhen:'none', reminderLeads:ring?[0]:[], reminderTime:ring, remindOn:ring?(date||''):'', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{avoid:p.title}, strategic:{what:p.title}, flip:{}, created:Date.now()});
       added.push(p);
       return;
     }
     if(kind==='nudge'){
       if(typeof ensureNudges==='function') ensureNudges();
-      state.nudges.push({id:uid(), enabled:true, name:p.title, time:p.start||'09:00', onceDate:date||todayStr(), days:[], sound:'chime', math:!!p.math, alert:'regular', snoozesMax:2, snoozesLeft:2, created:Date.now()});
+      const meet=p.eventTime||p.start||'';
+      const ring=p.alarmTime||p.start||'09:00';
+      const label=/\bat\s+\d{1,2}:\d{2}/i.test(p.title||'') ? p.title : spokenAlarmLabel(p.title, meet);
+      state.nudges.push({id:uid(), enabled:true, name:label, time:ring, eventTime:(meet && meet!==ring ? meet : ''), onceDate:date||todayStr(), days:[], sound:'chime', math:p.math!==false, alert:'regular', snoozesMax:2, snoozesLeft:2, created:Date.now()});
       added.push(p);
       return;
     }
@@ -6240,11 +6301,15 @@ function saveWizardAppointments(list){
     if(!state.studyBlocks) state.studyBlocks=[];
     state.studyBlocks.push(item);
     added.push(item);
+    if(p.alarmTime && p.start && p.alarmTime!==p.start){
+      if(typeof ensureNudges==='function') ensureNudges();
+      state.nudges.push({id:uid(), enabled:true, name:spokenAlarmLabel(p.title, p.start), time:p.alarmTime, onceDate:date||todayStr(), days:[], sound:'chime', math:true, alert:'regular', snoozesMax:2, snoozesLeft:2, created:Date.now()});
+    }
   });
   state.apptWizard=null;
   if(added.length && kind==='event' && typeof pushUndo==='function') pushUndo({type:'bulk-add-blocks', items:added, label:added.length+' appointments saved — Undo'});
   try{ saveState(); }catch(e){}
-  if(kind==='nudge'){
+  if(kind==='nudge' || (list||[]).some(function(p){ return p && p.alarmTime && p.start && p.alarmTime!==p.start; })){
     try{ scheduleWakeAlarms(); }catch(e){}
     try{ if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms(); }catch(e){}
   }
@@ -6363,7 +6428,7 @@ function renderModal(){
         <div style="font-weight:800;font-size:1.05rem;margin:8px 28px 8px 0">Add the one I missed</div>
         <button type="button" class="btn" id="wizHold" data-voice="journal" style="margin-top:8px">Hold and speak</button>
         <div id="wizStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0">Click Hold and speak, say it, then Done speaking. Or type it.</div>
-        <textarea id="wizMore" rows="3" style="width:100%" placeholder="Example: dentist tomorrow at 4"></textarea>
+        <textarea id="wizMore" rows="3" style="width:100%" placeholder="Meeting at 5 remind at 3"></textarea>
         <div style="display:flex;gap:8px;margin-top:10px">
           <button class="btn" id="wizAdd" type="button">Add this</button>
           <button class="btn ghost" id="wizDone" type="button">That's all</button>
@@ -6393,17 +6458,27 @@ function renderModal(){
     const kind=w.kind||'event';
     const noun=kind==='task'?'Task':(kind==='nudge'?'Nudge':'Appointment');
     const date=p.date || (p.heard ? '' : (p.day!=null && typeof nextDateForWeekday==='function' ? nextDateForWeekday(p.day) : todayStr()));
+    const jobTime=p.eventTime||p.start||'';
+    const ringTime=p.alarmTime||jobTime;
+    const taskEarly=kind==='task' && jobTime && ringTime && String(jobTime).slice(0,5)!==String(ringTime).slice(0,5);
     const timeRow=kind==='event'
       ? `<div class="row" style="margin-top:8px"><div class="field"><label>Start</label><input id="wizStart" type="time" value="${escapeHtml(p.start||'')}"></div><div class="field"><label>End</label><input id="wizEnd" type="time" value="${escapeHtml(p.end||'')}"></div></div>`
-      : `<div class="field" style="margin-top:8px"><label>Time</label><input id="wizStart" type="time" value="${escapeHtml(p.start||'')}"></div>`;
+      : taskEarly
+      ? `<div class="field" style="margin-top:8px"><label>When it happens</label><input id="wizStart" type="time" value="${escapeHtml(jobTime)}"></div><div class="field" style="margin-top:8px"><label>Remind at</label><input id="wizAlarm" type="time" value="${escapeHtml(ringTime)}"></div><p style="font-size:.8rem;color:var(--muted);margin:4px 0 0">The calendar keeps the time it happens. The earlier time only rings.</p>`
+      : `<div class="field" style="margin-top:8px"><label>${kind==='nudge'?'Rings at':'When it happens'}</label><input id="wizStart" type="time" value="${escapeHtml(kind==='nudge'?(p.alarmTime||p.start||''):(p.start||''))}"></div>`;
+    const early=(p.alarmTime && p.start && p.alarmTime!==p.start) || (p.alarmTime && p.eventTime && p.alarmTime!==p.eventTime);
+    const alarmRow=kind==='event'
+      ? `<div class="field" style="margin-top:8px"><label>Alarm</label><input id="wizAlarm" type="time" value="${escapeHtml(p.alarmTime||p.start||'')}"><p style="font-size:.8rem;color:var(--muted);margin:4px 0 0">${early?'The meeting stays at the start time. This is when the alarm rings, so you can get ready.':'Leave this the same as the start, or set an earlier time to get ready.'}</p></div>`
+      : (early && kind!=='task' ? `<p style="font-size:.8rem;color:var(--muted);margin:6px 0 0">Rings at the time above. The name says when the meeting is.</p>` : '');
     const mathRow=kind==='nudge' ? `<label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input id="wizMath" type="checkbox" ${p.math?'checked':''}> Ask a math problem</label>` : '';
     root.innerHTML=`<div class="overlay"><div class="quotecard" style="max-width:440px;text-align:left;position:relative">
       <button type="button" id="wizX" style="position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.2rem">✕</button>
       <div style="font-weight:800;font-size:1.05rem;margin:8px 28px 8px 0">${noun} ${n} of ${total}</div>
-      <div class="field"><label>What I heard. Edit this and the name, time, and date update.</label><textarea id="wizHeard" rows="2" style="width:100%">${escapeHtml(p.heard||p.title||'')}</textarea></div>
-      <div class="field" style="margin-top:8px"><label>Name</label><input id="wizTitle" value="${escapeHtml(p.title||'')}"></div>
+      <div class="field"><label>What I heard. Edit this and the name, time, and date update.</label><textarea id="wizHeard" rows="2" style="width:100%" placeholder="Meeting at 5 remind at 3">${escapeHtml(p.heard||p.title||'')}</textarea></div>
+      <div class="field" style="margin-top:8px"><label>Name</label><input id="wizTitle" value="${escapeHtml((p.eventTime&&p.alarmTime&&p.eventTime!==p.alarmTime)?spokenAlarmLabel(p.title, p.eventTime):spokenAlarmLabel(p.title, p.eventTime||p.start))}"></div>
       <div class="field" style="margin-top:8px"><label>Date</label><input id="wizDate" type="date" value="${escapeHtml(date)}"></div>
       ${timeRow}
+      ${alarmRow}
       ${mathRow}
       <div style="display:flex;gap:8px;margin-top:12px">
         <button class="btn" id="wizOk" type="button">Confirm this one</button>
@@ -6420,9 +6495,12 @@ function renderModal(){
       const dateEl=document.getElementById('wizDate');
       const startEl=document.getElementById('wizStart');
       const endEl=document.getElementById('wizEnd');
-      if(title) title.value=first.title||'';
+      if(title) title.value=(first.eventTime && first.alarmTime && first.eventTime!==first.alarmTime) ? spokenAlarmLabel(first.title, first.eventTime) : spokenAlarmLabel(first.title, first.eventTime||first.start);
       if(dateEl && first.date) dateEl.value=first.date;
-      if(startEl && first.start) startEl.value=first.start;
+      if(startEl && first.start && kind!=='nudge') startEl.value=first.start;
+      if(kind==='nudge' && startEl && (first.alarmTime||first.start)) startEl.value=first.alarmTime||first.start;
+      const alarmEl=document.getElementById('wizAlarm');
+      if(alarmEl && (first.alarmTime||first.start)) alarmEl.value=first.alarmTime||first.start;
       if(endEl && first.end) endEl.value=first.end;
       return items;
     }
@@ -6445,7 +6523,12 @@ function renderModal(){
       const first=(parsed&&parsed[0])?parsed[0]:p;
       if(title) first.title=title.value.trim()||first.title;
       if(dateEl&&dateEl.value){ first.date=dateEl.value; first.oneOff=true; }
-      if(startEl&&startEl.value) first.start=startEl.value;
+      if(startEl&&startEl.value){
+        if(kind==='nudge') first.alarmTime=startEl.value;
+        else { first.start=startEl.value; first.eventTime=startEl.value; }
+      }
+      const alarmPick=document.getElementById('wizAlarm');
+      if(alarmPick&&alarmPick.value) first.alarmTime=alarmPick.value;
       if(endEl&&endEl.value) first.end=endEl.value;
       if(mathEl) first.math=mathEl.checked;
       first.heard=raw||first.heard;
@@ -6758,7 +6841,7 @@ function renderModal(){
       <div style="font-weight:800;font-size:1.15rem;margin-bottom:8px">Time is up</div>
       <p style="margin:0 0 14px">${ft?('“'+escapeHtml(ft.title)+'”'):'Your focus block'} finished.</p>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <button class="btn" id="ffDone" type="button">Completed task</button>
+        <button class="btn" id="ffDone" type="button">Done</button>
         <button class="btn ghost" id="ffExtend" type="button">Extend time on focus</button>
       </div>
     </div></div>`;
@@ -7281,7 +7364,7 @@ function renderModal(){
       <p style="font-size:.85rem;color:var(--muted);margin:0 0 8px">Hold and speak, or type. Nothing is saved until you add it.</p>
       <button type="button" class="btn" id="fabHold" data-voice="fab" style="touch-action:none;user-select:none;-webkit-user-select:none">Hold and speak</button>
       <div id="fabStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0">Tap Hold and speak, say the task, then tap Done speaking. You do not have to keep your finger down.</div>
-      <textarea id="fabHeard" rows="3" placeholder="What needs doing?" style="width:100%"></textarea>
+      <textarea id="fabHeard" rows="3" placeholder="Meeting at 5 remind at 3" style="width:100%"></textarea>
       <div class="field" style="margin-top:8px"><label>Name</label><input id="fabTitle" style="width:100%"></div>
       <div class="row">
         <div class="field"><label>Date</label><input id="fabDate" type="date"></div>
@@ -8861,7 +8944,7 @@ function viewTerms(){
 const TOUR_STEPS = [
   { title: 'Welcome to SnapBack', body: 'This quick tour shows the main places. Use <b>Next</b> and <b>Back</b>. Tap <b>Skip</b> anytime. You can open the tour again from Settings → Take a tour.', view: 'today' },
   { title: 'Home (Today)', body: 'Your calm daily screen. <b>Tap a section title</b> to open it; tap again to hide it. Must-do, deadlines, and today’s commitments stay out of the way until you need them.', view: 'today' },
-  { title: 'Tasks', body: 'Use <b>Open</b>, <b>Completed</b>, and <b>Add task</b>. Tap a header to show or hide that panel. Add a task with a title and a date (today or later).', view: 'tasks' },
+  { title: 'Tasks', body: 'Use <b>Open</b>, <b>Done</b>, and <b>Add task</b>. Tap a header to show or hide that panel. Add a task with a title and a date (today or later).', view: 'tasks' },
   { title: 'Challenges', body: 'When you feel stuck, start from how you feel — for example “I cannot get started”. SnapBack suggests tools that match that situation.', view: 'challenges' },
   { title: 'Techniques', body: 'Tools like Bite Size, Focus Pod, Focus Plate, and Body Doubling. Usually you pick or create a task, then run the method on its own screen.', view: 'techniques' },
   { title: 'Focus Pod', body: 'A timer for one focus block. On that screen, choose a soundscape type, set volume, then <b>Play sound</b>. Session-end beeps are under Settings → Sounds & notifications (timers).', view: 'timer' },
@@ -9562,33 +9645,29 @@ function viewChallenges(){
   if(open && (CHALLENGE_PATHS[open] || open)){
     const ch = CHALLENGES.find(c=>c.id===open) || {title:'Challenge', ico:'🎯'};
     const paths = challengePathsFor(open);
-    const showAll = !state.whatsNext || state.challengeShowAll;
-    const shown = showAll ? paths : paths.slice(0, 3);
     return `
     <div class="pagehead">
       <button class="btn ghost sm" data-action="challenge-back" style="margin-bottom:8px">← All challenges</button>
-      <div class="eyebrow">${state.whatsNext?'Three tools. Start with the first.':'Pick one path — you do not need all of them'}</div>
+      <div class="eyebrow">Pick one. You do not need the others.</div>
       <h1>${ch.ico||''} ${escapeHtml(ch.title)}</h1>
       <p>${escapeHtml(ch.blurb||'')}</p>
     </div>
     <div style="display:grid;gap:12px">
-      ${shown.map((p,i)=>`
+      ${paths.map((p,i)=>`
         <button class="card" data-action="challenge-path" data-idx="${i}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line);background:var(--card)">
           <span style="display:block;font-size:1.6rem">${p.ico||''}</span>
-          <span style="display:block;font-weight:700;margin-top:6px">${i===0&&state.whatsNext?'Start here · ':''}${escapeHtml(p.title)}</span>
+          <span style="display:block;font-weight:700;margin-top:6px">${escapeHtml(p.title)}</span>
           <span style="display:block;font-size:.9rem;color:var(--muted);margin-top:4px">${escapeHtml(p.desc)}</span>
         </button>`).join('')}
-    </div>
-    ${(!showAll && paths.length>3)?'<button type="button" class="btn ghost" data-action="challenge-more" style="margin-top:12px;width:100%">Show the rest</button>':''}`;
+    </div>`;
   }
   return `
   <div class="pagehead">
     <button class="btn ghost sm" data-action="go-back" style="margin-bottom:8px">← Back</button>
     <div class="eyebrow">What feels hard right now?</div>
     <h1>Challenges</h1>
-    <p>Tap the feeling. You will get three tools, not the whole list. The first one is the one to start.</p>
+    <p>Tap what feels hard. Each one opens tools you can try. None of them is marked as the right first step.</p>
   </div>
-  <button type="button" class="btn" data-action="whats-next" style="width:100%;margin-bottom:12px">Just tell me what's next</button>
   <div style="display:grid;gap:10px">
     ${CHALLENGES.map(c=>`
       <button class="card" data-action="challenge-open" data-id="${c.id}" style="text-align:left;cursor:pointer;width:100%;border:1px solid var(--line);background:var(--card)">
@@ -10586,7 +10665,7 @@ function strategyPanel(t){
 }
 
 function taskDateTag(t){
-  if(t.done) return '<span class="badge low">Completed</span>';
+  if(t.done) return '<span class="badge low">Done</span>';
   if(!t.date) return '<span class="badge low">No date</span>';
   const du = daysUntil(t.date);
   if(du<0) return '<span class="badge overdue">Overdue</span>';
@@ -10638,22 +10717,20 @@ function taskCard(t){
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px"><div style="font-weight:700;font-size:1.05rem">${escapeHtml(t.title)}</div>${slipMarkHtml(t)}${taskDateTag(t)}</div>
     <div style="font-size:.88rem;color:var(--muted);margin-bottom:10px">
       ${t.date ? '📅 '+escapeHtml(t.date)+(t.time?' · '+escapeHtml(t.time):'') : 'No date set'}
-      ${t.done?' · done':''}
       ${t.frog?' · 🐸 frog':''}${t.backburner?' · backburner':''}
       ${typeof isOverdue==='function' && isOverdue(t)?' · overdue':''}
     </div>
     ${typeof isOverdue==='function' && isOverdue(t) && !t.done && !(state.techHide&&state.techHide[t.id]) ? `<div style="background:var(--pine-soft);border-radius:10px;padding:8px 10px;margin-bottom:10px;display:flex;gap:8px;align-items:flex-start"><span style="flex:1;font-size:.88rem">This has been waiting. Do the first two minutes only.</span><button type="button" class="btn ghost sm" data-action="hide-tech" data-id="${t.id}" aria-label="Close">×</button></div>` : ''}
     ${(!t.done && ((typeof isOverdue==='function' && isOverdue(t)) || (t.created && Date.now()-t.created<36*3600*1000))) ? `<div style="display:flex;gap:8px;margin-bottom:10px"><button type="button" class="btn ghost sm" data-action="open-bite" data-id="${t.id}">Bite Size</button><button type="button" class="btn ghost sm" data-action="open-spot" data-id="${t.id}">Spotlight</button></div>` : ''}
     ${t.notes?`<div style="font-size:.85rem;color:var(--muted);margin-bottom:10px">${escapeHtml((t.notes||'').slice(0,160))}</div>`:''}
-    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:4px">
-      <button type="button" class="btn sm" data-action="task-start" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">Start</button>
-      <button type="button" class="btn sm" data-action="task-complete" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">Completed</button>
-      <button type="button" class="btn ghost sm" data-action="hard-one" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">${t.frog?'🐸 Hard one':'Hard one'}</button>
-      <button type="button" class="btn ghost sm" data-action="slip-help" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">Can’t start</button>
-      <button type="button" class="btn ghost sm" data-action="start-task-edit" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">Edit</button>
-      <button type="button" class="btn ghost sm" data-action="quick-done" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">${t.done?'Undo done':'Done'}</button>
-      <button type="button" class="btn ghost sm" data-action="delete-task" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">Delete</button>
-      <button type="button" class="btn ghost sm" data-action="task-menu" data-id="${t.id}" style="width:100%;height:100%;min-height:44px;padding:8px 6px;line-height:1.15">More</button>
+    <div class="task-actions">
+      <button type="button" class="btn sm" data-action="task-start" data-id="${t.id}">Start</button>
+      <button type="button" class="btn sm" data-action="quick-done" data-id="${t.id}">${t.done?'Undo':'Done'}</button>
+      <button type="button" class="btn ghost sm" data-action="hard-one" data-id="${t.id}">${t.frog?'🐸 Hard one':'Hard one'}</button>
+      <button type="button" class="btn ghost sm" data-action="slip-help" data-id="${t.id}">Can’t start</button>
+      <button type="button" class="btn ghost sm" data-action="start-task-edit" data-id="${t.id}">Edit</button>
+      <button type="button" class="btn ghost sm" data-action="delete-task" data-id="${t.id}">Delete</button>
+      <button type="button" class="btn ghost sm" data-action="task-menu" data-id="${t.id}">More</button>
     </div>
   </li>`;
 }
@@ -10941,8 +11018,8 @@ function viewTasks(){
 
   const items = list.length ? list.map(taskCard).join('') : (f==='done'
     ? ((state.tasks||[]).some(function(t){ return t && t.done; })
-      ? `<div class="empty">No completed tasks match this search or date range.</div>`
-      : `<div class="empty">No completed tasks yet. Mark a task done, then open Completed again.</div>`)
+      ? `<div class="empty">No done tasks match this search or date range.</div>`
+      : `<div class="empty">No done tasks yet. Tap Done on a task, then open Done again.</div>`)
     : `<div class="empty">Nothing here. Add a task above, or pick a different filter.</div>`);
   if(mode === 'one'){
     const open = list.filter(t=>!t.done);
@@ -11087,7 +11164,7 @@ function viewTasks(){
   </div>
   <div class="card" style="padding:0;overflow:hidden;margin-bottom:8px">
     <button type="button" class="btn ghost" data-action="tasks-panel" data-panel="done" style="width:100%;text-align:left;padding:14px 16px;border:none;border-radius:0;display:flex;justify-content:space-between;align-items:center">
-      <span style="font-weight:800">Completed (${completedTaskList().length})</span>
+      <span style="font-weight:800">Done (${completedTaskList().length})</span>
       <span style="color:var(--muted)">${tasksPanelOpen('done')?'▾':'▸'}</span>
     </button>
   </div>
@@ -11411,6 +11488,15 @@ function itemsForDate(dateStr){
   state.tasks.filter(t=>t.date===dateStr && !t.exerciseId).forEach(t=>items.push({type:'task', kind:'task', id:t.id, color: t.priority==='high'?'var(--brick)':t.priority==='medium'?'var(--amber)':'var(--pine)',time:t.time||'',label:t.title,meetingUrl:t.meetingUrl}));
   state.tasks.filter(t=>t.startDate===dateStr && t.startDate!==t.date && !t.exerciseId).forEach(t=>items.push({type:'taskstart', kind:'task', id:t.id, color:'var(--blue-soft)',time:t.startTime||'',label:t.title,meetingUrl:t.meetingUrl}));
   state.studyBlocks.filter(b=>b.date===dateStr).forEach(b=>items.push({type:'block', kind:'block', id:b.id, color:'var(--purple)', time:b.start, end:b.end||'', label:b.label, meetingUrl:b.meetingUrl, seriesId:b.seriesId||'', source:b.source||''}));
+  (state.nudges||[]).forEach(function(n){
+    const slot=nudgeCalendarSlot(n, dateStr);
+    if(!slot) return;
+    const already=items.some(function(it){
+      return String(it.time||'').slice(0,5)===slot.time && meetingKey(it.label||'')===meetingKey(slot.label);
+    });
+    if(already) return;
+    items.push({type:'nudge', kind:'nudge', id:n.id, color:'var(--purple)', time:slot.time, end:slot.end||'', label:slot.label, meetingUrl:''});
+  });
   (state.externalBusy||[]).forEach(ev=>{
     if(ev.date!==dateStr) return;
     if(!ev.id) ev.id='ext_'+dateStr+'_'+(ev.start||'')+'_'+(ev.title||'');
@@ -12381,7 +12467,7 @@ function calDraftCard(){
   const d = state.calDraft;
   if(!d) return '';
   return `<div>
-    <div class="field"><label>Name</label><input id="calDraftTitle" value="${escapeHtml(d.title||'')}" placeholder="Class, meeting, gym…"></div>
+    <div class="field"><label>Name</label><input id="calDraftTitle" value="${escapeHtml(d.title||'')}" placeholder="Meeting at 5 remind at 3"></div>
     <button type="button" class="btn" id="calHold" data-voice="event" style="touch-action:none;user-select:none;margin-top:8px">Hold and speak</button>
     <div id="calVoiceStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0 0">Hold the button and say the whole appointment: name, day, start, end, place, and whether it repeats. Then check the form. Nothing is saved yet.</div>
     <div class="row" style="margin-top:8px">
@@ -12450,6 +12536,16 @@ function openDayPop(ds){
   persistRender();
 }
 function openListedEvent(it){
+  if(it && (it.kind==='nudge' || it.type==='nudge')){
+    state.nudgeEditId=it.id;
+    state.view='nudge';
+    state.dayPop=null;
+    state.calDraft=null;
+    if(!state.nudgeOpen) state.nudgeOpen={create:true, yours:true};
+    state.nudgeOpen.create=true;
+    persistRender();
+    return;
+  }
   const date=(state.dayPop&&state.dayPop.date)||state.selectedDay||todayStr();
   const title=String(it.label||'').split('·')[0].trim();
   if(eventRepeats(it)){
@@ -12828,7 +12924,7 @@ function viewNudge(){
     <div style="font-size:.78rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase">Current time</div>
     <div id="nudgeNowClock" style="font-size:2.1rem;font-weight:800;margin:2px 0 10px">${nowClock}</div>
     <div class="field"><label>Time</label><input type="time" id="wakeTime" value="${escapeHtml(timeVal)}"></div>
-    <div class="field" style="margin-top:8px"><label>Name (optional)</label><input id="wakeName" maxlength="80" placeholder="Example: Pack laptop charger" value="${escapeHtml((editing&&editing.name)||(draft&&draft.name)||'')}"></div>
+    <div class="field" style="margin-top:8px"><label>Name (optional)</label><input id="wakeName" maxlength="80" placeholder="Meeting at 5 remind at 3" value="${escapeHtml((editing&&editing.name)||(draft&&draft.name)||'')}"></div>
     <button type="button" class="btn" id="wakeHold" data-voice="nudge" style="touch-action:none;user-select:none;margin-top:8px">Hold and speak</button>
     <div id="wakeVoiceStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0 0">Hold the button and say the whole Nudge: name, time, one time or repeat, the date or days, silent or regular, and math or no math. Then check the form. Nothing is saved yet.</div>
     <p style="font-size:.78rem;color:var(--muted);margin:6px 0 0">The clock above is the time now. The time you set is when this Nudge should ring.</p>
@@ -13161,7 +13257,7 @@ function viewCalendar(){
     <div id="ttOcrStatus" style="font-size:.82rem;color:var(--muted);margin-bottom:8px"></div>
     <button type="button" class="btn" id="ttHold" data-voice="quick" style="touch-action:none;user-select:none">Hold and speak</button>
     <div id="ttVoiceStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0 8px">Hold the button and say every appointment, with the day and time. Let go. Check the list before you save.</div>
-    <textarea id="ttPaste" rows="4" placeholder="Dentist Mon 2pm&#10;Doctor Tue 4pm&#10;Or paste a screenshot here" style="width:100%"></textarea>
+    <textarea id="ttPaste" rows="4" placeholder="Meeting at 5 remind at 3" style="width:100%"></textarea>
     <button class="btn" id="ttParseBtn" type="button" style="margin-top:10px">Check what I read</button>
     <div id="ttPreview" style="margin-top:12px"></div>
   `)}
@@ -13963,6 +14059,50 @@ function addClockMinutes(hhmm, mins){
   total=((total%1440)+1440)%1440;
   return String(Math.floor(total/60)).padStart(2,'0')+':'+String(total%60).padStart(2,'0');
 }
+function friendlyClock(hhmm){
+  const bits=String(hhmm||'').split(':');
+  let h=Number(bits[0]);
+  const m=Number(bits[1]||0);
+  if(!(h>=0) || h>23 || isNaN(h)) return '';
+  const ap=h>=12?'pm':'am';
+  let h12=h%12; if(!h12) h12=12;
+  return h12+':'+(m<10?'0':'')+m+' '+ap;
+}
+function spokenAlarmLabel(name, eventClock){
+  const nice=String(name||'Alarm').replace(/\s+/g,' ').trim()||'Alarm';
+  const when=friendlyClock(eventClock);
+  return when ? (nice+' at '+when) : nice;
+}
+function spokenAlarmSplit(text){
+  const raw=normalizeSpokenClockText(text);
+  const low=raw.toLowerCase();
+  const clocks=spokenClockList(raw);
+  let name=tidySpokenName(raw);
+  name=name.replace(/\b(alarm|reminder|nudge|remind|wake|ready)\b/ig,' ');
+  name=name.replace(/\b\d+\b/g,' ');
+  name=name.replace(/\b(for the|for a|for an|hours?|minutes?|before|for|the|me|my)\b/ig,' ');
+  name=name.replace(/\s+/g,' ').trim();
+  if(!name) name='Alarm';
+  if(clocksAreOneRange(raw)) return {name:name, alarm:clocks[0]||'', event:clocks[0]||''};
+  function clockAfter(at){
+    if(at<0) return '';
+    return spokenClockList(raw.slice(at, at+48))[0]||'';
+  }
+  const alarmAt=low.search(/\b(alarm|remind(?:er)?(?: me)?|nudge(?: me)?|wake me|get ready)\b/);
+  const eventAt=low.search(/\b(meeting|class|appointment|lecture|session|call)\b/);
+  let alarm=clockAfter(alarmAt);
+  let event=clockAfter(eventAt);
+  if(!event) event=clocks.filter(function(c){ return c!==alarm; })[0]||alarm||clocks[0]||'';
+  const hoursBefore=low.match(/\b(\d+)\s+hours?\s+before\b/);
+  const minsBefore=low.match(/\b(\d+)\s+minutes?\s+before\b/);
+  if(!alarm && event && (hoursBefore||minsBefore)){
+    const lead=(hoursBefore?Number(hoursBefore[1])*60:0)+(minsBefore?Number(minsBefore[1]):0);
+    alarm=addClockMinutes(event, -lead);
+  }
+  if(!alarm) alarm=event||clocks[0]||'';
+  if(!event) event=alarm;
+  return {name:name, alarm:alarm, event:event};
+}
 function normalizeSpokenClockText(text){
   let s=speechNumbers(String(text||''));
   s=s.replace(/\bat\s+(\d{1,2})(?:st|nd|rd|th)\s+(\d{1,2})(?:st|nd|rd|th)\b/gi, function(_, h, m){
@@ -14081,6 +14221,23 @@ function isSpokenContinuation(bit){
 function clocksAreOneRange(bit){
   return /\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\s+(?:to|until|till|-)\s+\d{1,2}(?::\d{2})?/i.test(String(bit||''));
 }
+function isReminderClause(bit){
+  return /^\s*(?:(?:and|then|also)\s+)?(?:an?\s+)?(?:alarm|remind(?:er)?(?:\s+me)?|nudge(?:\s+me)?|wake me|get ready)\b/i.test(String(bit||''));
+}
+function spokenReminderPair(bit){
+  const s=String(bit||'');
+  if(clocksAreOneRange(s)) return false;
+  if(spokenClockList(s).length<2) return false;
+  return /\b(alarm|remind(?:er)?(?: me)?|nudge(?: me)?|wake me|get ready)\b/i.test(s);
+}
+function glueReminderParts(parts){
+  const out=[];
+  (parts||[]).forEach(function(p){
+    if(out.length && isReminderClause(p)) out[out.length-1]=out[out.length-1]+' '+p;
+    else out.push(p);
+  });
+  return out;
+}
 function isTimeOnly(bit){
   if(!spokenClockList(bit).length) return false;
   const name=tidySpokenName(bit);
@@ -14091,7 +14248,7 @@ function splitSpokenItems(text){
   const bits=[];
   norm.split(/\s*(?:\.\s+|;\s+|\n+)\s*/).forEach(function(sentence){
     splitAfterDates(sentence).forEach(function(dated){
-      const parts=dated.split(/\s*(?:and then|then|also)\s+|\s+\band\b\s+|,\s*/i).map(function(p){ return p.trim(); }).filter(Boolean);
+      const parts=glueReminderParts(dated.split(/\s*(?:and then|then|also)\s+|\s+\band\b\s+|,\s*/i).map(function(p){ return p.trim(); }).filter(Boolean));
       const rich=parts.filter(function(p){ return spokenClockList(p).length || spokenDateList(p).length; });
       if(parts.length>1 && rich.length>=2) parts.forEach(function(p){ bits.push(p); });
       else if(parts.length===1 && parts[0] && parts[0]!==dated.trim()) bits.push(parts[0]);
@@ -14104,7 +14261,7 @@ function splitSpokenItems(text){
     bit=String(bit||'').trim();
     if(!bit) return;
     const spans=clockSpans(bit);
-    if(spans.length>=2 && !clocksAreOneRange(bit)){
+    if(spans.length>=2 && !clocksAreOneRange(bit) && !spokenReminderPair(bit)){
       if(hold){ out.push(hold); hold=''; }
       spans.forEach(function(at, i){
         const from=i===0?0:at;
@@ -14201,7 +14358,11 @@ function spokenAppointments(text){
     if(!date && inheritDate) date=inheritDate;
     if(date) inheritDate=date;
     const heard=line;
-    const item={title:title, start:start, end:(clocks.length>1 && clocksAreOneRange(line) ? clocks[1] : (start?addClockMinutes(start, 60):'')), heard:heard, room:'', oneOff:true, ambiguous:false, scope:'session'};
+    const split=spokenAlarmSplit(line);
+    const meet=split.event||start;
+    const ring=split.alarm||meet;
+    if(meet) start=meet;
+    const item={title:split.name&&split.name!=='Alarm'?split.name:title, start:start, end:(clocks.length>1 && clocksAreOneRange(line) ? clocks[1] : (start?addClockMinutes(start, 60):'')), heard:heard, room:'', oneOff:true, ambiguous:false, scope:'session', eventTime:meet, alarmTime:ring};
     if(date){
       item.date=date;
       item.day=(new Date(date+'T12:00:00').getDay()+6)%7;
@@ -14300,8 +14461,10 @@ function setFormDays(prefix, days){
 function applySpokenForm(kind, text, statusEl){
   const plan=planFromSpeech(kind, text);
   if(kind==='nudge'){
-    setFormValue('wakeName', plan.name);
-    setFormValue('wakeTime', plan.clocks[0]);
+    const split=spokenAlarmSplit(text);
+    setFormValue('wakeName', spokenAlarmLabel(split.name||plan.name, split.event||plan.clocks[0]));
+    setFormValue('wakeTime', split.alarm||plan.clocks[0]);
+    state.nudgeVoiceMeet=(split.event && split.alarm && split.event!==split.alarm) ? split.event : '';
     if(plan.repeat){
       setFormRadio('wakeWhen','repeat');
       if(plan.days.length) setFormDays('wakeDay', plan.days);
@@ -15587,7 +15750,7 @@ function viewSemester(){
     <div id="ttOcrStatus" style="font-size:.82rem;color:var(--muted);margin-bottom:8px"></div>
     <button type="button" class="btn" id="ttHold" data-voice="quick" style="touch-action:none;user-select:none">Hold and speak</button>
     <div id="ttVoiceStatus" style="font-size:.82rem;color:var(--muted);margin:6px 0 8px">Hold the button and say every appointment, with the day and time. Let go. Check the list before you save.</div>
-    <textarea id="ttPaste" rows="4" placeholder="One item per line, or paste a screenshot here" style="width:100%"></textarea>
+    <textarea id="ttPaste" rows="4" placeholder="Meeting at 5 remind at 3" style="width:100%"></textarea>
     <button class="btn" id="ttParseBtn" style="margin-top:10px">Preview</button>
     <div id="ttPreview" style="margin-top:12px"></div>
   </div>
@@ -16522,13 +16685,17 @@ function viewJournal(){
   </div>`;
 }
 function addJournalEntry(){
-  const text=(document.getElementById('journalText')?.value||'').trim();
+  const box=document.getElementById('journalText');
+  const text=(box&&box.value||'').trim();
   if(!text) return;
   if(!state.journal) state.journal=[];
   const now=new Date();
   const time=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
   state.journal.unshift({id:uid(), text, date:todayStr(), time, filed:false});
   state.journal=state.journal.slice(0,100);
+  if(box) box.value='';
+  try{ _talkTranscript=''; _talkPartial=''; _talkHeld=false; }catch(e){}
+  window._skipRestore=true;
   persistRender();
 }
 function fileJournalEntry(id, bucket){
@@ -16638,7 +16805,10 @@ function habitSec(key, title, inner){
 function ensureHabitPlans(){
   if(!Array.isArray(state.exercisePlan)) state.exercisePlan=[];
   if(!state.screenPlan) state.screenPlan={nudgeTime:'21:00', days:{}};
-  if(!state.habitNudges) state.habitNudges={exercise:true, meal:true, water:true, sleep:true, screen:true};
+  if(!state.habitNudges) state.habitNudges={exercise:true, meal:true, water:true, sleep:true, screen:true, mood:true};
+  ['exercise','meal','water','sleep','screen','mood'].forEach(function(k){
+    if(state.habitNudges[k]===undefined) state.habitNudges[k]=true;
+  });
   if(!state.mealLog) state.mealLog={};
   if(!state.sleepLog) state.sleepLog={};
   if(!state.exerciseLog) state.exerciseLog={};
@@ -17577,7 +17747,7 @@ function viewStats(){
   </div>
 
   <div class="grid3">
-    <div class="statbox"><div class="lbl">Tasks completed</div><div class="val" style="color:var(--pine)">${completed.length}</div></div>
+    <div class="statbox"><div class="lbl">Tasks done</div><div class="val" style="color:var(--pine)">${completed.length}</div></div>
     <div class="statbox"><div class="lbl">Left undone</div><div class="val" style="color:var(--brick)">${leftOut.length}</div></div>
   </div>
 
@@ -17805,7 +17975,7 @@ ${(state.settings&&state.settings.adminOpen)?`<details style="margin-top:12px" i
         <div class="field" style="flex:1;min-width:120px"><label>To</label><input type="date" id="shareTo" value=""></div>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;margin:10px 0;max-width:320px">
-        <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelDone" checked style="width:18px;height:18px;flex:0 0 auto"> <span>Completed tasks</span></label>
+        <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelDone" checked style="width:18px;height:18px;flex:0 0 auto"> <span>Done tasks</span></label>
         <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelOpen" checked style="width:18px;height:18px;flex:0 0 auto"> <span>Open tasks</span></label>
         <label style="display:flex;gap:10px;align-items:center;font-size:.9rem;margin:0;cursor:pointer"><input type="checkbox" id="shareSelClasses" style="width:18px;height:18px;flex:0 0 auto"> <span>Class load summary</span></label>
       </div>
@@ -18000,7 +18170,7 @@ function buildStatusUpdateText(){
     const tasks=(state.tasks||[]);
     if(wantDone){
       const done=tasks.filter(t=>t.done && (inRange(t.date) || inRange(t.completedAt) || (!t.date && t.done)));
-      lines.push('Completed tasks ('+done.length+'):');
+      lines.push('Done tasks ('+done.length+'):');
       if(done.length){
         done.slice(0,40).forEach(t=>{
           lines.push('• '+(t.title||'Untitled')+(t.date?' ('+t.date+')':''));
@@ -18319,10 +18489,7 @@ function wireView(){
     });
     else if(action==='task-complete') el.addEventListener('click', (e)=>{
       e.preventDefault(); e.stopPropagation();
-      const t=findTask(id); if(!t) return;
-      if(t.done && !wasDone){ t.done=true; t.doneAt=Date.now(); offerCelebration(); }
-      else { t.done=false; t.doneAt=Date.now(); }
-      persistRender();
+      toggleDone(id);
     });
     else if(action==='hard-one') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); setHardOne(id); });
     else if(action==='slip-help') el.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); state.techniqueTaskId=id; openStartWizard(); });
