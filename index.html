@@ -6,7 +6,7 @@
 <title>SnapBack — Study Companion</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1E2422">
-<meta name="snapback-build" content="406">
+<meta name="snapback-build" content="407">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.gstatic.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://www.gstatic.com https://cdn.jsdelivr.net https://huggingface.co https://cdn-lfs.huggingface.co https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net wss://*.firebaseio.com; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://open.spotify.com https://w.soundcloud.com https://accounts.google.com https://apis.google.com https://*.firebaseapp.com; media-src 'self' blob: data:; worker-src 'self' blob: https://cdn.jsdelivr.net;">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png">
@@ -121,6 +121,25 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 .btn.warm:hover{background:#c67a2e}
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
 .btn.ghost:hover{background:var(--grey-soft)}
+.assist-actions{display:flex;flex-direction:row;flex-wrap:wrap;gap:8px;align-items:center}
+.assist-actions .btn{width:auto;flex:0 0 auto}
+.mind{display:flex;flex-direction:column;align-items:center;gap:10px}
+.mind-core{background:var(--pine);color:#fff;border-radius:999px;padding:8px 14px;font-weight:700;font-size:.88rem;text-align:center;max-width:100%}
+.mind-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.mind-branch{flex:0 1 150px;background:var(--grey-soft);border:1px solid var(--line);border-radius:12px;padding:8px 10px;font-size:.8rem;line-height:1.35;color:var(--ink)}
+body.desk-on .main{padding-bottom:120px}
+.desk-bar{position:fixed;left:0;right:0;bottom:0;z-index:25;display:flex;gap:8px;align-items:center;padding:10px 14px calc(12px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
+.desk-bar input{border-radius:999px;padding:12px 16px}
+.desk-clip{width:46px;height:46px;min-width:46px;border-radius:50%;padding:0;display:flex;align-items:center;justify-content:center}
+.desk-clip svg{width:20px;height:20px;display:block}
+.saywrap{display:flex;justify-content:flex-end;margin-bottom:8px}
+.say{background:var(--pine);color:#fff;border-radius:16px 16px 4px 16px;padding:8px 12px;max-width:92%}
+.nextup{border:1px solid var(--pine);background:var(--pine-soft);border-radius:14px;padding:12px 14px;margin-bottom:14px}
+.desk-kicker{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.desk-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:.95rem}
+.desk-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.desk-actions .btn{width:auto;flex:0 0 auto}
+textarea.assist-box::placeholder{color:#8A938E;font-size:13px;font-weight:400;opacity:1}
 .btn.danger{background:var(--brick)}
 .btn.danger:hover{background:#a3402f}
 .btn.gold{background:var(--gold)}
@@ -424,6 +443,7 @@ details.setgroup .setgroup-body{margin-top:12px}
 /* Phones: prevent iOS Safari's zoom-on-focus (needs >=16px inputs), bigger tap targets, single-column forms */
 @media(max-width:480px){
   input,select,textarea{font-size:16px!important}
+  textarea.assist-box::placeholder{font-size:13px!important;color:#8A938E}
   .main{padding:12px 12px calc(120px + env(safe-area-inset-bottom, 0px))}
   .pagehead h1{font-size:1.35rem}
   .card{padding:14px 14px}
@@ -6016,7 +6036,7 @@ function topOfMindBanner(){
 }
 function habitSavedHtml(){ return ''; }
 function startTourPending(){
-  if(state.startTour===4) return false;
+  return false;
   if(typeof needsLoginScreen==='function' && needsLoginScreen()) return false;
   if(state.quoteModalOpen || state.quickAddOpen) return false;
   if(state.startMark!=='v4'){
@@ -6208,6 +6228,7 @@ function restoreMainFields(snap){
 function renderMain(){
   const el=document.getElementById('main');
   if(!el) return;
+  document.body.classList.remove('desk-on');
   try{ ensureFab(); }catch(e){}
   let _fieldSnap=null;
   try{
@@ -6243,7 +6264,7 @@ function renderMain(){
     try{ wireLoginScreen(); }catch(e){ console.warn(e); }
     return;
   }
-  const views={today:viewToday,terms:viewTerms,tasks:viewTasks,challenges:viewChallenges,planAhead:viewPlanAhead,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
+  const views={today:viewDesk,assist:viewAssist,terms:viewTerms,tasks:viewTasks,challenges:viewChallenges,planAhead:viewPlanAhead,plan:viewPlan,techniques:viewTechniques,calendar:viewCalendar,semester:viewSemester,projects:viewProjects,money:viewMoney,timer:viewTimer,
     eisenhower:viewEisenhower,bitesize:viewBiteSize,timeblocking:viewTimeBlocking,rule135:viewRule135,nudge:viewNudge,
     bodydouble:viewBodyDouble,energyFocus:viewEnergyFocus,ifThen:viewIfThen,ritualBackpack:viewRitualBackpack,ritualCostume:viewRitualCostume,ritualLocation:viewRitualLocation,contextSplit:viewContextSplit,settings:viewSettings,
     habits:viewHabits,journal:viewJournal,studytools:viewStudyTools,stats:viewStats,help:viewHelp,reminders:viewNudge,mindmaps:viewMindmaps,soundscape:viewSoundscape,
@@ -10491,6 +10512,869 @@ function commitmentRowsHtml(rows, emptyText){
     return `<div class="classrow">${inner}</div>`;
   }).join('');
 }
+function assistPage(low){
+  if(!/^(open|show|go to)\b/.test(low)) return null;
+  const pages=[['tasks','Tasks'],['calendar','Calendar'],['nudge','Nudge'],['habits','Healthy habits'],['journal','Jot it'],['money','Money'],['settings','Settings'],['stats','Stats'],['projects','Projects'],['timer','Timer'],['techniques','Techniques'],['challenges','Challenges']];
+  for(let i=0;i<pages.length;i++){
+    if(low.indexOf(pages[i][0])>=0 || low.indexOf(pages[i][1].toLowerCase())>=0) return {id:pages[i][0], label:pages[i][1]};
+  }
+  return null;
+}
+function assistHintList(){
+  return ['Dr appointment at 7 remind me at 5','Physics project is due on 7th Nov','Add stick figures to the comic strip','Physics class at 10.30 every Tuesday','Send email to Prof ASK at 11','Gym at 7.30 on Mondays','I dont know where to start','Plan Project','Send my expense statement','Upload my calendar'];
+}
+function assistPlaceholder(){
+  return assistHintList().concat(['Summarise the attached lesson','Draft a message to my teacher']).join('\n');
+}
+function assistWantsCalendarFile(low){
+  if(!/\b(upload|import|sync|bring)\b/.test(low)) return false;
+  return /\b(calendar|google|outlook)\b/.test(low);
+}
+function assistFindTask(text){
+  const low=String(text||'').toLowerCase();
+  const tasks=(state.tasks||[]).filter(function(t){ return t && !t.done && t.title; });
+  let best=null, score=0;
+  tasks.forEach(function(t){
+    const title=String(t.title).toLowerCase();
+    if(low.indexOf(title)>=0 && title.length>score){ best=t; score=title.length+10; return; }
+    const words=title.split(/\s+/).filter(function(w){ return w.length>3; });
+    const hit=words.filter(function(w){ return low.indexOf(w)>=0; }).length;
+    if(hit && hit>=Math.min(2, words.length) && hit>score){ best=t; score=hit; }
+  });
+  return best;
+}
+function assistNextTask(){
+  const tasks=(state.tasks||[]).filter(function(t){ return t && !t.done; });
+  return tasks.find(function(t){ return t.frog; })
+    || tasks.find(function(t){ return t.tier==='must'; })
+    || tasks.slice().sort(function(a,b){ return String(a.date||'9999').localeCompare(String(b.date||'9999')); })[0]
+    || null;
+}
+function assistSnap(said, low){
+  if(/\bhydrat|\bdrank water\b|\bhad water\b/.test(low)) return {place:'leave'};
+  if(/\b(had a meal|had lunch|had dinner|had breakfast|i ate|ate a)\b/.test(low)) return {place:'leave'};
+  if(/\b(slept|hours of sleep|screen time)\b/.test(low)) return {place:'leave'};
+  if(/\b(done with|finished|i finished|i did|completed|mark .* done)\b/.test(low)){
+    const t=assistFindTask(low);
+    if(!t) return {place:'ask', askKind:'done', summary:'Which task is done?'};
+    return {place:'done', taskId:t.id, title:t.title, summary:'Marked done: '+t.title+'.'};
+  }
+  if(/\b(don'?t know where to start|do not know where to start|where do i start|where to start|i(?:'| a)?m stuck|overwhelmed|too many tasks|can'?t start|cannot start)\b/.test(low)){
+    const t=assistNextTask();
+    if(!t) return {place:'ask', askKind:'name', summary:'Nothing is saved yet. Tell me the one thing.'};
+    return {place:'choose', taskId:t.id, title:t.title, summary:t.title};
+  }
+  if(/^(open|show|go to|take me to)\b/.test(low) || /\b(show me|open my|where is my|where'?s my)\b/.test(low)){
+    const pages=[['calendar','calendar'],['calendar','schedule'],['tasks','tasks'],['tasks','to do'],['tasks','todo'],['money','money'],['money','expense'],['habits','habit'],['journal','jot'],['journal','note'],['projects','project'],['nudge','alarm'],['nudge','reminder'],['nudge','nudge'],['stats','stat'],['settings','setting'],['timer','timer'],['techniques','technique'],['challenges','challenge']];
+    for(let i=0;i<pages.length;i++){
+      if(low.indexOf(pages[i][1])>=0) return {place:'open', view:pages[i][0], title:pages[i][0], summary:"I'll open that."};
+    }
+  }
+  return null;
+}
+function assistMoney(said, low){
+  const income=/\b(got|received|receive|earned|earn|income)\b/.test(low);
+  const expense=/\b(spent|spend|paid|pay|bought|buy|expense)\b/.test(low);
+  if(!income && !expense) return null;
+  if(income && expense) return null;
+  const num=low.match(/(?:rs\.?|₹|rupees?)?\s*(\d+(?:\.\d+)?)/);
+  if(!num) return null;
+  const amount=Number(num[1]);
+  if(!amount) return null;
+  let title='';
+  const from=said.match(/\bfrom\s+(.+)$/i);
+  const on=said.match(/\bon\s+(.+)$/i);
+  if(income && from) title='From '+from[1].replace(/[₹.]/g,'').replace(/\b(rs|rupees?)\b/ig,'').trim();
+  else if(expense && on) title=on[1].replace(/[₹.]/g,'').replace(/\b(rs|rupees?)\b/ig,'').trim();
+  if(!title){
+    title=said.replace(/[₹]/g,'').replace(/\b(rs\.?|rupees?)\b/ig,'').replace(/\d+(?:\.\d+)?/,'').replace(/\b(got|received|receive|earned|earn|income|spent|spend|paid|pay|bought|buy|expense|on|from|a|an|the|my)\b/ig,' ').replace(/\s+/g,' ').trim();
+  }
+  if(!title) title=income?'Received':'Expense';
+  title=title.charAt(0).toUpperCase()+title.slice(1);
+  const kind=income?'income':'expense';
+  return {place:'money', type:kind, amount:amount, title:title, category:'General', summary: income ? ('Saved ₹'+amount+' as money received. '+title+'.') : ('Saved ₹'+amount+' as an expense. '+title+'.'), source:said};
+}
+function assistReminder(said, low){
+  if(!/\b(email|e-mail|mail|message|whatsapp|text|call|remind me)\b/.test(low)) return null;
+  if(/\b(appointment|meeting|class|lecture|session|doctor|dr)\b/.test(low)) return null;
+  if(assistWantsCalendarFile(low)) return null;
+  const clocks=(typeof spokenClockList==='function') ? spokenClockList(said) : [];
+  const time=clocks[0]||'';
+  let rest=said.replace(/\b(at|by)\s+\d{1,2}(?::\d{2})?\s*(a\.?m\.?|p\.?m\.?)?(?:\s+.*)?$/i,'').trim();
+  rest=rest.replace(/^(please\s+)?/i,'');
+  let title=rest;
+  const to=rest.match(/\bto\s+(.+)$/i);
+  if(/\b(email|e-mail|mail)\b/i.test(rest) && to) title='Email '+to[1].trim();
+  else if(/^remind me\b/i.test(rest)) title=(rest.replace(/^remind me\s+(to\s+)?/i,'').trim()||'Reminder');
+  if(!title) title='Reminder';
+  let date=todayStr();
+  if(time){
+    const now=new Date();
+    const bits=time.split(':').map(Number);
+    if(bits[0]<now.getHours() || (bits[0]===now.getHours() && bits[1]<=now.getMinutes())) date=tomorrowStr();
+  }
+  return {place:'reminder', title:title, date:date, time:time, summary: time ? ('Reminder set. '+title+' at '+time+'.') : ('Task added. '+title+'.'), source:said};
+}
+function assistInterpret(text){
+  const said=String(text||'').replace(/\s+/g,' ').trim();
+  const low=said.toLowerCase();
+  if(!said) return null;
+  if(/\b(summar\w*|highlights?|key points|mind\s*map|graphic\w*)\b/.test(low)){
+    return {place:'lesson', source:said};
+  }
+  if(/\b(draft|write)\b/.test(low) && /\b(message|email|note|letter)\b/.test(low)){
+    return {place:'draft', source:said};
+  }
+  if(assistWantsCalendarFile(low)){
+    return {place:'upload-calendar', title:'Upload my calendar', summary:'Choose the calendar file you downloaded. I will add those events here.', source:said};
+  }
+  const money=assistMoney(said, low);
+  if(money) return money;
+  const reminder=assistReminder(said, low);
+  if(reminder) return reminder;
+  if(/^(plan|start|new|create|open)\b.*\bprojects?\b/.test(low) || /\b(plan|start|new|create)\s+(a\s+)?projects?\b/.test(low)){
+    return {place:'project', title:'', summary:"I'll open Projects. Answer one question at a time.", source:said};
+  }
+  const snap=assistSnap(said, low);
+  if(snap){ snap.source=said; return snap; }
+  const page=assistPage(low);
+  if(page && spokenClockList(said).length===0 && !/\b(due|tomorrow|today|at)\b/.test(low)){
+    return {place:'open', view:page.id, title:page.label, summary:"I'll open "+page.label+".", source:said};
+  }
+  const parsed=(typeof spokenAppointments==='function' ? spokenAppointments(said) : [])[0] || {};
+  const title=(parsed.title && parsed.title!=='Appointment') ? parsed.title : said;
+  const date=parsed.date||'';
+  const event=parsed.eventTime||parsed.start||'';
+  const ring=parsed.alarmTime && event && parsed.alarmTime!==event ? parsed.alarmTime : '';
+  if(/\b(workout|gym|exercise|yoga|\brun\b|swim|walk|meditation)\b/.test(low)){
+    return {place:'habit', title:title, date:date, time:event||'08:00', summary:"I'll add this under Healthy habits"+(date?' on '+date:'')+' at '+(event||'08:00')+'. It repeats that weekday.', source:said};
+  }
+  if(/\b(idea|jot|sticky|what if)\b/.test(low) && !event && !/\b(due|assignment|homework)\b/.test(low)){
+    return {place:'jot', title:said, summary:"I'll put this in Jot it.", source:said};
+  }
+  if(/\b(i must|must do|must complete|have to finish)\b/.test(low) || /\bmust\b/.test(low)){
+    return {place:'must', title:title, date:date||tomorrowStr(), time:event, askBreak:false, summary:"I'll put this in Must-do"+(date?' for '+date:' for tomorrow')+'.', source:said};
+  }
+  if(/\b(due|deadline|assignment|homework|exam|submit)\b/.test(low)){
+    let name=title.replace(/\s+(is\s+)?due\b.*$/i,'').replace(/\s+on\s+\d.*$/i,'').trim();
+    if(!name || name==='Appointment' || name==='Alarm') name=said.replace(/\s+(is\s+)?due\b.*$/i,'').trim()||said;
+    return {place:'deadline', title:name, date:date, time:event, remind:ring||'08:00', askBreak:true, summary:'', source:said};
+  }
+  if(event || /\b(meeting|class|appointment|lecture|session|doctor|dr)\b/.test(low)){
+    return {place:'calendar', title:title, date:date||todayStr(), time:event||'09:00', remind:ring, summary:'', source:said};
+  }
+  return {place:'ask', askKind:'which', title:said, summary:'', source:said};
+}
+function assistFile(d){
+  if(!d) return;
+  if(d.place==='lesson' || d.place==='draft'){
+    if(!state.lesson || !state.lesson.points){
+      state.lessonNote='Attach a PDF or a text file first.';
+    } else if(d.place==='draft'){
+      state.lesson.draft=assistWriteDraft(d.source||'', state.lesson);
+      state.lessonNote='';
+    } else {
+      state.lessonNote='';
+    }
+    state.assistHeard='';
+    const box=document.getElementById('assistBox');
+    if(box) box.value='';
+    state.view='today';
+    try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+    return;
+  }
+  if(d.place==='techniques' || d.place==='open'){
+    state.assistDraft=null;
+    setView(d.view||'challenges');
+    return;
+  }
+  if(d.place==='project'){
+    state.assistDraft=null;
+    state.assistHeard='';
+    state.projectId=null;
+    state.projectWizard={step:'kind', kind:'', stream:'', subject:'', title:'', deadline:'', fromExisting:false};
+    state.view='projects';
+    try{ saveState(); }catch(e){}
+    try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+    return;
+  }
+  if(d.place==='ask' || d.place==='choose' || d.place==='leave'){
+    if(d.place==='ask' && d.askKind==='which'){
+      state.assistPending={kind:'which', text:d.title||d.source||''};
+    } else if(d.place==='leave') state.assistPending=null;
+    state.assistDraft=null;
+    state.assistHeard='';
+    const box=document.getElementById('assistBox');
+    if(box) box.value='';
+    try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+    return;
+  }
+  if(d.place==='done'){
+    const t=(state.tasks||[]).find(function(x){ return x && String(x.id)===String(d.taskId); });
+    if(t) t.done=true;
+  } else if(d.place==='habitlog'){
+    const day=todayStr();
+    if(!state.habitLog) state.habitLog={};
+    state.habitLog[day]=state.habitLog[day]||{};
+    state.habitLog[day][d.habitId]=d.value;
+  } else if(d.place==='technique'){
+    const t=(state.tasks||[]).find(function(x){ return x && String(x.id)===String(d.taskId); });
+    if(d.tech==='split' && t){
+      t.chunks=[{id:uid(),text:'Read the brief',done:false},{id:uid(),text:'Do the first part',done:false},{id:uid(),text:'Finish and check',done:false}];
+    } else if(d.tech==='start' && t){
+      state.topOfMindId=t.id;
+      state.assistDraft=null;
+      state.view='today';
+    } else if(t && d.tech==='body'){
+      try{ applyTechniqueTaskId(t.id); }catch(e){}
+      state.assistDraft=null;
+      state.view='bodydouble';
+    } else if(t && d.tech==='timer'){
+      try{ applyTechniqueTaskId(t.id); }catch(e){}
+      state.focusPodAsk=t.id;
+      state.assistDraft=null;
+      state.view='timer';
+    } else if(d.tech==='eisenhower'){
+      if(t) try{ applyTechniqueTaskId(t.id); }catch(e){}
+      state.assistDraft=null;
+      state.view='eisenhower';
+    }
+  } else if(d.place==='money'){
+    if(!Array.isArray(state.money)) state.money=[];
+    state.money.unshift({id:uid(), title:d.title||'Money', amount:Number(d.amount)||0, type:d.type==='income'?'income':'expense', category:d.category||'General', date:todayStr()});
+  } else if(d.place==='reminder'){
+    if(!Array.isArray(state.tasks)) state.tasks=[];
+    state.tasks.unshift({id:uid(), title:d.title||'Reminder', notes:'', date:d.date||'', time:d.time||'', priority:'medium', urgent:false, important:true, eisSet:false, tier:'could', frog:false, context:'personal', technique:'', meetingUrl:'', nudgeWhen:d.time?'attime':'none', reminderLeads:[], reminderTime:d.time||'', remindOn:d.date||'', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{avoid:d.title||'Reminder'}, strategic:{what:d.title||'Reminder'}, flip:{}, created:Date.now()});
+    if(d.time){
+      try{ ensureNudges(); }catch(e){}
+      if(!Array.isArray(state.nudges)) state.nudges=[];
+      state.nudges.push({id:uid(), enabled:true, name:d.title||'Reminder', time:d.time, onceDate:d.date||todayStr(), days:[], sound:'chime', math:false, alert:'regular', snoozesMax:2, snoozesLeft:2, created:Date.now()});
+      try{ scheduleWakeAlarms(); }catch(e){}
+      try{ if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms(); }catch(e){}
+    }
+    state._assistOffer=state.tasks[0];
+  } else if(d.place==='jot'){
+    if(!Array.isArray(state.journal)) state.journal=[];
+    const now=new Date();
+    state.journal.unshift({id:uid(), text:d.title, date:todayStr(), time:String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'), filed:false});
+    state.journal=state.journal.slice(0,100);
+  } else if(d.place==='habit'){
+    try{ ensureHabitPlans(); }catch(e){}
+    const date=d.date||todayStr();
+    const start=d.time||'08:00';
+    const end=addClockMinutes(start, 60);
+    if(!Array.isArray(state.exercisePlan)) state.exercisePlan=[];
+    state.exercisePlan.push({id:uid(), day:mondayIndex(new Date(date+'T12:00:00')), start:start, end:end, focus:d.title||'Workout', details:'', km:'', onceDate:'', from:todayStr(), to:''});
+    try{ syncExerciseLinks(); }catch(e){}
+  } else if(d.place==='must' || d.place==='deadline'){
+    const task={id:uid(), title:d.title||'Task', notes:'', date:d.date||'', time:d.time||'', priority:'medium', urgent:d.place==='must', important:d.place==='must', eisSet:d.place==='must', tier:d.place==='must'?'must':'could', frog:false, context:'school', technique:'', meetingUrl:'', nudgeWhen:'none', reminderLeads:d.place==='deadline'?[0]:[], reminderTime:d.place==='deadline'?(d.remind||'08:00'):'', remindOn:d.place==='deadline'?(d.date||''):'', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], pomodoros:0, done:false, whenThen:{}, rewarding:{avoid:d.title||'Task'}, strategic:{what:d.title||'Task'}, flip:{}, created:Date.now()};
+    if(!Array.isArray(state.tasks)) state.tasks=[];
+    state.tasks.unshift(task);
+    state.assistBreak='';
+    if(d.askBreak) state.assistPending={kind:'break', taskId:task.id, title:task.title};
+  } else if(d.place==='calendar'){
+    const date=d.date||todayStr();
+    const start=d.time||'09:00';
+    const end=addClockMinutes(start, 60);
+    if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
+    state.studyBlocks.push({id:uid(), label:d.title||'Appointment', date:date, start:start, end:end, meetingUrl:'', room:'', kind:'other', alarmMinutes:d.remind?0:15});
+    if(d.remind && d.remind!==start){
+      try{ ensureNudges(); }catch(e){}
+      if(!Array.isArray(state.nudges)) state.nudges=[];
+      state.nudges.push({id:uid(), enabled:true, name:(d.title||'Appointment'), time:d.remind, eventTime:start, onceDate:date, days:[], sound:'chime', math:false, alert:'regular', snoozesMax:2, snoozesLeft:2, created:Date.now()});
+      try{ scheduleWakeAlarms(); }catch(e){}
+      try{ if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms(); }catch(e){}
+    }
+  }
+  const offered=state._assistOffer;
+  state._assistOffer=null;
+  state.assistDraft=null;
+  state.assistHeard='';
+  const box=document.getElementById('assistBox');
+  if(box) box.value='';
+  try{ saveState(); }catch(e){}
+  if(offered && offered.id) state.view='today';
+  try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+}
+function assistStudyLesson(name, text){
+  const stop={the:1,and:1,that:1,this:1,with:1,from:1,have:1,were:1,they:1,their:1,which:1,when:1,what:1,your:1,into:1,about:1,also:1,than:1,then:1,there:1,these:1,those:1,been:1,will:1,would:1,could:1,should:1,because:1,while:1,where:1,each:1,such:1,only:1,other:1,more:1,most:1,some:1,very:1,just:1,over:1,after:1,before:1,between:1,through:1};
+  const clean=String(text||'').replace(/\s+/g,' ').trim().slice(0,20000);
+  const sentences=clean.split(/(?<=[.!?])\s+/).map(function(s){ return s.trim(); }).filter(function(s){ return s.length>35 && s.length<240; });
+  const freq={};
+  sentences.forEach(function(s){
+    s.toLowerCase().split(/[^a-z0-9]+/).forEach(function(w){
+      if(w.length<4 || stop[w]) return;
+      freq[w]=(freq[w]||0)+1;
+    });
+  });
+  const ranked=sentences.map(function(s){
+    const words=s.toLowerCase().split(/[^a-z0-9]+/).filter(function(w){ return w.length>3 && !stop[w]; });
+    const score=words.reduce(function(a,w){ return a+(freq[w]||0); },0)/Math.sqrt(words.length||1);
+    return {s:s, words:words, score:score};
+  }).sort(function(a,b){ return b.score-a.score; });
+  const points=[];
+  ranked.forEach(function(item){
+    if(points.length>=5) return;
+    const clash=points.some(function(p){
+      const pw=p.toLowerCase().split(/[^a-z0-9]+/);
+      return item.words.filter(function(w){ return pw.indexOf(w)>=0; }).length>=4;
+    });
+    if(!clash) points.push(item.s.replace(/\s+/g,' '));
+  });
+  let title=String(name||'Lesson').replace(/\.[a-z0-9]+$/i,'').replace(/[_-]+/g,' ').trim();
+  const first=(clean.split(/(?<=[.!?])\s+/)[0]||'').trim();
+  if(first.length>12 && first.length<70) title=first.replace(/[.!?]$/,'').trim();
+  return {name:name||'Lesson', title:title||'Lesson', points:points, draft:''};
+}
+function assistWriteDraft(said, lesson){
+  const who=(String(said||'').match(/\bto\s+(.+?)(?:\s+about|\s+saying|\s+that|$)/i)||[])[1];
+  const to=(who||'').replace(/\b(my|the|a|an)\b/ig,'').replace(/\s+/g,' ').trim();
+  const student=(state.profile&&state.profile.name)||'';
+  const lines=['Hello'+(to?' '+to:'')+','];
+  lines.push('');
+  if(lesson && lesson.points && lesson.points.length){
+    lines.push('I went through '+lesson.title+'. These are the main points:');
+    lesson.points.forEach(function(p){ lines.push('- '+p); });
+    lines.push('');
+  }
+  const tail=String(said||'').replace(/^.*\b(about|saying|that)\s+/i,'');
+  if(tail && tail.length>12 && tail.toLowerCase()!==String(said||'').toLowerCase()){
+    lines.push(tail.charAt(0).toUpperCase()+tail.slice(1));
+    lines.push('');
+  }
+  lines.push('Thank you'+(student?',':'') );
+  if(student) lines.push(student);
+  return lines.join('\n');
+}
+function assistPdfDecode(t){
+  return String(t||'').replace(/\\n/g,' ').replace(/\\r/g,' ').replace(/\\t/g,' ').replace(/\\\(/g,'(').replace(/\\\)/g,')').replace(/\\\\/g,'\\').replace(/\\([0-7]{1,3})/g,function(_,o){ return String.fromCharCode(parseInt(o,8)); });
+}
+function assistPullPdf(s){
+  const bits=[];
+  let m;
+  const one=/\(((?:\\.|[^\\)])*)\)\s*Tj/g;
+  while((m=one.exec(s))) bits.push(assistPdfDecode(m[1]));
+  const many=/\[([\s\S]*?)\]\s*TJ/g;
+  while((m=many.exec(s))){
+    const row=[];
+    const inner=/\(((?:\\.|[^\\)])*)\)/g;
+    let n;
+    while((n=inner.exec(m[1]))) row.push(assistPdfDecode(n[1]));
+    if(row.length) bits.push(row.join(''));
+  }
+  return bits.join('\n');
+}
+async function assistInflate(bytes){
+  let start=0;
+  if(bytes.length>2 && bytes[0]===0x78) start=2;
+  const body=bytes.subarray(start, Math.max(start+1, bytes.length-4));
+  const ds=new DecompressionStream('deflate-raw');
+  const out=await new Response(new Blob([body]).stream().pipeThrough(ds)).arrayBuffer();
+  return new Uint8Array(out);
+}
+async function assistPdfText(buf){
+  const bytes=new Uint8Array(buf);
+  const latin=new TextDecoder('latin1').decode(bytes);
+  const re=/stream\r?\n/g;
+  const jobs=[];
+  const parts=[];
+  let m;
+  while((m=re.exec(latin))){
+    const start=m.index+m[0].length;
+    const end=latin.indexOf('endstream', start);
+    if(end<0) continue;
+    const before=latin.slice(Math.max(0,m.index-180), m.index);
+    const slice=bytes.subarray(start, end);
+    if(/FlateDecode/.test(before)){
+      jobs.push(assistInflate(slice).then(function(u){ parts.push(assistPullPdf(new TextDecoder('latin1').decode(u))); }).catch(function(){}));
+    } else parts.push(assistPullPdf(latin.slice(start, end)));
+  }
+  await Promise.all(jobs);
+  let text=parts.join('\n').replace(/[^\S\n]+/g,' ').trim();
+  if(text.length<40) text=assistPullPdf(latin);
+  return text;
+}
+function assistLessonCard(){
+  const lesson=state.lesson;
+  const note=state.lessonNote||'';
+  if(!lesson && !note) return '';
+  if(lesson && lesson.error) return `<div class="card"><p style="margin:0;color:var(--muted)">${escapeHtml(lesson.error)}</p></div>`;
+  if(!lesson) return `<div class="card"><p style="margin:0;color:var(--muted)">${escapeHtml(note)}</p></div>`;
+  const branches=(lesson.points||[]).map(function(p){ return `<div class="mind-branch">${escapeHtml(p)}</div>`; }).join('');
+  return `<div class="card">
+    <div class="lbl">Key points</div>
+    <div class="mind">
+      <div class="mind-core">${escapeHtml(lesson.title||'Lesson')}</div>
+      <div class="mind-row">${branches}</div>
+    </div>
+    ${note?`<p style="margin:10px 0 0;color:var(--muted)">${escapeHtml(note)}</p>`:''}
+    ${lesson.draft?`<label style="display:block;margin-top:12px">Message draft</label><textarea id="assistDraftOut" rows="8" readonly style="width:100%">${escapeHtml(lesson.draft)}</textarea><button type="button" class="btn ghost" id="assistCopyDraft" style="margin-top:8px">Copy</button>`:''}
+  </div>`;
+}
+function assistHomeCard(){
+  const ph=assistPlaceholder();
+  return `<div class="card">
+    <div class="lbl">SnapBack Assist</div>
+    <textarea id="assistBox" class="assist-box" rows="12" placeholder="${escapeHtml(ph)}">${escapeHtml(state.assistHeard||'')}</textarea>
+    <input type="file" id="assistIcs" accept=".ics,text/calendar,.txt" style="position:absolute;left:-9999px;width:1px;height:1px" aria-label="Calendar file">
+    <input type="file" id="assistLessonFile" accept=".pdf,.txt,.text,.md,application/pdf,text/plain" style="position:absolute;left:-9999px;width:1px;height:1px" aria-label="Lesson file">
+    <div class="assist-actions" style="margin-top:10px">
+      <button type="button" class="btn ghost" data-voice="assist" data-area="assistBox" data-status="assistStatus">Hold and speak</button>
+      <button type="button" class="btn" id="assistGo">File this</button>
+      <button type="button" class="btn ghost" id="assistClear">Delete</button>
+      <button type="button" class="btn ghost" id="assistAttach">Attach</button>
+    </div>
+    <div id="assistStatus" hidden></div>
+  </div>${assistLessonCard()}`;
+}
+function viewAssist(){
+  return `
+  <div class="pagehead">
+    <button type="button" class="btn ghost" id="assistBack">Back</button>
+    <h1>SnapBack Assist</h1>
+  </div>
+  ${assistHomeCard()}`;
+}
+function deskAddDays(iso, n){
+  const d=new Date(String(iso).slice(0,10)+'T12:00:00');
+  d.setDate(d.getDate()+n);
+  return toDateStr(d);
+}
+function deskNice(iso){
+  const d=new Date(String(iso).slice(0,10)+'T12:00:00');
+  return d.toLocaleDateString(undefined,{weekday:'long', day:'numeric', month:'short'});
+}
+function deskClock(t){
+  if(!t) return '';
+  try{ return friendlyClock(t); }catch(e){ return t; }
+}
+function deskWakeTime(said){
+  const low=String(said||'').toLowerCase();
+  let time=(spokenClockList(said)||[])[0]||'05:30';
+  if(!/\bp\.?m/.test(low)){
+    const h=Number(String(time).slice(0,2));
+    if(h>=12) time=String(h===12?0:h-12).padStart(2,'0')+String(time).slice(2);
+  }
+  return time;
+}
+function deskItems(date){
+  const items=[];
+  (state.nudges||[]).forEach(function(n){
+    if(!n || n.enabled===false) return;
+    let hit=n.onceDate===date;
+    if(!hit && !n.onceDate && Array.isArray(n.days) && n.days.length){
+      try{ hit=n.days.indexOf(mondayIndex(new Date(date+'T12:00:00')))>=0; }catch(e){}
+    }
+    if(hit) items.push({time:n.time||'', title:n.name||'Alarm', kind:'alarm'});
+  });
+  (state.tasks||[]).forEach(function(t){
+    if(!t || t.done) return;
+    let stepped=false;
+    (t.checkpoints||[]).forEach(function(c){
+      if(c && c.date===date && !c.done){ stepped=true; items.push({time:c.time||'', title:c.text, kind:'step', task:t.title}); }
+    });
+    if(!stepped && t.date===date) items.push({time:t.time||'', title:t.title, kind:'task'});
+  });
+  (state.studyBlocks||[]).forEach(function(b){
+    if(b && b.date===date) items.push({time:b.start||'', title:b.label||'Appointment', kind:'cal'});
+  });
+  try{
+    const dow=mondayIndex(new Date(date+'T12:00:00'));
+    (state.classes||[]).forEach(function(c){
+      if(c && c.day===dow) items.push({time:c.start||'', title:c.title||'Class', kind:'class', extra:c.room||''});
+    });
+  }catch(e){}
+  (state.quietNotes||[]).forEach(function(n){
+    if(n && n.date===date) items.push({time:n.time||'21:30', title:n.title||'Wind down', kind:'note', extra:'notification, no alarm'});
+  });
+  items.sort(function(a,b){ return String(a.time||'99').localeCompare(String(b.time||'99')); });
+  return items;
+}
+function deskBuildLesson(name, text){
+  const base=assistStudyLesson(name, text);
+  const clean=String(text||'').replace(/\s+/g,' ').trim();
+  const stop={the:1,and:1,that:1,this:1,with:1,from:1,have:1,were:1,they:1,their:1,which:1,when:1,what:1,your:1,into:1,about:1,also:1,than:1,then:1,there:1,these:1,those:1,been:1,will:1,would:1,could:1,should:1,because:1,while:1,where:1,each:1,such:1,only:1,other:1,more:1,most:1,some:1,very:1,just:1,over:1,after:1,before:1,between:1,through:1,lesson:1};
+  const freq={};
+  clean.toLowerCase().split(/[^a-z0-9]+/).forEach(function(w){
+    if(w.length<4 || stop[w]) return;
+    freq[w]=(freq[w]||0)+1;
+  });
+  const keywords=Object.keys(freq).sort(function(a,b){ return freq[b]-freq[a]; }).slice(0,6);
+  const points=base.points && base.points.length ? base.points : [clean.slice(0,180)];
+  const summary=(points.slice(0,2).join(' ')||clean).slice(0,320);
+  const per=points.length>4 ? 2 : 1;
+  const sessions=[];
+  for(let i=0;i<points.length && sessions.length<4;i+=per){
+    const chunk=points.slice(i, i+per);
+    sessions.push({date:deskAddDays(tomorrowStr(), sessions.length), minutes:Math.max(20, chunk.length*20), cover:chunk[0].replace(/\s+/g,' ').slice(0,110)});
+  }
+  return {name:name||'Lesson', title:base.title||'Lesson', summary:summary, keywords:keywords, points:points, sessions:sessions};
+}
+async function deskTakeFile(file){
+  if(!file) return;
+  const name=file.name||'Lesson';
+  state.deskSaid='';
+  state.deskFlow={kind:'lesson-wait', name:name};
+  try{ render(); }catch(e){}
+  let text='';
+  const kind=String(file.type||'').toLowerCase();
+  try{
+    if(/pdf/.test(kind) || /\.pdf$/i.test(name)) text=await assistPdfText(await file.arrayBuffer());
+    else if(/^image\//.test(kind) || /\.(png|jpe?g|webp|gif)$/i.test(name)){
+      const T=await loadTesseract();
+      const result=await T.recognize(file, 'eng');
+      text=(result && result.data && result.data.text) || '';
+    } else text=await file.text();
+  }catch(e){
+    state.deskFlow={kind:'lesson', lesson:{name:name, title:'Could not read that', summary:'Try a PDF, a text file, or a clearer photo of the page.', keywords:[], points:[], sessions:[]}};
+    deskSave();
+    return;
+  }
+  text=String(text||'').replace(/\s+/g,' ').trim();
+  if(text.length<20){
+    state.deskFlow={kind:'lesson', lesson:{name:name, title:'Not enough words', summary:'I could not find enough writing in that file. A typed PDF or a straight photo of the page works best.', keywords:[], points:[], sessions:[]}};
+    deskSave();
+    return;
+  }
+  state.deskFlow={kind:'lesson', lesson:deskBuildLesson(name, text)};
+  deskSave();
+}
+function deskSaveSessions(){
+  const L=(state.deskFlow&&state.deskFlow.lesson)||{};
+  if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
+  (L.sessions||[]).forEach(function(s){
+    const mins=s.minutes||20;
+    const endMins=16*60+mins;
+    const end=String(Math.floor(endMins/60)).padStart(2,'0')+':'+String(endMins%60).padStart(2,'0');
+    state.studyBlocks.push({id:uid(), label:(L.title||'Lesson')+': '+s.cover, date:s.date, start:'16:00', end:end, meetingUrl:'', room:'', kind:'study', alarmMinutes:0});
+  });
+  state.deskFlow={kind:'lesson', lesson:L, saved:true};
+  deskSave();
+}
+function deskDueTitle(said){
+  let t=String(said||'').replace(/\s+(is\s+)?due\b.*$/i,'').replace(/^(my|the|a|an)\s+/i,'').trim();
+  if(!t) t='Task';
+  return t.charAt(0).toUpperCase()+t.slice(1);
+}
+function deskTask(id){
+  return (state.tasks||[]).find(function(t){ return t && String(t.id)===String(id); });
+}
+function deskSave(){
+  try{ saveState(); }catch(e){}
+  try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+}
+function deskPushNudge(name, time, date){
+  try{ ensureNudges(); }catch(e){}
+  if(!Array.isArray(state.nudges)) state.nudges=[];
+  state.nudges.push({id:uid(), enabled:true, name:name, time:time, onceDate:date, days:[], sound:'chime', math:false, alert:'regular', snoozesMax:2, snoozesLeft:2, created:Date.now()});
+  try{ scheduleWakeAlarms(); }catch(e){}
+  try{ if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms(); }catch(e){}
+}
+function deskQuiet(title, body, date, time){
+  if(!Array.isArray(state.quietNotes)) state.quietNotes=[];
+  state.quietNotes=state.quietNotes.filter(function(n){ return !(n && n.kind==='winddown' && n.date===date); });
+  state.quietNotes.push({id:uid(), kind:'winddown', title:title, body:body, date:date, time:time, alarm:false});
+  try{ deskScheduleQuiet(title, body, date, time); }catch(e){}
+}
+async function deskScheduleQuiet(title, body, date, time){
+  if(typeof isNativeApp!=='function' || !isNativeApp()) return;
+  const when=new Date(date+'T'+time+':00');
+  if(when.getTime()<=Date.now()+3000) return;
+  const LN=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+  if(!LN || !LN.schedule) return;
+  try{
+    await LN.createChannel({id:'snapback_habit_quiet', name:'SnapBack checks', description:'A quiet popup. Not an alarm.', importance:3, visibility:1, vibration:false});
+  }catch(e){}
+  const id=notifIdFromKey('wind:'+date);
+  try{ await LN.cancel({notifications:[{id:id}]}); }catch(e){}
+  await LN.schedule({notifications:[{
+    id:id, title:title, body:body,
+    schedule:{at:when, allowWhileIdle:true},
+    channelId:'snapback_habit_quiet',
+    sound:null,
+    extra:{kind:'winddown', key:'wind:'+date, title:title, body:body}
+  }]});
+}
+function deskWake(said){
+  const time=deskWakeTime(said);
+  const low=String(said||'').toLowerCase();
+  let date=/\btomorrow\b/.test(low) ? tomorrowStr() : (spokenDate(said)||tomorrowStr());
+  deskPushNudge('Wake up', time, date);
+  let eve=deskAddDays(date,-1);
+  if(eve<todayStr()) eve=todayStr();
+  deskQuiet('Wind down', 'Wake-up is '+deskNice(date)+' at '+deskClock(time)+'. Screens down. This is a notification, not an alarm.', eve, '21:30');
+  state.deskSaid=said;
+  state.deskFlow={kind:'wake', time:time, date:date, windDate:eve, windTime:'21:30'};
+  state.deskReply=null;
+  deskSave();
+}
+function deskSaveDeadline(said){
+  const date=spokenDate(said)||'';
+  const title=deskDueTitle(said);
+  const task={id:uid(), title:title, notes:'', date:date, time:'', priority:'medium', urgent:false, important:true, eisSet:false, tier:'could', frog:false, context:'school', technique:'', meetingUrl:'', nudgeWhen:'none', reminderLeads:[], reminderTime:'08:00', remindOn:date, startDate:'', startTime:'', startReminderMinutes:[], chunks:[], checkpoints:[], pomodoros:0, done:false, whenThen:{}, rewarding:{avoid:title}, strategic:{what:title}, flip:{}, created:Date.now()};
+  if(!Array.isArray(state.tasks)) state.tasks=[];
+  state.tasks.unshift(task);
+  state.deskSaid=said;
+  state.deskFlow={kind:'choose', taskId:task.id};
+  state.deskReply=null;
+  deskSave();
+}
+function deskPlanNames(kind){
+  if(kind==='model') return ['Pick the idea','Build the model','Prepare what you will say','Rehearse once','Hand in'];
+  if(kind==='unsure') return ['Start the first part','Do the middle','Check it','Hand in'];
+  return ['Pick a topic and 2 sources','Make an outline','Write the first draft','Fix and check','Hand in'];
+}
+function deskPlanDates(due, count){
+  const dates=[];
+  let d=tomorrowStr();
+  if(!due) due=d;
+  if(d>due) d=due;
+  while(d<=due && dates.length<40){
+    dates.push(d);
+    d=deskAddDays(d,1);
+  }
+  if(!dates.length) dates.push(due);
+  if(dates.length<=count) return dates;
+  return dates.slice(dates.length-count);
+}
+function deskJustRemind(){
+  const flow=state.deskFlow||{};
+  const task=deskTask(flow.taskId);
+  if(!task){ state.deskFlow=null; deskSave(); return; }
+  const when=task.reminderTime||'08:00';
+  const date=task.date||todayStr();
+  deskPushNudge(task.title, when, date);
+  state.deskFlow={kind:'reminded', taskId:task.id, time:when, date:date};
+  deskSave();
+}
+function deskConfirmPlan(){
+  const flow=state.deskFlow||{};
+  const task=deskTask(flow.taskId);
+  if(!task){ state.deskFlow=null; deskSave(); return; }
+  const inputs=[].slice.call(document.querySelectorAll('[data-plan-step]'));
+  const steps=(flow.preview||[]).map(function(p,i){
+    const text=inputs[i] && inputs[i].value.trim() ? inputs[i].value.trim() : p.text;
+    return {id:uid(), text:text, date:p.date, minutes:flow.minutes||20, done:false};
+  });
+  task.checkpoints=steps;
+  steps.forEach(function(s){
+    if(s.date) deskPushNudge(task.title+': '+s.text, '08:00', s.date);
+  });
+  state.deskFlow={kind:'planned', taskId:task.id};
+  deskSave();
+}
+function deskOpenStep(){
+  let found=null;
+  (state.tasks||[]).forEach(function(t){
+    (t.checkpoints||[]).forEach(function(c){
+      if(!c || c.done || !c.date || c.date>todayStr()) return;
+      if(state.deskSkip && String(c.id)===String(state.deskSkip)) return;
+      if(!found || c.date<found.c.date) found={t:t, c:c};
+    });
+  });
+  return found;
+}
+function deskMatchChallenge(low){
+  const rules=[
+    ['list_freeze', /\b(list freezes|looking at (?:my |the )?list|long list|the list (?:is|feels)|shut down|too many tasks)\b/],
+    ['cant_start', /\b(can'?t (?:get )?start(?:ed)?|cannot (?:get )?start(?:ed)?|can'?t begin|cannot begin|don'?t know where to start|do not know where to start|where (?:do i|to) start|i(?:'| a)?m stuck|\bstuck\b|blank)\b/],
+    ['too_much', /\b(overwhelmed|too much|drowning|can'?t cope|cannot cope|everything feels|all at once)\b/],
+    ['bounce', /\b(switch(?:ing)? tasks?|keep jumping|jump(?:ing)? around|can'?t (?:stay|focus)|cannot focus|keep changing|bounc(?:e|ing)|distracted|can'?t stick)\b/],
+    ['what_next', /\b(what (?:do i|should i|to) do next|don'?t know what to do|do not know what to do|which (?:one|task)|can'?t (?:choose|decide)|cannot (?:choose|decide)|what(?:'s| is) next)\b/],
+    ['miss_due', /\b(miss (?:a |the )?(?:due|deadline)|afraid i(?:'| wi)ll miss|forget the deadline|due dates?)\b/],
+    ['schedule_tight', /\b(schedule stresses|plans stress|calendar freezes|too (?:planned|scheduled)|rigid (?:plan|schedule)|timetable)\b/],
+    ['life_blur', /\b(study and (?:personal|life)|can'?t switch off|cannot switch off|work and rest|no boundary|life (?:is )?mix)\b/],
+    ['adhd_brain', /\b(adhd|my brain|too complicated|need it simple|executive)\b/]
+  ];
+  let best=null, score=0;
+  rules.forEach(function(rule){
+    const m=String(low||'').match(rule[1]);
+    if(m && m[0].length>=score){ best=rule[0]; score=m[0].length; }
+  });
+  return best;
+}
+function deskOfferHelp(){
+  const id=deskMatchChallenge(String(state.deskSaid||'').toLowerCase());
+  const hit=deskOpenStep();
+  const task=(state.tasks||[]).find(function(t){ return t && !t.done && (!hit || t.id===hit.t.id); }) || (state.tasks||[]).find(function(t){ return t && !t.done; });
+  if(task){ try{ applyTechniqueTaskId(task.id); }catch(e){ state.techniqueTaskId=task.id; } }
+  if(!id){
+    state.deskFlow={kind:'small', taskId:hit?hit.t.id:(task?task.id:''), stepId:hit?hit.c.id:''};
+    deskSave();
+    return;
+  }
+  state.challengeId=id;
+  state.lastChallengeId=id;
+  state.deskFlow={kind:'challenge', challengeId:id, taskId:task?task.id:'', stepId:hit?hit.c.id:''};
+  deskSave();
+}
+function deskOverwhelmed(){ deskOfferHelp(); }
+function deskSlideStep(task, step){
+  const open=(task.checkpoints||[]).filter(function(c){ return c && !c.done; });
+  const later=open.filter(function(c){ return c!==step && c.date>step.date; });
+  const dest=deskAddDays(todayStr(),1);
+  if(later.length && dest>=later[0].date) return false;
+  if(task.date && dest>task.date) return false;
+  step.date=dest;
+  return true;
+}
+function deskHandle(raw){
+  const said=String(raw||'').replace(/\s+/g,' ').trim();
+  if(!said) return;
+  const low=said.toLowerCase();
+  state.deskSaid=said;
+  const flow=state.deskFlow;
+  if(flow && flow.kind==='choose'){
+    if(/\b(plan|yes|break)\b/.test(low)){ state.deskFlow={kind:'finish', taskId:flow.taskId}; deskSave(); return; }
+    if(/\bremind\b/.test(low)){ deskJustRemind(); return; }
+  }
+  if(deskMatchChallenge(low)){
+    deskOfferHelp();
+    return;
+  }
+  if(/\bwake me\b|\bwake up\b/.test(low)){
+    deskWake(said);
+    return;
+  }
+  if(/\b(due|deadline)\b/.test(low)){
+    deskSaveDeadline(said);
+    return;
+  }
+  const d=(typeof assistInterpret==='function') ? assistInterpret(said) : null;
+  if(d && d.place==='deadline'){ deskSaveDeadline(said); return; }
+  if(d && d.place && d.place!=='ask' && d.place!=='choose' && d.place!=='leave'){
+    state.deskFlow=null;
+    state.deskReply=d.summary || 'Saved.';
+    try{ assistFile(d); }catch(e){ deskSave(); }
+    state.view='today';
+    state.deskReply=state.deskReply||'Saved.';
+    deskSave();
+    return;
+  }
+  state.deskFlow={kind:'which', text:said};
+  deskSave();
+}
+function deskFlowHtml(){
+  const flow=state.deskFlow;
+  const said=state.deskSaid||'';
+  const bubble=said?`<div class="saywrap"><div class="say">${escapeHtml(said)}</div></div>`:'';
+  if(!flow && state.deskReply) return bubble+`<div class="card"><p style="margin:0">${escapeHtml(state.deskReply)}</p></div>`;
+  if(!flow) return '';
+  if(flow.kind==='wake'){
+    const wind=flow.windDate?`<p style="margin:8px 0 0">A quiet note at ${escapeHtml(deskClock(flow.windTime||'21:30'))} on ${escapeHtml(deskNice(flow.windDate))}: wind down. No alarm.</p>`:'';
+    return bubble+`<div class="card"><b>Alarm set for ${escapeHtml(deskNice(flow.date))}, ${escapeHtml(deskClock(flow.time))}.</b><p style="margin:8px 0 0;color:var(--muted)">The wake-up rings at that time. You can open it and turn it off.</p>${wind}<div class="desk-actions"><button type="button" class="btn ghost" data-desk="change-wake">Change</button></div></div>`;
+  }
+  if(flow.kind==='change-wake'){
+    return bubble+`<div class="card"><label>Wake-up time</label><input id="deskWakeTime" type="time" value="${escapeHtml(flow.time||'05:30')}"><div class="desk-actions"><button type="button" class="btn" data-desk="save-wake">Save</button></div></div>`;
+  }
+  const task=deskTask(flow.taskId);
+  const title=task?task.title:'This';
+  if(flow.kind==='choose' && task){
+    const n=task.date?deskDaysBetween(task.date):'';
+    const when=task.date?deskNice(task.date):'no date yet';
+    return bubble+`<div class="card"><b>Saved: ${escapeHtml(title)}, due ${escapeHtml(when)}.</b><p style="margin:8px 0 0">${n===''?'Want to plan it together? It takes about a minute.':"That's "+n+" days away. Want to plan it together? It takes about a minute."}</p><div class="desk-actions"><button type="button" class="btn" data-desk="plan">Yes, plan it</button><button type="button" class="btn ghost" data-desk="remind">Just remind me</button></div></div>`;
+  }
+  if(flow.kind==='finish'){
+    return bubble+`<div class="card"><div class="desk-kicker">Planning · ${escapeHtml(title)}</div><p style="margin:8px 0">What does finished look like?</p><div class="desk-actions"><button type="button" class="btn" data-desk="finish" data-val="report">A written report</button><button type="button" class="btn ghost" data-desk="finish" data-val="model">Model and a talk</button><button type="button" class="btn ghost" data-desk="finish" data-val="unsure">Not sure</button></div></div>`;
+  }
+  if(flow.kind==='minutes'){
+    return bubble+`<div class="card"><div class="desk-kicker">Planning · ${escapeHtml(title)}</div><p style="margin:8px 0">How much can you give it each day?</p><div class="desk-actions"><button type="button" class="btn ghost" data-desk="mins" data-val="20">20 min</button><button type="button" class="btn" data-desk="mins" data-val="40">40 min</button><button type="button" class="btn ghost" data-desk="mins" data-val="60">1 hour</button></div></div>`;
+  }
+  if(flow.kind==='preview'){
+    const rows=(flow.preview||[]).map(function(p,i){
+      return `<label>${escapeHtml(deskNice(p.date))}</label><input data-plan-step="${i}" value="${escapeHtml(p.text)}">`;
+    }).join('');
+    return bubble+`<div class="card"><div class="desk-kicker">My plan · change anything</div>${rows}<p style="margin:8px 0 0;color:var(--muted)">I'll ask you on each of these days.</p><div class="desk-actions"><button type="button" class="btn" data-desk="confirm-plan">Looks good</button></div></div>`;
+  }
+  if(flow.kind==='planned'){
+    return bubble+`<div class="card"><b>Plan saved.</b><p style="margin:8px 0 0">I'll ask about each step on its day. The hand-in stays on ${task&&task.date?escapeHtml(deskNice(task.date)):'the due date'}.</p></div>`;
+  }
+  if(flow.kind==='reminded'){
+    return bubble+`<div class="card"><b>I'll remind you ${escapeHtml(deskNice(flow.date))} at ${escapeHtml(deskClock(flow.time))}.</b><div class="desk-actions"><button type="button" class="btn ghost" data-desk="change-remind">Change</button></div></div>`;
+  }
+  if(flow.kind==='change-remind'){
+    return bubble+`<div class="card"><label>Remind at</label><input id="deskRemindTime" type="time" value="${escapeHtml(flow.time||'08:00')}"><div class="desk-actions"><button type="button" class="btn" data-desk="save-remind">Save</button></div></div>`;
+  }
+  if(flow.kind==='lesson'){
+    const L=flow.lesson||{};
+    const keys=(L.keywords||[]).map(function(w){ return `<span class="chip off">${escapeHtml(w)}</span>`; }).join(' ');
+    const branches=(L.points||[]).map(function(p){ return `<div class="mind-branch">${escapeHtml(p)}</div>`; }).join('');
+    const sessions=(L.sessions||[]).map(function(s,i){
+      return `<div class="desk-row"><span><b>Session ${i+1}</b> · ${escapeHtml(s.cover)}</span><span>${escapeHtml(deskNice(s.date).split(',')[0])} · ${s.minutes} min</span></div>`;
+    }).join('');
+    return bubble+`<div class="card"><div class="desk-kicker">${escapeHtml(L.name||'Lesson')}</div><p style="margin:8px 0"><b>${escapeHtml(L.title||'Lesson')}</b></p><p style="margin:0 0 8px">${escapeHtml(L.summary||'')}</p><div style="margin-bottom:8px">${keys}</div><div class="mind"><div class="mind-core">${escapeHtml(L.title||'Lesson')}</div><div class="mind-row">${branches}</div></div><div class="desk-kicker" style="margin-top:12px">How to cover it</div>${sessions}<div class="desk-actions"><button type="button" class="btn" data-desk="save-sessions">Put these on the day</button></div>${flow.saved?'<p style="margin:8px 0 0;color:var(--muted)">On your day, from 4:00. No alarm.</p>':''}</div>`;
+  }
+  if(flow.kind==='lesson-wait'){
+    return bubble+`<div class="card"><p style="margin:0">Reading ${escapeHtml(flow.name||'that file')}…</p></div>`;
+  }
+  if(flow.kind==='challenge'){
+    const ch=(typeof CHALLENGES!=='undefined' && CHALLENGES.find(function(c){ return c.id===flow.challengeId; })) || {title:'This', blurb:''};
+    const tools=(typeof challengePathsFor==='function') ? challengePathsFor(flow.challengeId).filter(function(t){ return t && t.action!=='challenge-home'; }) : [];
+    const hit=task && (task.checkpoints||[]).find(function(c){ return String(c.id)===String(flow.stepId); });
+    const buttons=tools.map(function(t,i){
+      return `<button type="button" class="btn ghost" data-action="challenge-path" data-idx="${i}">${escapeHtml(t.title)}</button>`;
+    }).join('');
+    return bubble+`<div class="card"><p style="margin:0 0 6px">This is <b>${escapeHtml(ch.title)}</b>. ${escapeHtml(ch.blurb||'')}</p>${hit?`<p style="margin:0 0 8px;color:var(--muted)">You're on ${escapeHtml(hit.text)}.</p>`:''}<p style="margin:0 0 8px">These are the SnapBack tools for this. Pick one and I'll open it.</p><div class="desk-actions">${buttons}</div></div>`;
+  }
+  if(flow.kind==='small'){
+    const hit=task && (task.checkpoints||[]).find(function(c){ return String(c.id)===String(flow.stepId); });
+    if(!hit) return bubble+`<div class="card"><p style="margin:0">Nothing is waiting. Tell me the one thing, and I'll put it on the day.</p></div>`;
+    const left=state.deskTimer && state.deskTimer.ends>Date.now() ? Math.ceil((state.deskTimer.ends-Date.now())/1000) : 0;
+    const clock=left?`${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}`:'';
+    return bubble+`<div class="card"><p style="margin:0 0 8px">That's okay. We'll make it very small. Just this, for 10 minutes. Then you can stop.</p><div class="desk-kicker">Start here</div><p style="margin:6px 0"><b>${escapeHtml(hit.text)}</b></p>${clock?`<p id="deskCount">${clock}</p>`:''}<div class="desk-actions"><button type="button" class="btn" data-desk="ten">Start 10 minutes</button><button type="button" class="btn ghost" data-desk="else">Pick something else</button><button type="button" class="btn ghost" data-desk="talk">Talk it through</button></div>${flow.talk?`<p style="margin:8px 0 0">${escapeHtml(flow.talk)}</p>`:''}</div>`;
+  }
+  if(flow.kind==='check'){
+    const hit=task && (task.checkpoints||[]).find(function(c){ return String(c.id)===String(flow.stepId); });
+    if(!hit) return '';
+    return `<div class="card"><div class="desk-kicker">${escapeHtml(title)} · check-in</div><p style="margin:8px 0"><b>Did you ${escapeHtml(hit.text.charAt(0).toLowerCase()+hit.text.slice(1))}?</b></p><p style="margin:0;color:var(--muted)">That was the step for ${escapeHtml(deskNice(hit.date))}.</p><div class="desk-actions"><button type="button" class="btn" data-desk="did">Yes, done</button><button type="button" class="btn ghost" data-desk="notyet">Not yet</button><button type="button" class="btn ghost" data-desk="slide">Move it to tomorrow</button></div>${flow.note?`<p style="margin:8px 0 0">${escapeHtml(flow.note)}</p>`:''}</div>`;
+  }
+  if(flow.kind==='which'){
+    return bubble+`<div class="card"><p style="margin:0 0 8px">Do you want me to file this as a task or as an idea?</p><div class="desk-actions"><button type="button" class="btn" data-desk="as-task">A task</button><button type="button" class="btn ghost" data-desk="as-idea">An idea</button></div></div>`;
+  }
+  return bubble;
+}
+function deskDaysBetween(iso){
+  const a=new Date(todayStr()+'T12:00:00');
+  const b=new Date(String(iso).slice(0,10)+'T12:00:00');
+  return Math.round((b-a)/86400000);
+}
+function deskCheckin(){
+  const k=state.deskFlow && state.deskFlow.kind;
+  if(k && k!=='planned' && k!=='reminded') return;
+  const hit=deskOpenStep();
+  if(!hit) return;
+  state.deskFlow={kind:'check', taskId:hit.t.id, stepId:hit.c.id};
+}
+function viewDesk(){
+  document.body.classList.add('desk-on');
+  try{ deskCheckin(); }catch(e){}
+  const today=deskItems(todayStr());
+  const tom=deskItems(tomorrowStr());
+  const nowMin=new Date().getHours()*60+new Date().getMinutes();
+  let next=null;
+  const later=[];
+  today.forEach(function(item){
+    const bits=String(item.time||'').split(':');
+    const mins=item.time?Number(bits[0])*60+Number(bits[1]||0):null;
+    if(!next && mins!=null && mins>=nowMin-5) next=item;
+    else later.push(item);
+  });
+  const row=function(item){
+    const extra=item.extra?` · ${escapeHtml(item.extra)}`:'';
+    return `<div class="desk-row"><span>${escapeHtml(item.title)}${extra}</span><span>${item.time?escapeHtml(deskClock(item.time)):''}</span></div>`;
+  };
+  let nextHtml='';
+  if(next){
+    const bits=String(next.time).split(':');
+    const mins=Number(bits[0])*60+Number(bits[1]||0)-nowMin;
+    const soon=mins>=0?`In ${mins} minutes`:'Now';
+    nextHtml=`<div class="nextup"><div class="desk-kicker">Next up · ${escapeHtml(soon)}</div><p style="margin:6px 0 0"><b>${escapeHtml(next.title)}</b></p><p style="margin:2px 0 0;color:var(--muted)">${escapeHtml(deskClock(next.time))}${next.extra?' · '+escapeHtml(next.extra):''}</p></div>`;
+  }
+  const laterHtml=later.length?`<div class="desk-kicker" style="margin-top:8px">Later today</div>${later.slice(0,5).map(row).join('')}`:'';
+  const tomHtml=`<div class="desk-kicker" style="margin-top:16px">Tomorrow</div>`+(tom.length?tom.slice(0,4).map(row).join(''):`<p style="color:var(--muted);margin:8px 0">Nothing saved for tomorrow yet.</p>`);
+  const when=new Date().toLocaleDateString(undefined,{weekday:'long', day:'numeric', month:'long'});
+  return `<div class="pagehead"><div class="eyebrow">${escapeHtml(when)}</div><h1>Here's your day</h1></div>${nextHtml}${laterHtml}${tomHtml}${deskFlowHtml()}<div class="desk-bar"><input id="deskBox" placeholder="Tell me anything..." autocomplete="off"><button type="button" class="btn ghost desk-clip" id="deskClip" aria-label="Attach a lesson"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 12.5V7a4 4 0 0 1 8 0v9a3 3 0 0 1-6 0V8"/></svg></button><input id="deskFile" type="file" accept=".pdf,.txt,.text,.md,image/*,application/pdf,text/plain" style="position:absolute;left:-9999px;width:1px;height:1px" aria-label="Lesson file"><button type="button" class="btn desk-mic" id="deskMic" data-voice="desk" data-area="deskBox" data-status="deskStatus" aria-label="Hold and speak">Say</button></div><div id="deskStatus" hidden></div>`;
+}
 function viewToday(){
   try{ clearExcludedCopies(); }catch(e){}
   try{ syncExerciseLinks(); }catch(e){}
@@ -10523,6 +11407,8 @@ function viewToday(){
     <p style="margin:4px 0 0;font-size:.85rem">${escapeHtml(lastSyncedLine())}</p>
     <p>${L('justToday')}</p>
   </div>
+
+  ${assistHomeCard()}
 
   <div class="card nn-card"${seeOn('today','nn')?'':' hidden style="display:none"'}>
     <div class="lbl">One non-negotiable</div>
@@ -14543,6 +15429,19 @@ function finishHeard(area, statusEl){
     if(statusEl) statusEl.textContent='No speech heard. Hold the button and say the whole thing.';
     return;
   }
+  if(kind==='desk'){
+    if(area) area.value='';
+    try{ deskHandle(said); }catch(e){ console.warn(e); }
+    return;
+  }
+  if(kind==='assist'){
+    if(area) area.value=said;
+    state.assistHeard=said;
+    state.assistDraft=assistInterpret(said);
+    if(statusEl) statusEl.textContent='Check this, then tap That\'s right. Nothing is saved yet.';
+    try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+    return;
+  }
   if(kind==='fab'){
     const many=spokenAppointments(said);
     if(many && many.length>1){
@@ -14889,7 +15788,7 @@ function ensureVoiceClicks(){
       btn.dataset.talkClick='';
       btn.dataset.justStopped='1';
       btn.style.background='';
-      btn.textContent='Hold and speak';
+      btn.textContent=btn.getAttribute('data-voice')==='desk'?'Say':'Hold and speak';
       window._talkBtn=null;
       fingerDown=false;
       stopHoldTalk(area, status);
@@ -14938,7 +15837,7 @@ function ensureVoiceClicks(){
     }
     btn.dataset.talkClick='';
     btn.style.background='';
-    btn.textContent='Hold and speak';
+    btn.textContent=btn.getAttribute('data-voice')==='desk'?'Say':'Hold and speak';
     const area=document.getElementById(btn.getAttribute('data-area')||'');
     window._talkBtn=null;
     stopHoldTalk(area, status);
@@ -18274,6 +19173,158 @@ function getShareMessage(){
 
 function wireView(){
   try{ consumePendingNudge(); }catch(e){}
+  try{ ensureVoiceClicks(); }catch(e){}
+  const assistOpen=document.getElementById('assistOpen');
+  if(assistOpen) assistOpen.addEventListener('click', function(){ state.view='assist'; try{ persistRender(); }catch(e){} });
+  const assistBack=document.getElementById('assistBack');
+  if(assistBack) assistBack.addEventListener('click', function(){ state.view='today'; try{ persistRender(); }catch(e){} });
+  const assistClear=document.getElementById('assistClear');
+  if(assistClear) assistClear.addEventListener('click', function(){
+    state.assistHeard='';
+    state.assistDraft=null;
+    state.assistPending=null;
+    const box=document.getElementById('assistBox');
+    if(box) box.value='';
+    try{ persistRender(); }catch(e){}
+  });
+  if(window._assistHintTimer){ clearInterval(window._assistHintTimer); window._assistHintTimer=null; }
+  const assistAttach=document.getElementById('assistAttach');
+  const assistLessonFile=document.getElementById('assistLessonFile');
+  if(assistAttach && assistLessonFile){
+    assistAttach.addEventListener('click', function(){ assistLessonFile.click(); });
+    assistLessonFile.addEventListener('change', function(){
+      const file=assistLessonFile.files && assistLessonFile.files[0];
+      if(!file) return;
+      const reader=new FileReader();
+      reader.onload=function(){
+        const done=function(text){
+          const clean=String(text||'').replace(/\u0000/g,' ').trim();
+          if(clean.length<40){
+            state.lesson={error:'That file has no lesson text. Use a text file, or a PDF that is not a scan.'};
+          } else {
+            state.lesson=assistStudyLesson(file.name, clean);
+            state.lessonNote='';
+          }
+          state.view='today';
+          try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
+        };
+        const buf=reader.result;
+        const pdf=/pdf$/i.test(file.name)||file.type==='application/pdf';
+        if(pdf) assistPdfText(buf).then(done).catch(function(){ state.lesson={error:'Could not read that PDF.'}; try{ persistRender(); }catch(e){} });
+        else done(new TextDecoder('utf-8').decode(buf));
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+  const assistCopy=document.getElementById('assistCopyDraft');
+  if(assistCopy) assistCopy.addEventListener('click', function(){
+    const el=document.getElementById('assistDraftOut');
+    const text=el?el.value:'';
+    if(navigator.clipboard && text) navigator.clipboard.writeText(text).catch(function(){});
+  });
+  const assistGo=document.getElementById('assistGo');
+  if(assistGo) assistGo.addEventListener('click', function(){
+    const raw=(document.getElementById('assistBox')||{}).value||'';
+    const low=raw.trim().toLowerCase();
+    const waiting=state.assistPending;
+    if(waiting && low){
+      const words=low.split(/\s+/).length;
+      if(waiting.kind==='break' && words<=5 && /^(yes|yeah|yep|yup|sure|ok|okay|please|break it|break the task|yes please)\b/.test(low)){
+        const t=(state.tasks||[]).find(function(x){ return x && String(x.id)===String(waiting.taskId); });
+        if(t) t.chunks=[{id:uid(),text:'Start it',done:false},{id:uid(),text:'Do the middle',done:false},{id:uid(),text:'Check and finish',done:false}];
+        state.assistPending=null;
+        state.assistHeard='';
+        try{ saveState(); }catch(e){}
+        try{ persistRender(); }catch(e){}
+        return;
+      }
+      if(waiting.kind==='break' && words<=4 && /^(no|nope|nah|leave it|not now|don'?t)\b/.test(low)){
+        state.assistPending=null;
+        state.assistHeard='';
+        try{ persistRender(); }catch(e){}
+        return;
+      }
+      if(waiting.kind==='which' && words<=8 && /\b(idea|jot|note)\b/.test(low) && !/\btask\b/.test(low)){
+        const text=waiting.text;
+        state.assistPending=null;
+        assistFile({place:'jot', title:text, summary:''});
+        return;
+      }
+      if(waiting.kind==='which' && words<=8 && /\btask\b/.test(low)){
+        const text=waiting.text;
+        state.assistPending=null;
+        assistFile({place:'must', title:text, date:'', askBreak:false, summary:''});
+        return;
+      }
+      state.assistPending=null;
+    }
+    const d=assistInterpret(raw);
+    if(d && d.place==='upload-calendar'){
+      state.assistHeard=raw;
+      state.assistDraft=d;
+      const st=document.getElementById('assistStatus');
+      if(st) st.textContent='Choose the calendar file you downloaded. It ends in .ics.';
+      const f=document.getElementById('assistIcs');
+      if(f) f.click();
+      try{ persistRender(); }catch(e){}
+      return;
+    }
+    if(d){
+      state.assistHeard='';
+      assistFile(d);
+      return;
+    }
+  });
+  const assistIcs=document.getElementById('assistIcs');
+  if(assistIcs) assistIcs.addEventListener('change', function(){
+    const file=assistIcs.files && assistIcs.files[0];
+    if(!file) return;
+    importICSFile(file);
+    state.assistDraft=null;
+    state.assistHeard='';
+    const box=document.getElementById('assistBox');
+    if(box) box.value='';
+  });
+  const assistPick=document.getElementById('assistPickCal');
+  if(assistPick) assistPick.addEventListener('click', function(){
+    const f=document.getElementById('assistIcs');
+    if(f) f.click();
+  });
+  document.querySelectorAll('[data-assist-choice]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      const d=state.assistDraft;
+      if(!d) return;
+      const tech=btn.getAttribute('data-assist-choice');
+      if(tech==='no'){ state.assistDraft=null; try{ persistRender(); }catch(e){} return; }
+      assistFile({place:'technique', tech:tech, taskId:d.taskId, title:d.title, summary:''});
+    });
+  });
+  const assistOk=document.getElementById('assistOk');
+  if(assistOk) assistOk.addEventListener('click', function(){
+    const d=state.assistDraft;
+    if(!d) return;
+    const title=document.getElementById('assistTitle');
+    const date=document.getElementById('assistDate');
+    const time=document.getElementById('assistTime');
+    const remind=document.getElementById('assistRemind');
+    if(title && title.value.trim()) d.title=title.value.trim();
+    if(date && date.value) d.date=date.value;
+    if(time && time.value) d.time=time.value;
+    if(remind && remind.value) d.remind=remind.value;
+    assistFile(d);
+  });
+  const assistNo=document.getElementById('assistNo');
+  if(assistNo) assistNo.addEventListener('click', function(){ state.assistDraft=null; try{ persistRender(); }catch(e){} });
+  const assistSplit=document.getElementById('assistSplit');
+  if(assistSplit) assistSplit.addEventListener('click', function(){
+    const t=(state.tasks||[]).find(function(x){ return x.id===state.assistBreak; });
+    if(t) t.chunks=[{id:uid(),text:'Read the brief',done:false},{id:uid(),text:'Do the first part',done:false},{id:uid(),text:'Finish and check',done:false}];
+    state.assistBreak='';
+    try{ saveState(); }catch(e){}
+    try{ persistRender(); }catch(e){}
+  });
+  const assistWhole=document.getElementById('assistWhole');
+  if(assistWhole) assistWhole.addEventListener('click', function(){ state.assistBreak=''; try{ persistRender(); }catch(e){} });
   // Share Calendar — delegated so it always works
   if(!window._shareCalDelegated){
     window._shareCalDelegated = true;
@@ -19518,6 +20569,109 @@ function wireView(){
   });
 
   if(state.view==='today'){
+    const deskBox=document.getElementById('deskBox');
+    const file=document.getElementById('deskFile');
+    const clip=document.getElementById('deskClip');
+    if(clip && file) clip.addEventListener('click', function(){ file.click(); });
+    if(file) file.addEventListener('change', function(){
+      const f=file.files && file.files[0];
+      file.value='';
+      if(f) deskTakeFile(f);
+    });
+    if(deskBox) deskBox.addEventListener('keydown', function(e){
+      if(e.key!=='Enter') return;
+      e.preventDefault();
+      const v=deskBox.value;
+      deskBox.value='';
+      deskHandle(v);
+    });
+    document.querySelectorAll('[data-desk]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const act=btn.getAttribute('data-desk');
+        const flow=state.deskFlow||{};
+        const task=deskTask(flow.taskId);
+        if(act==='save-sessions') deskSaveSessions();
+        else if(act==='plan'){ state.deskFlow={kind:'finish', taskId:flow.taskId}; deskSave(); }
+        else if(act==='remind') deskJustRemind();
+        else if(act==='finish'){ state.deskFlow={kind:'minutes', taskId:flow.taskId, shape:btn.getAttribute('data-val')}; deskSave(); }
+        else if(act==='mins'){
+          const minutes=Number(btn.getAttribute('data-val'))||20;
+          const names=deskPlanNames(flow.shape||'report');
+          const dates=deskPlanDates(task&&task.date, names.length);
+          const preview=names.map(function(text,i){ return {text:text, date:dates[Math.min(i, dates.length-1)]}; });
+          state.deskFlow={kind:'preview', taskId:flow.taskId, shape:flow.shape, minutes:minutes, preview:preview};
+          deskSave();
+        }
+        else if(act==='confirm-plan') deskConfirmPlan();
+        else if(act==='change-wake'){ state.deskFlow=Object.assign({}, flow, {kind:'change-wake'}); deskSave(); }
+        else if(act==='save-wake'){
+          const el=document.getElementById('deskWakeTime');
+          const time=el&&el.value?el.value:(flow.time||'05:30');
+          (state.nudges||[]).forEach(function(n){ if(n && n.name==='Wake up' && n.onceDate===flow.date) n.time=time; });
+          state.deskFlow={kind:'wake', time:time, date:flow.date};
+          deskSave();
+        }
+        else if(act==='change-remind'){ state.deskFlow=Object.assign({}, flow, {kind:'change-remind'}); deskSave(); }
+        else if(act==='save-remind'){
+          const el=document.getElementById('deskRemindTime');
+          const time=el&&el.value?el.value:(flow.time||'08:00');
+          if(task) task.reminderTime=time;
+          (state.nudges||[]).forEach(function(n){ if(n && task && n.name===task.title && n.onceDate===flow.date) n.time=time; });
+          state.deskFlow={kind:'reminded', taskId:flow.taskId, time:time, date:flow.date};
+          deskSave();
+        }
+        else if(act==='ten'){ state.deskTimer={ends:Date.now()+10*60*1000}; deskSave(); }
+        else if(act==='else'){
+          state.deskSkip=flow.stepId;
+          const hit=deskOpenStep();
+          state.deskFlow={kind:'small', taskId:hit?hit.t.id:'', stepId:hit?hit.c.id:''};
+          deskSave();
+        }
+        else if(act==='talk'){
+          const hit=task&&(task.checkpoints||[]).find(function(c){ return String(c.id)===String(flow.stepId); });
+          flow.talk=hit?('Do only this: '+hit.text+'. Then stop.'):'Tell me the one piece you can do.';
+          state.deskFlow=flow;
+          deskSave();
+        }
+        else if(act==='did'){
+          const hit=task&&(task.checkpoints||[]).find(function(c){ return String(c.id)===String(flow.stepId); });
+          if(hit) hit.done=true;
+          state.deskSaid='';
+          state.deskFlow=null;
+          deskSave();
+        }
+        else if(act==='notyet'){
+          flow.note='No problem. Do 10 minutes now, or move it to tomorrow if that day is free.';
+          state.deskFlow=flow;
+          deskSave();
+        }
+        else if(act==='slide'){
+          const hit=task&&(task.checkpoints||[]).find(function(c){ return String(c.id)===String(flow.stepId); });
+          if(task && hit && deskSlideStep(task, hit)) flow.note='I moved that step to tomorrow. The hand-in day stays.';
+          else flow.note='The hand-in day is full. I cannot move it. Do 10 minutes now.';
+          state.deskFlow=flow;
+          deskSave();
+        }
+        else if(act==='as-task'){
+          const title=flow.text||'Task';
+          if(!Array.isArray(state.tasks)) state.tasks=[];
+          state.tasks.unshift({id:uid(), title:title, notes:'', date:'', time:'', priority:'medium', urgent:false, important:false, eisSet:false, tier:'could', frog:false, context:'personal', technique:'', meetingUrl:'', nudgeWhen:'none', reminderLeads:[], reminderTime:'', remindOn:'', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], checkpoints:[], pomodoros:0, done:false, whenThen:{}, rewarding:{}, strategic:{}, flip:{}, created:Date.now()});
+          state.deskSaid='';
+          state.deskFlow=null;
+          state.deskReply='Saved as a task.';
+          deskSave();
+        }
+        else if(act==='as-idea'){
+          if(!Array.isArray(state.journal)) state.journal=[];
+          const now=new Date();
+          state.journal.unshift({id:uid(), text:flow.text||'', date:todayStr(), time:String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'), filed:false});
+          state.deskSaid='';
+          state.deskFlow=null;
+          state.deskReply='Saved as an idea.';
+          deskSave();
+        }
+      });
+    });
     const sn=document.getElementById('sneakTomBtn');
     if(sn) sn.addEventListener('click', ()=>{ state.sneakTomorrow=!state.sneakTomorrow; persistRender(); });
 

@@ -1,6 +1,6 @@
 {
-  "name": "SnapBack — Study Companion",
-  "short_name": "SnapBack",
+  "name": "SnapBack Assist",
+  "short_name": "Assist",
   "description": "A focus and organization companion built for students who work a little differently.",
   "id": "/",
   "start_url": "./index.html",
