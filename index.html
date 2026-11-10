@@ -4380,10 +4380,9 @@ function dismissHabitAsk(){
   try{ saveState(); }catch(e){}
   try{ persistRender(); }catch(e){ try{ render(); }catch(e2){} }
 }
-function saveSleepAsk(){
+function saveSleepHours(v){
   const a=state.habitAsk; if(!a) return;
   ensureHabitPlans();
-  const v=document.getElementById('sleepHours')&&document.getElementById('sleepHours').value;
   state.sleepLog[a.date]=v||'';
   markHabitSaved(v ? ('Saved. '+v+' hours of sleep.') : 'Saved.');
   const sleepHabit=(state.habits||[]).find(function(h){ return h.id===3 || /sleep/i.test(h.name||''); });
@@ -4396,6 +4395,10 @@ function saveSleepAsk(){
   state.habitAsk=null;
   try{ saveState(); }catch(e){}
   persistRender();
+}
+function saveSleepAsk(){
+  const v=document.getElementById('sleepHours')&&document.getElementById('sleepHours').value;
+  saveSleepHours(v||'');
 }
 function saveScreenAsk(){
   const a=state.habitAsk; if(!a) return;
@@ -5159,6 +5162,7 @@ function openHabitFromNotif(extra){
   }
   if(alreadyAsked(key)) { dismissNativeHabit(key); return; }
   if(extra.log && habitAnswered(extra.log, extra.date, extra.hid)) { dismissNativeHabit(key); return; }
+  if(state.habitAsk && key && state.habitAsk.key===key) return;
   try{ cancelHabitNotif(key); }catch(e){}
   if(!state.notifiedKeys) state.notifiedKeys=[];
   if(key && state.notifiedKeys.indexOf(key)<0) state.notifiedKeys.push(key);
@@ -6611,7 +6615,10 @@ function renderModal(){
   }
   if(state.habitAsk){
     const a=state.habitAsk;
-    const sleepOpts=['0','1','2','3','4','5','6','7','8','9','10','10+'].map(h=>`<option>${h}</option>`).join('');
+    const stamp=String(a.key||a.text||'');
+    const live=document.getElementById('habitAskCard');
+    if(live && live.getAttribute('data-key')===stamp) return;
+    const sleepOpts=['0','1','2','3','4','5','6','7','8','9','10','10+'].map(function(h){ return '<option>'+h+'</option>'; }).join('');
     const hourOpts=Array.from({length:17}, function(_,i){ return '<option value="'+i+'">'+i+'</option>'; }).join('');
     const moodFaces=[[1,'😞'],[2,'😕'],[3,'😐'],[4,'🙂'],[5,'😊']];
     const moodNames=['','Very low','Low','Okay','Good','Great'];
@@ -6622,15 +6629,15 @@ function renderModal(){
       : (a.kind==='screen'
         ? `<div class="row"><div class="field"><label>Hours</label><select id="screenHoursAsk">${hourOpts}</select></div><div class="field"><label>Minutes</label><input id="screenMinsAsk" type="number" min="0" max="59" value="0"></div></div><button class="btn" id="screenSaveAsk" type="button" style="margin-top:8px">Save</button>`
         : `<div style="display:flex;flex-direction:column;gap:8px"><button class="btn" id="habitYes" type="button">Yes</button><button class="btn ghost" id="habitNo" type="button">No</button></div>`));
-    root.innerHTML=`<div class="overlay"><div class="quotecard" style="text-align:left;max-width:380px;position:relative">
+    root.innerHTML=`<div class="overlay"><div class="quotecard" id="habitAskCard" data-key="${escapeHtml(stamp)}" style="text-align:left;max-width:380px;position:relative">
       <button type="button" id="habitAskClose" aria-label="Close" style="position:absolute;top:8px;right:10px;border:none;background:transparent;font-size:1.45rem;line-height:1;cursor:pointer;color:var(--ink);padding:4px 8px">×</button>
       <div style="font-weight:800;font-size:1.05rem;margin:0 36px 12px 0">${escapeHtml(a.text||'')}</div>
       ${body}
     </div></div>`;
     const y=document.getElementById('habitYes'); if(y) y.onclick=function(){ answerHabitAsk('yes'); };
     const n=document.getElementById('habitNo'); if(n) n.onclick=function(){ answerHabitAsk('no'); };
-    const s=document.getElementById('sleepSaveAsk'); if(s) s.onclick=saveSleepAsk;
     const sc=document.getElementById('screenSaveAsk'); if(sc) sc.onclick=saveScreenAsk;
+    const ss=document.getElementById('sleepSaveAsk'); if(ss) ss.onclick=saveSleepAsk;
     const hc=document.getElementById('habitAskClose'); if(hc) hc.onclick=function(){ dismissHabitAsk(); };
     root.querySelectorAll('.mood-face').forEach(function(btn){
       btn.onclick=function(){ answerMoodAsk(Number(btn.getAttribute('data-mood'))||0); };
@@ -11079,6 +11086,7 @@ async function deskTakeCalendar(file){
     state.deskFlow={kind:'cal-file', ok:false, text:(result&&result.message)||'That is not a calendar file. Choose a file that ends in .ics.'};
   } else {
     state.deskFlow={kind:'cal-file', ok:true, added:result.added||0, questions:result.questions||0, name:file.name||'calendar'};
+    state._icsImportGuard=Date.now()+600000;
   }
   deskSave();
 }
@@ -11367,8 +11375,8 @@ function deskFlowHtml(){
     return `<div class="card"><p style="margin:0">Reading ${escapeHtml(flow.name||'the calendar')}…</p></div>`;
   }
   if(flow.kind==='cal-file'){
-    if(!flow.ok) return `<div class="card"><b>${/removed/i.test(flow.text||'')?'Upload removed.':'Calendar not updated.'}</b><p style="margin:8px 0 0">${escapeHtml(flow.text||'')}</p><div class="desk-actions"><button type="button" class="btn ghost" data-desk="cal-another">Choose another file</button></div></div>`;
-    return `<div class="card"><b>Calendar ready.</b><p style="margin:8px 0 0">${flow.added} appointments from ${escapeHtml(flow.name||'the file')} are on your day. No alarm was set.</p>${flow.questions?`<p style="margin:8px 0 0">Some times overlap. They are on the calendar so you can sort them.</p>`:''}<div class="desk-actions"><button type="button" class="btn" data-desk="cal-save">Save</button></div></div>`;
+    if(!flow.ok) return `<div class="card"><b>Calendar not updated.</b><p style="margin:8px 0 0">${escapeHtml(flow.text||'')}</p><div class="desk-actions"><button type="button" class="btn ghost" data-desk="cal-cancel">Cancel</button></div></div>`;
+    return `<div class="card"><b>${flow.added} appointments from ${escapeHtml(flow.name||'the file')}.</b><p style="margin:8px 0 0">They are on your day. No alarm was set. Save keeps them. Cancel puts the calendar back.</p>${flow.questions?`<p style="margin:8px 0 0">Some times overlap. Save still keeps them, and you can sort those on the calendar.</p>`:''}<div class="desk-actions"><button type="button" class="btn" data-desk="cal-save">Save</button><button type="button" class="btn ghost" data-desk="cal-cancel">Cancel</button></div></div>`;
   }
   if(flow.kind==='lesson-empty'){
     return `<div class="card"><b>I opened ${escapeHtml(flow.name||'that file')}.</b><p style="margin:8px 0 0">${escapeHtml(flow.summary||'')}</p>${deskFileButtons()}</div>`;
@@ -20714,21 +20722,24 @@ function wireView(){
         const flow=state.deskFlow||{};
         const task=deskTask(flow.taskId);
         if(act==='save-sessions') deskSaveSessions();
-        else if(act==='cal-undo'){
-          if(state.icsUndo && (state.icsUndo.classes || state.icsUndo.studyBlocks)){
-            state.classes=state.icsUndo.classes||[];
-            state.studyBlocks=state.icsUndo.studyBlocks||[];
-            state.icsUndo=null;
-          } else {
-            state.classes=(state.classes||[]).filter(function(c){ return c.source!=='ics-file' && c.source!=='ics'; });
-            state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return b.source!=='ics-file' && b.source!=='ics'; });
+        else if(act==='cal-save'){ state._icsImportGuard=Date.now()+8000; state.deskFlow=null; state.deskSaid=''; deskSave(); }
+        else if(act==='cal-cancel'){
+          if(flow.ok){
+            if(state.icsUndo && (state.icsUndo.classes || state.icsUndo.studyBlocks)){
+              state.classes=state.icsUndo.classes||[];
+              state.studyBlocks=state.icsUndo.studyBlocks||[];
+              state.icsUndo=null;
+            } else {
+              state.classes=(state.classes||[]).filter(function(c){ return c.source!=='ics-file' && c.source!=='ics'; });
+              state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return b.source!=='ics-file' && b.source!=='ics'; });
+            }
           }
+          state._icsImportGuard=Date.now()+8000;
           state.view='today';
-          state.deskFlow={kind:'cal-file', ok:false, text:'Calendar upload removed. Appointments you added yourself are still there.'};
+          state.deskFlow=null;
+          state.deskSaid='';
           deskSave();
         }
-        else if(act==='cal-save'){ state.deskFlow=null; state.deskSaid=''; deskSave(); }
-        else if(act==='cal-another'){ const f=document.getElementById('deskFile'); if(f) f.click(); }
         else if(act==='lesson-clear'){ state.deskFlow=null; state.deskSaid=''; deskSave(); }
         else if(act==='lesson-another'){ const f=document.getElementById('deskFile'); if(f) f.click(); }
         else if(act==='lesson-notes'){
