@@ -128,7 +128,7 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--pine);outline-of
 .mind-row{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
 .mind-branch{flex:0 1 150px;background:var(--grey-soft);border:1px solid var(--line);border-radius:12px;padding:8px 10px;font-size:.8rem;line-height:1.35;color:var(--ink)}
 body.desk-on .main{padding-bottom:120px}
-.desk-bar{position:fixed;left:0;right:0;bottom:0;z-index:25;display:flex;gap:8px;align-items:center;padding:10px 14px calc(12px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
+.desk-bar{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;gap:8px;align-items:center;padding:10px 14px calc(12px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--line)}
 .desk-bar input{border-radius:999px;padding:12px 16px}
 .desk-clip{width:46px;height:46px;min-width:46px;border-radius:50%;padding:0;display:flex;align-items:center;justify-content:center}
 .desk-clip svg{width:20px;height:20px;display:block}
@@ -137,6 +137,7 @@ body.desk-on .main{padding-bottom:120px}
 .nextup{border:1px solid var(--pine);background:var(--pine-soft);border-radius:14px;padding:12px 14px;margin-bottom:14px}
 .desk-kicker{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
 .desk-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:.95rem}
+.desk-row.past{color:#8A8478}
 .desk-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .desk-actions .btn{width:auto;flex:0 0 auto}
 textarea.assist-box::placeholder{color:#8A938E;font-size:13px;font-weight:400;opacity:1}
@@ -406,6 +407,7 @@ details.setgroup .setgroup-body{margin-top:12px}
 }
 @media (prefers-reduced-motion: reduce){ .fab-task.fab-run{ animation:none; } }
 @media (min-width:821px){ .fab-task{ bottom:18px; right:18px; } }
+body.desk-on .fab-task{ display:none !important; }
 .task-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
 @media(max-width:820px){
   .task-actions{grid-template-columns:1fr 1fr}
@@ -6355,14 +6357,14 @@ function ensureFab(){
     });
     document.body.appendChild(b);
   }
-  const hide=document.body.classList.contains('login-only') || document.body.classList.contains('share-only');
+  const hide=document.body.classList.contains('login-only') || document.body.classList.contains('share-only') || document.body.classList.contains('desk-on');
   b.hidden=!!hide;
 }
 let _fabRanDay='';
 function maybeFabRun(){
   const b=document.getElementById('fabTask');
   if(!b) return;
-  const hide=document.body.classList.contains('login-only') || document.body.classList.contains('share-only');
+  const hide=document.body.classList.contains('login-only') || document.body.classList.contains('share-only') || document.body.classList.contains('desk-on');
   b.hidden=!!hide;
   if(hide) return;
   if(!Array.isArray(state.fabDays)) state.fabDays=[];
@@ -10987,8 +10989,50 @@ function deskItems(date){
   (state.quietNotes||[]).forEach(function(n){
     if(n && n.date===date) items.push({time:n.time||'21:30', title:n.title||'Wind down', kind:'note', extra:'notification, no alarm'});
   });
-  items.sort(function(a,b){ return String(a.time||'99').localeCompare(String(b.time||'99')); });
-  return items;
+  (state.habits||[]).forEach(function(h){
+    if(!h || h.stopped || !h.time) return;
+    if(typeof customOccursOn==='function' && !customOccursOn(h, date)) return;
+    items.push({time:String(h.time).slice(0,5), title:h.name||'Habit', kind:'habit'});
+  });
+  const seen={};
+  const unique=items.filter(function(it){
+    const key=String(it.time||'').slice(0,5)+'|'+String(it.title||'').toLowerCase().replace(/\s+/g,' ').trim();
+    if(seen[key]) return false;
+    seen[key]=1;
+    return true;
+  });
+  unique.sort(function(a,b){ return String(a.time||'99').localeCompare(String(b.time||'99')); });
+  return unique;
+}
+function loadPdfJs(){
+  return new Promise(function(resolve, reject){
+    if(window.pdfjsLib){ resolve(window.pdfjsLib); return; }
+    const s=document.createElement('script');
+    s.src='vendor/pdf.min.js';
+    s.onload=function(){
+      try{ window.pdfjsLib.GlobalWorkerOptions.workerSrc='vendor/pdf.worker.min.js'; }catch(e){}
+      resolve(window.pdfjsLib);
+    };
+    s.onerror=function(){ reject(new Error('Could not open the PDF reader')); };
+    document.head.appendChild(s);
+  });
+}
+async function assistPdfJsText(buf){
+  const pdfjs=await loadPdfJs();
+  const data=buf.slice ? buf.slice(0) : buf;
+  const pdf=await pdfjs.getDocument({data:data, disableWorker:false}).promise;
+  const parts=[];
+  const n=Math.min(pdf.numPages||0, 12);
+  for(let i=1;i<=n;i++){
+    const page=await pdf.getPage(i);
+    const content=await page.getTextContent();
+    const line=(content.items||[]).map(function(it){ return it.str||''; }).join(' ');
+    if(line.trim()) parts.push(line.trim());
+  }
+  return parts.join('\n');
+}
+function deskFileButtons(){
+  return `<div class="desk-actions"><button type="button" class="btn ghost" data-desk="lesson-clear">Remove</button><button type="button" class="btn ghost" data-desk="lesson-another">Attach a different file</button></div>`;
 }
 function deskBuildLesson(name, text){
   const base=assistStudyLesson(name, text);
@@ -11002,53 +11046,77 @@ function deskBuildLesson(name, text){
   const keywords=Object.keys(freq).sort(function(a,b){ return freq[b]-freq[a]; }).slice(0,6);
   const points=base.points && base.points.length ? base.points : [clean.slice(0,180)];
   const summary=(points.slice(0,2).join(' ')||clean).slice(0,320);
-  const per=points.length>4 ? 2 : 1;
+  return {name:name||'Lesson', title:base.title||'Lesson', summary:summary, keywords:keywords, points:points, sessions:[]};
+}
+async function deskTakeCalendar(file){
+  if(!file) return;
+  state.deskSaid='';
+  state.deskFlow={kind:'cal-wait', name:file.name||'calendar'};
+  try{ render(); }catch(e){}
+  let text='';
+  try{
+    const buf=await file.arrayBuffer();
+    const bytes=new Uint8Array(buf);
+    if(bytes.length>2 && bytes[0]===0xFF && bytes[1]===0xFE) text=new TextDecoder('utf-16le').decode(buf);
+    else if(bytes.length>2 && bytes[0]===0xFE && bytes[1]===0xFF) text=new TextDecoder('utf-16be').decode(buf);
+    else {
+      text=new TextDecoder('utf-8').decode(buf);
+      if(text.indexOf('BEGIN:VEVENT')<0){
+        const alt=new TextDecoder('utf-16le').decode(buf);
+        if(alt.indexOf('BEGIN:VEVENT')>=0) text=alt;
+      }
+    }
+  }catch(e){
+    state.view='today';
+    state.deskFlow={kind:'cal-file', ok:false, text:'That file could not be opened. Choose a calendar file that ends in .ics.'};
+    deskSave();
+    return;
+  }
+  let result=null;
+  try{ result=importIcsText(text, 'ics-file'); }catch(e){ result=null; }
+  state.view='today';
+  if(!result || !result.ok){
+    state.deskFlow={kind:'cal-file', ok:false, text:(result&&result.message)||'That is not a calendar file. Choose a file that ends in .ics.'};
+  } else {
+    state.deskFlow={kind:'cal-file', ok:true, added:result.added||0, questions:result.questions||0, name:file.name||'calendar'};
+  }
+  deskSave();
+}
+function deskPlanSittings(minutes){
+  const flow=state.deskFlow||{};
+  const L=flow.lesson||{};
+  const points=L.points&&L.points.length?L.points:[L.summary||'Read it'];
+  const per=points.length>4?2:1;
   const sessions=[];
   for(let i=0;i<points.length && sessions.length<4;i+=per){
     const chunk=points.slice(i, i+per);
-    sessions.push({date:deskAddDays(tomorrowStr(), sessions.length), minutes:Math.max(20, chunk.length*20), cover:chunk[0].replace(/\s+/g,' ').slice(0,110)});
+    sessions.push({date:deskAddDays(tomorrowStr(), sessions.length), minutes:minutes, cover:String(chunk[0]||'').replace(/\s+/g,' ').slice(0,110)});
   }
-  return {name:name||'Lesson', title:base.title||'Lesson', summary:summary, keywords:keywords, points:points, sessions:sessions};
-}
-async function deskTakeFile(file){
-  if(!file) return;
-  const name=file.name||'Lesson';
-  state.deskSaid='';
-  state.deskFlow={kind:'lesson-wait', name:name};
-  try{ render(); }catch(e){}
-  let text='';
-  const kind=String(file.type||'').toLowerCase();
-  try{
-    if(/pdf/.test(kind) || /\.pdf$/i.test(name)) text=await assistPdfText(await file.arrayBuffer());
-    else if(/^image\//.test(kind) || /\.(png|jpe?g|webp|gif)$/i.test(name)){
-      const T=await loadTesseract();
-      const result=await T.recognize(file, 'eng');
-      text=(result && result.data && result.data.text) || '';
-    } else text=await file.text();
-  }catch(e){
-    state.deskFlow={kind:'lesson', lesson:{name:name, title:'Could not read that', summary:'Try a PDF, a text file, or a clearer photo of the page.', keywords:[], points:[], sessions:[]}};
-    deskSave();
-    return;
-  }
-  text=String(text||'').replace(/\s+/g,' ').trim();
-  if(text.length<20){
-    state.deskFlow={kind:'lesson', lesson:{name:name, title:'Not enough words', summary:'I could not find enough writing in that file. A typed PDF or a straight photo of the page works best.', keywords:[], points:[], sessions:[]}};
-    deskSave();
-    return;
-  }
-  state.deskFlow={kind:'lesson', lesson:deskBuildLesson(name, text)};
-  deskSave();
+  L.sessions=sessions;
+  flow.lesson=L;
+  flow.minutes=minutes;
+  state.deskFlow=flow;
 }
 function deskSaveSessions(){
-  const L=(state.deskFlow&&state.deskFlow.lesson)||{};
+  const flow=state.deskFlow||{};
+  const L=flow.lesson||{};
+  const time=flow.time||'';
+  if(!/^\d{2}:\d{2}$/.test(time)){
+    flow.note='Choose a time first. I will not pick one.';
+    state.deskFlow=flow;
+    deskSave();
+    return;
+  }
   if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
   (L.sessions||[]).forEach(function(s){
     const mins=s.minutes||20;
-    const endMins=16*60+mins;
-    const end=String(Math.floor(endMins/60)).padStart(2,'0')+':'+String(endMins%60).padStart(2,'0');
-    state.studyBlocks.push({id:uid(), label:(L.title||'Lesson')+': '+s.cover, date:s.date, start:'16:00', end:end, meetingUrl:'', room:'', kind:'study', alarmMinutes:0});
+    const parts=time.split(':');
+    const startMin=Number(parts[0])*60+Number(parts[1]);
+    const endMin=startMin+mins;
+    const end=String(Math.floor(endMin/60)%24).padStart(2,'0')+':'+String(endMin%60).padStart(2,'0');
+    state.studyBlocks.push({id:uid(), label:(L.title||'Lesson')+': '+s.cover, date:s.date, start:time, end:end, meetingUrl:'', room:'', kind:'study', alarmMinutes:0});
   });
-  state.deskFlow={kind:'lesson', lesson:L, saved:true};
+  state.deskFlow={kind:'lesson-done', text:'Saved '+(L.sessions||[]).length+' sittings at '+deskClock(time)+'. No alarm. You can remove this file and attach another.'};
   deskSave();
 }
 function deskDueTitle(said){
@@ -11295,14 +11363,43 @@ function deskFlowHtml(){
   if(flow.kind==='change-remind'){
     return bubble+`<div class="card"><label>Remind at</label><input id="deskRemindTime" type="time" value="${escapeHtml(flow.time||'08:00')}"><div class="desk-actions"><button type="button" class="btn" data-desk="save-remind">Save</button></div></div>`;
   }
-  if(flow.kind==='lesson'){
+  if(flow.kind==='cal-wait'){
+    return `<div class="card"><p style="margin:0">Reading ${escapeHtml(flow.name||'the calendar')}…</p></div>`;
+  }
+  if(flow.kind==='cal-file'){
+    if(!flow.ok) return `<div class="card"><b>${/removed/i.test(flow.text||'')?'Upload removed.':'Calendar not updated.'}</b><p style="margin:8px 0 0">${escapeHtml(flow.text||'')}</p><div class="desk-actions"><button type="button" class="btn ghost" data-desk="cal-another">Choose another file</button></div></div>`;
+    return `<div class="card"><b>Calendar ready.</b><p style="margin:8px 0 0">${flow.added} appointments from ${escapeHtml(flow.name||'the file')} are on your day. No alarm was set.</p>${flow.questions?`<p style="margin:8px 0 0">Some times overlap. They are on the calendar so you can sort them.</p>`:''}<div class="desk-actions"><button type="button" class="btn" data-desk="cal-save">Save</button></div></div>`;
+  }
+  if(flow.kind==='lesson-empty'){
+    return `<div class="card"><b>I opened ${escapeHtml(flow.name||'that file')}.</b><p style="margin:8px 0 0">${escapeHtml(flow.summary||'')}</p>${deskFileButtons()}</div>`;
+  }
+  if(flow.kind==='lesson-done'){
+    return `<div class="card"><b>${escapeHtml(flow.text||'Saved.')}</b>${deskFileButtons()}</div>`;
+  }
+  if(flow.kind==='lesson-ask' || flow.kind==='lesson-when' || flow.kind==='lesson'){
     const L=flow.lesson||{};
     const keys=(L.keywords||[]).map(function(w){ return `<span class="chip off">${escapeHtml(w)}</span>`; }).join(' ');
-    const branches=(L.points||[]).map(function(p){ return `<div class="mind-branch">${escapeHtml(p)}</div>`; }).join('');
-    const sessions=(L.sessions||[]).map(function(s,i){
-      return `<div class="desk-row"><span><b>Session ${i+1}</b> · ${escapeHtml(s.cover)}</span><span>${escapeHtml(deskNice(s.date).split(',')[0])} · ${s.minutes} min</span></div>`;
+    const points=L.points||[];
+    const pointList=points.map(function(p){ return `<li style="margin:0 0 6px">${escapeHtml(p)}</li>`; }).join('');
+    const outline=points.map(function(p){
+      const low=p.toLowerCase();
+      const found=(L.keywords||[]).filter(function(w){ return low.indexOf(w)>=0; });
+      const kids=found.length?found.map(function(w){ return `<li>${escapeHtml(w)}</li>`; }).join(''):'<li>'+escapeHtml((L.keywords||[])[0]||'main idea')+'</li>';
+      return `<li style="margin:0 0 8px"><b>${escapeHtml(p.slice(0,80))}</b><ul style="margin:4px 0 0">${kids}</ul></li>`;
     }).join('');
-    return bubble+`<div class="card"><div class="desk-kicker">${escapeHtml(L.name||'Lesson')}</div><p style="margin:8px 0"><b>${escapeHtml(L.title||'Lesson')}</b></p><p style="margin:0 0 8px">${escapeHtml(L.summary||'')}</p><div style="margin-bottom:8px">${keys}</div><div class="mind"><div class="mind-core">${escapeHtml(L.title||'Lesson')}</div><div class="mind-row">${branches}</div></div><div class="desk-kicker" style="margin-top:12px">How to cover it</div>${sessions}<div class="desk-actions"><button type="button" class="btn" data-desk="save-sessions">Put these on the day</button></div>${flow.saved?'<p style="margin:8px 0 0;color:var(--muted)">On your day, from 4:00. No alarm.</p>':''}</div>`;
+    const branches=points.map(function(p){ return `<div class="mind-branch">${escapeHtml(p)}</div>`; }).join('');
+    const study=`<div class="desk-kicker">Summary</div><p style="margin:6px 0 10px">${escapeHtml(L.summary||'')}</p><div class="desk-kicker">Key points</div><ol style="margin:6px 0 10px;padding-left:18px">${pointList}</ol><div class="desk-kicker">Keyword outline</div><ul style="margin:6px 0 10px;padding-left:18px">${outline}</ul><div style="margin-bottom:8px">${keys}</div><div class="desk-kicker">Graphical representation</div><div class="mind" style="margin-top:8px"><div class="mind-core">${escapeHtml(L.title||'Lesson')}</div><div class="mind-row">${branches}</div></div>`;
+    const head=`<div class="card"><p style="margin:0 0 8px"><b>Read ${escapeHtml(L.name||'the file')}.</b></p>`+study;
+    if(flow.kind==='lesson-ask'){
+      return head+`<p style="margin:12px 0 8px">What do you want from this?</p><div class="desk-actions"><button type="button" class="btn" data-desk="lesson-notes">Keep as notes</button><button type="button" class="btn ghost" data-desk="lesson-task">Make one task</button><button type="button" class="btn ghost" data-desk="lesson-sittings">Break it into sittings</button></div>${deskFileButtons()}</div>`;
+    }
+    if(flow.kind==='lesson-when'){
+      return head+`<p style="margin:12px 0 8px">What does finished look like?</p><div class="desk-actions"><button type="button" class="btn ghost" data-desk="lesson-aim" data-val="understand">I understand it</button><button type="button" class="btn ghost" data-desk="lesson-aim" data-val="answer">I can answer questions</button><button type="button" class="btn ghost" data-desk="lesson-aim" data-val="revise">I have revised it</button></div><p style="margin:12px 0 8px">How long each sitting?</p><div class="desk-actions"><button type="button" class="btn ghost" data-desk="lesson-mins" data-val="20">20 min</button><button type="button" class="btn ghost" data-desk="lesson-mins" data-val="40">40 min</button><button type="button" class="btn ghost" data-desk="lesson-mins" data-val="60">1 hour</button></div><label style="margin-top:12px">What time of day?</label><input id="deskLessonTime" type="time" value="${escapeHtml(flow.time||'')}"><div class="desk-actions"><button type="button" class="btn" data-desk="lesson-use-time">Use this time</button></div>${flow.note?`<p style="margin:8px 0 0">${escapeHtml(flow.note)}</p>`:''}${deskFileButtons()}</div>`;
+    }
+    const sessions=(L.sessions||[]).map(function(s,i){
+      return `<div class="desk-row"><span><b>Sitting ${i+1}</b> · ${escapeHtml(s.cover)}</span><span>${escapeHtml(String(deskNice(s.date)).split(',')[0])} · ${s.minutes} min</span></div>`;
+    }).join('');
+    return head+`<div class="desk-kicker" style="margin-top:12px">Sittings at ${escapeHtml(deskClock(flow.time||''))}</div>${sessions}<p style="margin:8px 0 0;color:var(--muted)">Finished looks like: ${escapeHtml(flow.aimLabel||'you have covered it')}.</p><div class="desk-actions"><button type="button" class="btn" data-desk="save-sessions">Put these on the day</button></div>${deskFileButtons()}</div>`;
   }
   if(flow.kind==='lesson-wait'){
     return bubble+`<div class="card"><p style="margin:0">Reading ${escapeHtml(flow.name||'that file')}…</p></div>`;
@@ -11348,20 +11445,44 @@ function deskCheckin(){
 function viewDesk(){
   document.body.classList.add('desk-on');
   try{ deskCheckin(); }catch(e){}
+  const fk=state.deskFlow && state.deskFlow.kind;
+  if(fk && /^lesson/.test(fk)){ state.deskFlow=null; state.deskSaid=''; }
+  try{
+    const today=todayStr();
+    const tom=tomorrowStr();
+    const nowMin=new Date().getHours()*60+new Date().getMinutes();
+    function pullEvening(obj, dateKey){
+      if(!obj) return;
+      const name=obj.name||obj.title||obj.label||'';
+      if(!/medicin/i.test(name)) return;
+      const raw=obj[dateKey];
+      if(String(raw).slice(0,10)!==tom) return;
+      const t=String(obj.time||obj.start||'').slice(0,5);
+      if(!/^\d{2}:\d{2}$/.test(t)) return;
+      const mins=Number(t.slice(0,2))*60+Number(t.slice(3));
+      if(mins>=17*60 && mins>nowMin) obj[dateKey]=today;
+    }
+    (state.nudges||[]).forEach(function(n){ pullEvening(n,'onceDate'); });
+    (state.habits||[]).forEach(function(h){ pullEvening(h,'onceDate'); });
+    (state.studyBlocks||[]).forEach(function(b){ pullEvening(b,'date'); });
+    (state.tasks||[]).forEach(function(t){ if(t && !t.done) pullEvening(t,'date'); });
+  }catch(e){}
   const today=deskItems(todayStr());
   const tom=deskItems(tomorrowStr());
   const nowMin=new Date().getHours()*60+new Date().getMinutes();
   let next=null;
+  const earlier=[];
   const later=[];
   today.forEach(function(item){
     const bits=String(item.time||'').split(':');
     const mins=item.time?Number(bits[0])*60+Number(bits[1]||0):null;
-    if(!next && mins!=null && mins>=nowMin-5) next=item;
+    if(mins!=null && mins<nowMin-5){ earlier.push(item); return; }
+    if(!next && mins!=null) next=item;
     else later.push(item);
   });
-  const row=function(item){
+  const row=function(item, past){
     const extra=item.extra?` · ${escapeHtml(item.extra)}`:'';
-    return `<div class="desk-row"><span>${escapeHtml(item.title)}${extra}</span><span>${item.time?escapeHtml(deskClock(item.time)):''}</span></div>`;
+    return `<div class="desk-row${past?' past':''}"><span>${escapeHtml(item.title)}${extra}</span><span>${item.time?escapeHtml(deskClock(item.time))+(past?' · over':''):''}</span></div>`;
   };
   let nextHtml='';
   if(next){
@@ -11370,10 +11491,11 @@ function viewDesk(){
     const soon=mins>=0?`In ${mins} minutes`:'Now';
     nextHtml=`<div class="nextup"><div class="desk-kicker">Next up · ${escapeHtml(soon)}</div><p style="margin:6px 0 0"><b>${escapeHtml(next.title)}</b></p><p style="margin:2px 0 0;color:var(--muted)">${escapeHtml(deskClock(next.time))}${next.extra?' · '+escapeHtml(next.extra):''}</p></div>`;
   }
-  const laterHtml=later.length?`<div class="desk-kicker" style="margin-top:8px">Later today</div>${later.slice(0,5).map(row).join('')}`:'';
-  const tomHtml=`<div class="desk-kicker" style="margin-top:16px">Tomorrow</div>`+(tom.length?tom.slice(0,4).map(row).join(''):`<p style="color:var(--muted);margin:8px 0">Nothing saved for tomorrow yet.</p>`);
+  const earlierHtml=earlier.length?earlier.slice(-5).map(function(item){ return row(item, true); }).join(''):'';
+  const laterHtml=later.length?`<div class="desk-kicker" style="margin-top:8px">Later today</div>${later.slice(0,5).map(function(item){ return row(item, false); }).join('')}`:'';
+  const tomHtml=`<div class="desk-kicker" style="margin-top:16px">Tomorrow</div>`+(tom.length?tom.slice(0,4).map(function(item){ return row(item, false); }).join(''):`<p style="color:var(--muted);margin:8px 0">Nothing saved for tomorrow yet.</p>`);
   const when=new Date().toLocaleDateString(undefined,{weekday:'long', day:'numeric', month:'long'});
-  return `<div class="pagehead"><div class="eyebrow">${escapeHtml(when)}</div><h1>Here's your day</h1></div>${nextHtml}${laterHtml}${tomHtml}${deskFlowHtml()}<div class="desk-bar"><input id="deskBox" placeholder="Tell me anything..." autocomplete="off"><button type="button" class="btn ghost desk-clip" id="deskClip" aria-label="Attach a lesson"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 12.5V7a4 4 0 0 1 8 0v9a3 3 0 0 1-6 0V8"/></svg></button><input id="deskFile" type="file" accept=".pdf,.txt,.text,.md,image/*,application/pdf,text/plain" style="position:absolute;left:-9999px;width:1px;height:1px" aria-label="Lesson file"><button type="button" class="btn desk-mic" id="deskMic" data-voice="desk" data-area="deskBox" data-status="deskStatus" aria-label="Hold and speak">Say</button></div><div id="deskStatus" hidden></div>`;
+  return `<div class="pagehead"><div class="eyebrow">${escapeHtml(when)}</div><h1>Here's your day</h1></div>${earlierHtml}${nextHtml}${laterHtml}${tomHtml}${deskFlowHtml()}<div class="desk-bar"><input id="deskBox" placeholder="Tell me anything..." autocomplete="off"><button type="button" class="btn ghost desk-clip" id="deskClip" aria-label="Attach a calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 12.5V7a4 4 0 0 1 8 0v9a3 3 0 0 1-6 0V8"/></svg></button><input id="deskFile" type="file" accept=".ics,text/calendar" style="position:absolute;left:-9999px;width:1px;height:1px" aria-label="Calendar file"><button type="button" class="btn desk-mic" id="deskMic" data-voice="desk" data-area="deskBox" data-status="deskStatus" aria-label="Hold and speak">Say</button></div><div id="deskStatus" hidden></div>`;
 }
 function viewToday(){
   try{ clearExcludedCopies(); }catch(e){}
@@ -14853,9 +14975,10 @@ function spokenClockList(text){
     if(ap.indexOf('p')===0 && h<12) h+=12;
     if(ap.indexOf('a')===0 && h===12) h=0;
     if(!ap && morning && h===12) h=0;
-    else if(!ap && h>=1 && h<=7 && !morning && (late || !m[2] || true)) h+=12;
+    else if(!ap && h>=1 && h<=7 && !morning && (late || !m[2])) h+=12;
     else if(!ap && h<=7 && late) h+=12;
     if(morning && h>=13 && h<=19 && !ap) h-=12;
+    if(!ap && late && h>=1 && h<=11) h+=12;
     out.push(String(h).padStart(2,'0')+':'+String(min).padStart(2,'0'));
   }
   const seen={};
@@ -20576,7 +20699,7 @@ function wireView(){
     if(file) file.addEventListener('change', function(){
       const f=file.files && file.files[0];
       file.value='';
-      if(f) deskTakeFile(f);
+      if(f) deskTakeCalendar(f);
     });
     if(deskBox) deskBox.addEventListener('keydown', function(e){
       if(e.key!=='Enter') return;
@@ -20591,6 +20714,64 @@ function wireView(){
         const flow=state.deskFlow||{};
         const task=deskTask(flow.taskId);
         if(act==='save-sessions') deskSaveSessions();
+        else if(act==='cal-undo'){
+          if(state.icsUndo && (state.icsUndo.classes || state.icsUndo.studyBlocks)){
+            state.classes=state.icsUndo.classes||[];
+            state.studyBlocks=state.icsUndo.studyBlocks||[];
+            state.icsUndo=null;
+          } else {
+            state.classes=(state.classes||[]).filter(function(c){ return c.source!=='ics-file' && c.source!=='ics'; });
+            state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return b.source!=='ics-file' && b.source!=='ics'; });
+          }
+          state.view='today';
+          state.deskFlow={kind:'cal-file', ok:false, text:'Calendar upload removed. Appointments you added yourself are still there.'};
+          deskSave();
+        }
+        else if(act==='cal-save'){ state.deskFlow=null; state.deskSaid=''; deskSave(); }
+        else if(act==='cal-another'){ const f=document.getElementById('deskFile'); if(f) f.click(); }
+        else if(act==='lesson-clear'){ state.deskFlow=null; state.deskSaid=''; deskSave(); }
+        else if(act==='lesson-another'){ const f=document.getElementById('deskFile'); if(f) f.click(); }
+        else if(act==='lesson-notes'){
+          const L=flow.lesson||{};
+          if(!Array.isArray(state.journal)) state.journal=[];
+          const now=new Date();
+          const body=[L.summary||''].concat(L.points||[]).filter(Boolean).join('\n');
+          state.journal.unshift({id:uid(), text:body, date:todayStr(), time:String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'), filed:false});
+          state.deskFlow={kind:'lesson-done', text:'Saved in Jot it. Nothing was put on the calendar.'};
+          deskSave();
+        }
+        else if(act==='lesson-task'){
+          const L=flow.lesson||{};
+          if(!Array.isArray(state.tasks)) state.tasks=[];
+          state.tasks.unshift({id:uid(), title:L.title||'Lesson', notes:L.summary||'', date:'', time:'', priority:'medium', urgent:false, important:true, eisSet:false, tier:'could', frog:false, context:'school', technique:'', meetingUrl:'', nudgeWhen:'none', reminderLeads:[], reminderTime:'', remindOn:'', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], checkpoints:[], pomodoros:0, done:false, whenThen:{}, rewarding:{}, strategic:{}, flip:{}, created:Date.now()});
+          state.deskFlow={kind:'lesson-done', text:'Saved as a task. No time, until you set one.'};
+          deskSave();
+        }
+        else if(act==='lesson-sittings'){ state.deskFlow=Object.assign({}, flow, {kind:'lesson-when', note:''}); deskSave(); }
+        else if(act==='lesson-aim'){
+          const labels={understand:'you understand it', answer:'you can answer questions', revise:'you have revised it'};
+          const val=btn.getAttribute('data-val');
+          state.deskFlow=Object.assign({}, flow, {aim:val, aimLabel:labels[val]||'you have covered it'});
+          deskSave();
+        }
+        else if(act==='lesson-mins'){
+          state.deskFlow=Object.assign({}, flow, {minutes:Number(btn.getAttribute('data-val'))||20, note:''});
+          deskSave();
+        }
+        else if(act==='lesson-use-time'){
+          const el=document.getElementById('deskLessonTime');
+          const time=el&&el.value?el.value:'';
+          if(!/^\d{2}:\d{2}$/.test(time)){
+            state.deskFlow=Object.assign({}, flow, {note:'Choose a time. I will not pick 4:00 for you.'});
+            deskSave();
+            return;
+          }
+          if(!flow.aim){ state.deskFlow=Object.assign({}, flow, {note:'Choose what finished looks like.'}); deskSave(); return; }
+          if(!flow.minutes){ state.deskFlow=Object.assign({}, flow, {note:'Choose how long each sitting is.'}); deskSave(); return; }
+          state.deskFlow=Object.assign({}, flow, {kind:'lesson', time:time, note:''});
+          deskPlanSittings(flow.minutes);
+          deskSave();
+        }
         else if(act==='plan'){ state.deskFlow={kind:'finish', taskId:flow.taskId}; deskSave(); }
         else if(act==='remind') deskJustRemind();
         else if(act==='finish'){ state.deskFlow={kind:'minutes', taskId:flow.taskId, shape:btn.getAttribute('data-val')}; deskSave(); }
