@@ -10993,6 +10993,9 @@ function deskItems(date){
       if(c && c.day===dow) items.push({time:c.start||'', title:c.title||'Class', kind:'class', extra:c.room||''});
     });
   }catch(e){}
+  (state.exercisePlan||[]).forEach(function(r){
+    if(typeof exerciseOccursOn==='function' && exerciseOccursOn(r, date)) items.push({time:r.start||'', title:exerciseTaskTitle(r), kind:'exercise'});
+  });
   (state.quietNotes||[]).forEach(function(n){
     if(n && n.date===date) items.push({time:n.time||'21:30', title:n.title||'Wind down', kind:'note', extra:'notification, no alarm'});
   });
@@ -11298,47 +11301,355 @@ function deskHandle(raw){
   const said=String(raw||'').replace(/\s+/g,' ').trim();
   if(!said) return;
   const low=said.toLowerCase();
-  state.deskSaid=said;
-  const flow=state.deskFlow;
-  if(flow && flow.kind==='choose'){
-    if(/\b(plan|yes|break)\b/.test(low)){ state.deskFlow={kind:'finish', taskId:flow.taskId}; deskSave(); return; }
-    if(/\bremind\b/.test(low)){ deskJustRemind(); return; }
+  state.deskReply='';
+  state.deskSaid='';
+  if(/^(please\s+)?(open|show|go to|take me to)\b/.test(low) || /\b(open my|show my|show me)\b/.test(low)){
+    let view='';
+    if(/\b(calendar|schedule)\b/.test(low)) view='calendar';
+    else if(/\b(task|to-?do)\b/.test(low)) view='tasks';
+    else if(/\b(habit|exercise)\b/.test(low)) view='habits';
+    else if(/\b(jot|note|idea)\b/.test(low)) view='journal';
+    else if(/\b(project)\b/.test(low)) view='projects';
+    else if(/\b(money|expense)\b/.test(low)) view='money';
+    else if(/\b(alarm|nudge|reminder)\b/.test(low)) view='nudge';
+    else if(/\b(setting)\b/.test(low)) view='settings';
+    else {
+      const page=assistPage(low);
+      if(page) view=page.id;
+    }
+    if(view){
+      state.view=view;
+      state.deskFlow=null;
+      deskSave();
+      return;
+    }
   }
-  if(deskMatchChallenge(low)){
-    deskOfferHelp();
-    return;
-  }
-  if(/\bwake me\b|\bwake up\b/.test(low)){
-    deskWake(said);
-    return;
-  }
-  if(/\b(due|deadline)\b/.test(low)){
-    deskSaveDeadline(said);
-    return;
-  }
-  const d=(typeof assistInterpret==='function') ? assistInterpret(said) : null;
-  if(d && d.place==='deadline'){ deskSaveDeadline(said); return; }
-  if(d && d.place && d.place!=='ask' && d.place!=='choose' && d.place!=='leave'){
-    state.deskFlow=null;
-    state.deskReply=d.summary || 'Saved.';
-    try{ assistFile(d); }catch(e){ deskSave(); }
-    state.view='today';
-    state.deskReply=state.deskReply||'Saved.';
+  if(/^(please\s+)?(delete|remove|cancel)\b/.test(low)){
+    const hits=deskNarrowHits(said, deskScheduleHits(said));
+    state.deskFlow={kind:'confirm-delete', text:said, hits:hits};
     deskSave();
     return;
   }
-  state.deskFlow={kind:'which', text:said};
+  if(/^(please\s+)?(edit|change|move|shift|reschedule)\b/.test(low)){
+    const move=deskMoveDays(said);
+    let hits=deskScheduleHits(said);
+    if(move) hits=hits.filter(function(h){ return deskHitDay(h)===move.from; });
+    state.deskFlow={kind:'confirm-move', text:said, hits:hits, toDay:move?move.to:null, fromDay:move?move.from:null};
+    deskSave();
+    return;
+  }
+  state.deskFlow={kind:'review', text:said};
+  deskSave();
+}
+function deskStopWords(){
+  return {the:1,a:1,an:1,my:1,me:1,to:1,for:1,in:1,on:1,and:1,or:1,of:1,with:1,delete:1,remove:1,cancel:1,edit:1,change:1,move:1,shift:1,reschedule:1,open:1,show:1,schedule:1,calendar:1,appointment:1,appointments:1,task:1,tasks:1,morning:1,evening:1,afternoon:1,night:1,today:1,tomorrow:1,please:1,from:1,this:1,that:1};
+}
+function deskScheduleHits(text){
+  const stop=deskStopWords();
+  const words=String(text||'').toLowerCase().split(/[^a-z0-9]+/).filter(function(w){ return w.length>2 && !stop[w]; });
+  function match(title){
+    const t=String(title||'').toLowerCase();
+    if(!words.length) return false;
+    return words.some(function(w){ return t.indexOf(w)>=0; });
+  }
+  const hits=[];
+  (state.classes||[]).forEach(function(c){
+    if(match(c.title)) hits.push({kind:'class', id:c.id, title:c.title, time:c.start||'', day:c.day, date:''});
+  });
+  (state.studyBlocks||[]).forEach(function(b){
+    if(match(b.label)) hits.push({kind:'block', id:b.id, title:b.label, time:b.start||'', day:null, date:b.date||''});
+  });
+  (state.nudges||[]).forEach(function(n){
+    if(match(n.name)) hits.push({kind:'nudge', id:n.id, title:n.name, time:n.time||'', day:null, date:n.onceDate||''});
+  });
+  (state.exercisePlan||[]).forEach(function(r){
+    if(match(r.focus)||match(exerciseTaskTitle(r))) hits.push({kind:'exercise', id:r.id, title:exerciseTaskTitle(r), time:r.start||'', day:r.onceDate?'':r.day, date:r.onceDate||''});
+  });
+  (state.tasks||[]).forEach(function(t){
+    if(t && !t.done && match(t.title)) hits.push({kind:'task', id:t.id, title:t.title, time:t.time||'', day:null, date:t.date||''});
+  });
+  return hits;
+}
+function deskHitDay(h){
+  if(h.date){
+    try{ return mondayIndex(new Date(String(h.date).slice(0,10)+'T12:00:00')); }catch(e){}
+  }
+  if(h.day!=null && h.day!=='') return Number(h.day);
+  return null;
+}
+function deskNarrowHits(text, hits){
+  const low=String(text||'').toLowerCase();
+  const morning=/\bmorning\b/.test(low);
+  const evening=/\b(evening|night)\b/.test(low);
+  const afternoon=/\bafternoon\b/.test(low);
+  if(!morning && !evening && !afternoon) return hits;
+  const narrowed=hits.filter(function(h){
+    const hr=Number(String(h.time||'').slice(0,2));
+    if(!h.time) return false;
+    if(morning && hr<12) return true;
+    if(afternoon && hr>=12 && hr<17) return true;
+    if(evening && hr>=17) return true;
+    return false;
+  });
+  return narrowed.length?narrowed:hits;
+}
+function deskMoveDays(text){
+  const re=/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/ig;
+  const found=[];
+  let m;
+  while((m=re.exec(String(text||'')))){
+    const n=dayNameToIndex(m[1]);
+    if(n>=0) found.push(n);
+  }
+  if(found.length<2) return null;
+  return {from:found[0], to:found[1]};
+}
+function deskDayName(n){
+  return ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'][Number(n)]||'';
+}
+function deskHitLine(h){
+  const when=h.date?deskNice(h.date):(h.day!=null && h.day!==''?deskDayName(h.day):'');
+  const time=h.time?deskClock(h.time):'';
+  return h.title+(when?' · '+when:'')+(time?' · '+time:'');
+}
+function deskApplyDelete(hits){
+  const ids={};
+  (hits||[]).forEach(function(h){ ids[h.kind+':'+h.id]=1; });
+  state.classes=(state.classes||[]).filter(function(c){ return !ids['class:'+c.id]; });
+  state.studyBlocks=(state.studyBlocks||[]).filter(function(b){ return !ids['block:'+b.id]; });
+  state.nudges=(state.nudges||[]).filter(function(n){ return !ids['nudge:'+n.id]; });
+  state.exercisePlan=(state.exercisePlan||[]).filter(function(r){ return !ids['exercise:'+r.id]; });
+  state.tasks=(state.tasks||[]).filter(function(t){ return !ids['task:'+t.id]; });
+  try{ scheduleWakeAlarms(); }catch(e){}
+  try{ if(typeof isNativeApp==='function' && isNativeApp()) scheduleNativeWakeAlarms(); }catch(e){}
+}
+function deskApplyMove(hits, toDay){
+  (hits||[]).forEach(function(h){
+    const from=deskHitDay(h);
+    const delta=(from==null)?0:(Number(toDay)-from);
+    if(h.kind==='class'){
+      const c=(state.classes||[]).find(function(x){ return String(x.id)===String(h.id); });
+      if(c) c.day=Number(toDay);
+    } else if(h.kind==='block'){
+      const b=(state.studyBlocks||[]).find(function(x){ return String(x.id)===String(h.id); });
+      if(b && b.date) b.date=icsAddDays(b.date, delta);
+    } else if(h.kind==='task'){
+      const t=(state.tasks||[]).find(function(x){ return String(x.id)===String(h.id); });
+      if(t && t.date) t.date=icsAddDays(t.date, delta);
+    } else if(h.kind==='nudge'){
+      const n=(state.nudges||[]).find(function(x){ return String(x.id)===String(h.id); });
+      if(n && n.onceDate) n.onceDate=icsAddDays(n.onceDate, delta);
+      if(n && Array.isArray(n.days) && from!=null){
+        n.days=n.days.map(function(d){ return Number(d)===from?Number(toDay):d; });
+      }
+    } else if(h.kind==='exercise'){
+      const r=(state.exercisePlan||[]).find(function(x){ return String(x.id)===String(h.id); });
+      if(!r) return;
+      if(r.onceDate) r.onceDate=icsAddDays(r.onceDate, delta);
+      r.day=Number(toDay);
+    }
+  });
+  try{ syncExerciseLinks(); }catch(e){}
+}
+function deskPullClocks(text){
+  const s=String(text||'').toLowerCase();
+  const out=[];
+  const re=/\b(\d{1,2})(?:[:.](\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?\b/g;
+  let m;
+  while((m=re.exec(s))){
+    const rawH=Number(m[1]);
+    const min=m[2]?Number(m[2]):0;
+    if(rawH>23 || min>59) continue;
+    const ap=(m[3]||'').replace(/\./g,'');
+    let h=rawH;
+    let known=!!ap || rawH>=13;
+    if(ap.indexOf('p')===0 && h<12) h+=12;
+    if(ap.indexOf('a')===0 && h===12) h=0;
+    if(!ap && /\bmorning\b/.test(s)) known=true;
+    if(!ap && /\b(afternoon|evening|tonight|night)\b/.test(s)){
+      if(h<=11) h+=12;
+      known=true;
+    }
+    out.push({h:h, min:min, rawH:rawH, known:known});
+  }
+  return out;
+}
+function deskTitleFrom(text){
+  let t=String(text||'').replace(/\b(today|tomorrow|tonight|this morning|this afternoon|this evening)\b/ig,' ');
+  t=t.replace(/\b\d{1,2}(?:[:.]\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\b/ig,' ');
+  t=t.replace(/\b(at|from|to|until|till|wake me up|wake me|wake up|every|each|weekly|daily)\b/ig,' ');
+  t=t.replace(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekdays?|weekends?)s?\b/ig,' ');
+  t=t.replace(/\s+/g,' ').trim();
+  if(!t) t=String(text||'').trim()||'Untitled';
+  return t.charAt(0).toUpperCase()+t.slice(1);
+}
+function deskClockBits(flow){
+  const clocks=flow.clocks||[];
+  return clocks.map(function(c){
+    let h=c.known?c.h:c.rawH;
+    if(!c.known && (flow.ampm==='afternoon' || flow.ampm==='evening') && h<12) h+=12;
+    if(!c.known && flow.ampm==='morning' && h===12) h=0;
+    return String(h).padStart(2,'0')+':'+String(c.min||0).padStart(2,'0');
+  });
+}
+function deskIsExercise(text){
+  return /\b(yoga|gym|workout|exercise|running|run|jog|strength|weights?|training|pilates|swim|swimming|cycling|walk|walking|hiit|cardio)\b/i.test(String(text||''));
+}
+function deskExerciseRepeat(text){
+  const low=String(text||'').toLowerCase();
+  if(/\b(mondays|tuesdays|wednesdays|thursdays|fridays|saturdays|sundays)\b/.test(low)) return 'weekly';
+  if(speechWantsRepeat(text)) return 'weekly';
+  if(/\b(today|tomorrow|tonight)\b/.test(low)) return 'once';
+  if(spokenDayHits(text).length) return '';
+  if(spokenDate(text)) return 'once';
+  return '';
+}
+function deskExerciseSummary(flow){
+  const text=flow.text||'';
+  const title=deskTitleFrom(text);
+  const bits=deskClockBits(flow);
+  const start=flow.time||bits[0]||'';
+  const end=bits[1]||'';
+  const clock=start?(deskClock(start)+(end?' to '+deskClock(end):'')):'no set time';
+  if(flow.repeat==='weekly'){
+    const days=spokenDayHits(text);
+    const day=flow.weekday!=null?Number(flow.weekday):(days.length?days[0]:null);
+    return title+' goes to Exercise, every '+(day==null?'week':deskDayName(day))+', at '+clock+'. That time is blocked on the calendar. It does not become a task.';
+  }
+  const date=flow.date||spokenDate(text)||todayStr();
+  return title+' goes to Exercise once, on '+deskNice(date)+', at '+clock+'. That time is blocked on the calendar that day only. It does not repeat.';
+}
+function deskAdvanceWhen(){
+  const flow=state.deskFlow||{};
+  const text=flow.text||'';
+  if(flow.place==='idea' || flow.place==='other'){
+    if(flow.place==='other' && deskMatchChallenge(text.toLowerCase())){
+      state.deskSaid=text;
+      deskOfferHelp();
+      return;
+    }
+    deskCommitHeard();
+    return;
+  }
+  if(flow.place==='exercise'){
+    if(!flow.clocks) flow.clocks=deskPullClocks(text);
+    const needAmpm=(flow.clocks||[]).some(function(c){ return !c.known && c.rawH>=1 && c.rawH<=11; });
+    if(needAmpm && !flow.ampm){ flow.kind='when'; flow.step='ampm'; state.deskFlow=flow; deskSave(); return; }
+    if(!flow.repeat){ flow.kind='when'; flow.step='repeat'; state.deskFlow=flow; deskSave(); return; }
+    const days=spokenDayHits(text);
+    if(flow.repeat==='weekly' && flow.weekday==null && !days.length){ flow.kind='when'; flow.step='weekday'; state.deskFlow=flow; deskSave(); return; }
+    if(flow.repeat==='once' && !flow.date && !spokenDate(text)){ flow.kind='when'; flow.step='date'; state.deskFlow=flow; deskSave(); return; }
+    const hasClock=(flow.clocks||[]).length>0 || !!flow.time;
+    if(!hasClock && !flow.noTime){ flow.kind='when'; flow.step='time'; state.deskFlow=flow; deskSave(); return; }
+    if(!flow.checked){ flow.kind='when'; flow.step='exercise-check'; flow.summary=deskExerciseSummary(flow); state.deskFlow=flow; deskSave(); return; }
+    deskCommitHeard();
+    return;
+  }
+  if(!flow.clocks) flow.clocks=deskPullClocks(text);
+  const needAmpm=(flow.clocks||[]).some(function(c){ return !c.known && c.rawH>=1 && c.rawH<=11; });
+  if(needAmpm && !flow.ampm){ flow.kind='when'; flow.step='ampm'; state.deskFlow=flow; deskSave(); return; }
+  if(!flow.date && !flow.dateSkipped){ flow.kind='when'; flow.step='date'; state.deskFlow=flow; deskSave(); return; }
+  const hasClock=(flow.clocks||[]).length>0 || !!flow.time;
+  if(!hasClock && !flow.noTime){ flow.kind='when'; flow.step='time'; state.deskFlow=flow; deskSave(); return; }
+  deskCommitHeard();
+}
+function deskCommitHeard(){
+  const flow=state.deskFlow||{};
+  const text=String(flow.text||'').trim();
+  const title=deskTitleFrom(text);
+  const bits=deskClockBits(flow);
+  const start=flow.time||bits[0]||'';
+  const end=bits[1]||'';
+  const date=flow.date||spokenDate(text)||'';
+  if(flow.place==='exercise'){
+    const bits=deskClockBits(flow);
+    const start=flow.time||bits[0]||'';
+    const end=bits[1]||'';
+    const days=spokenDayHits(text);
+    const row={id:uid(), start:start, end:end, focus:title, details:'', km:'', from:'', to:'', onceDate:'', day:0};
+    if(flow.repeat==='weekly'){
+      row.day=flow.weekday!=null?Number(flow.weekday):(days.length?days[0]:mondayIndex(new Date()));
+      row.onceDate='';
+      row.from=todayStr();
+    } else {
+      const once=date||todayStr();
+      row.onceDate=once;
+      row.day=mondayIndex(new Date(once+'T12:00:00'));
+    }
+    if(!Array.isArray(state.exercisePlan)) state.exercisePlan=[];
+    state.exercisePlan.push(row);
+    try{ syncExerciseLinks(); }catch(e){}
+  } else if(flow.place==='idea' || flow.place==='other'){
+    if(!Array.isArray(state.journal)) state.journal=[];
+    const now=new Date();
+    state.journal.unshift({id:uid(), text:text, date:todayStr(), time:String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0'), filed:false});
+  } else if(flow.place==='task'){
+    if(!Array.isArray(state.tasks)) state.tasks=[];
+    state.tasks.unshift({id:uid(), title:title, notes:text, date:date, time:start, priority:'medium', urgent:false, important:true, eisSet:false, tier:'could', frog:false, context:'', technique:'', meetingUrl:'', nudgeWhen:'none', reminderLeads:[], reminderTime:'', remindOn:'', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], checkpoints:[], pomodoros:0, done:false, whenThen:{}, rewarding:{}, strategic:{}, flip:{}, created:Date.now()});
+  } else {
+    if(date && start){
+      if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
+      state.studyBlocks.push({id:uid(), date:date, start:start, end:end, label:title, meetingUrl:'', room:'', kind:'other', alarmMinutes:0});
+      if(/\bwake me\b|\bwake up\b/i.test(text)) deskPushNudge('Wake up', start, date);
+    } else if(!date && !start){
+      if(!Array.isArray(state.tasks)) state.tasks=[];
+      state.tasks.unshift({id:uid(), title:title, notes:text, date:'', time:'', priority:'medium', urgent:false, important:true, eisSet:false, tier:'could', frog:false, context:'', technique:'', meetingUrl:'', nudgeWhen:'none', reminderLeads:[], reminderTime:'', remindOn:'', startDate:'', startTime:'', startReminderMinutes:[], chunks:[], checkpoints:[], pomodoros:0, done:false, whenThen:{}, rewarding:{}, strategic:{}, flip:{}, created:Date.now()});
+    } else {
+      if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
+      state.studyBlocks.push({id:uid(), date:date||todayStr(), start:start, end:end, label:title, meetingUrl:'', room:'', kind:'other', alarmMinutes:0});
+    }
+  }
+  state.deskFlow=null;
+  state.deskSaid='';
+  state.deskReply='';
+  state.view='today';
   deskSave();
 }
 function deskFlowHtml(){
   const flow=state.deskFlow;
-  const said=state.deskSaid||'';
-  const bubble=said?`<div class="saywrap"><div class="say">${escapeHtml(said)}</div></div>`:'';
-  if(!flow && state.deskReply) return bubble+`<div class="card"><p style="margin:0">${escapeHtml(state.deskReply)}</p></div>`;
   if(!flow) return '';
+  if(flow.kind==='confirm-delete'){
+    const hits=flow.hits||[];
+    if(!hits.length) return `<div class="card"><b>I can't find that.</b><p style="margin:8px 0 0">Nothing was deleted. Say the name again, or open the calendar and delete it there.</p><div class="desk-actions"><button type="button" class="btn ghost" data-desk="confirm-no">OK</button></div></div>`;
+    const lines=hits.map(function(h){ return `<div class="desk-row"><span>${escapeHtml(deskHitLine(h))}</span></div>`; }).join('');
+    return `<div class="card"><p style="margin:0 0 8px">Delete ${hits.length===1?'this':'these'}?</p>${lines}<div class="desk-actions"><button type="button" class="btn" data-desk="confirm-yes-delete">Delete</button><button type="button" class="btn ghost" data-desk="confirm-no">Keep</button></div></div>`;
+  }
+  if(flow.kind==='confirm-move'){
+    const hits=flow.hits||[];
+    const to=deskDayName(flow.toDay);
+    if(!hits.length || flow.toDay==null) return `<div class="card"><b>I can't find that day.</b><p style="margin:8px 0 0">Nothing was changed. Say the name and both days, like Neel on Friday to Thursday.</p><div class="desk-actions"><button type="button" class="btn ghost" data-desk="confirm-no">OK</button></div></div>`;
+    const lines=hits.map(function(h){ return `<div class="desk-row"><span>${escapeHtml(deskHitLine(h))}</span></div>`; }).join('');
+    return `<div class="card"><p style="margin:0 0 8px">Move ${hits.length===1?'this':'these'} to ${escapeHtml(to)}?</p>${lines}<div class="desk-actions"><button type="button" class="btn" data-desk="confirm-yes-move">Move</button><button type="button" class="btn ghost" data-desk="confirm-no">Keep</button></div></div>`;
+  }
+  if(flow.kind==='review'){
+    return `<div class="card"><label for="deskReview">Check this. Change anything that is wrong.</label><textarea id="deskReview" rows="3">${escapeHtml(flow.text||'')}</textarea><div class="desk-actions"><button type="button" class="btn" data-desk="keep">Keep</button><button type="button" class="btn ghost" data-desk="drop">Delete</button></div></div>`;
+  }
+  if(flow.kind==='sort'){
+    return `<div class="card"><p style="margin:0 0 8px">${escapeHtml(flow.text||'')}</p><p style="margin:0 0 8px">What is this?</p><div class="desk-actions"><button type="button" class="btn" data-desk="sort-as" data-val="appointment">Appointment</button><button type="button" class="btn ghost" data-desk="sort-as" data-val="task">Task</button><button type="button" class="btn ghost" data-desk="sort-as" data-val="exercise">Exercise</button><button type="button" class="btn ghost" data-desk="sort-as" data-val="idea">Idea</button><button type="button" class="btn ghost" data-desk="sort-as" data-val="other">Something else</button></div></div>`;
+  }
+  if(flow.kind==='when' && flow.step==='repeat'){
+    return `<div class="card"><p style="margin:0 0 8px">Just this once, or every week?</p><div class="desk-actions"><button type="button" class="btn" data-desk="repeat" data-val="once">Just this once</button><button type="button" class="btn ghost" data-desk="repeat" data-val="weekly">Every week</button></div></div>`;
+  }
+  if(flow.kind==='when' && flow.step==='weekday'){
+    const names=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    return `<div class="card"><p style="margin:0 0 8px">Which day?</p><div class="desk-actions">${names.map(function(n,i){ return '<button type="button" class="btn ghost" data-desk="weekday" data-val="'+i+'">'+n+'</button>'; }).join('')}</div></div>`;
+  }
+  if(flow.kind==='when' && flow.step==='ampm'){
+    return `<div class="card"><p style="margin:0 0 8px">That time could be morning or later. Which is it?</p><div class="desk-actions"><button type="button" class="btn" data-desk="ampm" data-val="morning">Morning</button><button type="button" class="btn ghost" data-desk="ampm" data-val="afternoon">Afternoon</button><button type="button" class="btn ghost" data-desk="ampm" data-val="evening">Evening</button></div></div>`;
+  }
+  if(flow.kind==='when' && flow.step==='date'){
+    return `<div class="card"><p style="margin:0 0 8px">Which day?</p><div class="desk-actions"><button type="button" class="btn" data-desk="which-day" data-val="today">Today</button><button type="button" class="btn ghost" data-desk="which-day" data-val="tomorrow">Tomorrow</button></div><label style="margin-top:8px">Or pick a date</label><input id="deskWhenDate" type="date"><div class="desk-actions"><button type="button" class="btn ghost" data-desk="which-day" data-val="pick">Use that date</button></div></div>`;
+  }
+  if(flow.kind==='when' && flow.step==='exercise-check'){
+    return `<div class="card"><p style="margin:0 0 8px">${escapeHtml(flow.summary||'')}</p><div class="desk-actions"><button type="button" class="btn" data-desk="confirm-exercise">Save</button><button type="button" class="btn ghost" data-desk="drop">Delete</button></div></div>`;
+  }
+  if(flow.kind==='when' && flow.step==='time'){
+    return `<div class="card"><p style="margin:0 0 8px">What time? Leave it blank only if there is no time.</p><input id="deskWhenTime" type="time"><div class="desk-actions"><button type="button" class="btn" data-desk="which-time">Use this time</button><button type="button" class="btn ghost" data-desk="no-time">No time</button></div></div>`;
+  }
+  const bubble='';
   if(flow.kind==='wake'){
     const wind=flow.windDate?`<p style="margin:8px 0 0">A quiet note at ${escapeHtml(deskClock(flow.windTime||'21:30'))} on ${escapeHtml(deskNice(flow.windDate))}: wind down. No alarm.</p>`:'';
-    return bubble+`<div class="card"><b>Alarm set for ${escapeHtml(deskNice(flow.date))}, ${escapeHtml(deskClock(flow.time))}.</b><p style="margin:8px 0 0;color:var(--muted)">The wake-up rings at that time. You can open it and turn it off.</p>${wind}<div class="desk-actions"><button type="button" class="btn ghost" data-desk="change-wake">Change</button></div></div>`;
+    return `<div class="card"><b>Alarm set for ${escapeHtml(deskNice(flow.date))}, ${escapeHtml(deskClock(flow.time))}.</b><p style="margin:8px 0 0;color:var(--muted)">The wake-up rings at that time. You can open it and turn it off.</p>${wind}<div class="desk-actions"><button type="button" class="btn ghost" data-desk="change-wake">Change</button></div></div>`;
   }
   if(flow.kind==='change-wake'){
     return bubble+`<div class="card"><label>Wake-up time</label><input id="deskWakeTime" type="time" value="${escapeHtml(flow.time||'05:30')}"><div class="desk-actions"><button type="button" class="btn" data-desk="save-wake">Save</button></div></div>`;
@@ -11455,6 +11766,7 @@ function viewDesk(){
   try{ deskCheckin(); }catch(e){}
   const fk=state.deskFlow && state.deskFlow.kind;
   if(fk && /^lesson/.test(fk)){ state.deskFlow=null; state.deskSaid=''; }
+  state.deskReply='';
   try{
     const today=todayStr();
     const tom=tomorrowStr();
@@ -11499,11 +11811,11 @@ function viewDesk(){
     const soon=mins>=0?`In ${mins} minutes`:'Now';
     nextHtml=`<div class="nextup"><div class="desk-kicker">Next up · ${escapeHtml(soon)}</div><p style="margin:6px 0 0"><b>${escapeHtml(next.title)}</b></p><p style="margin:2px 0 0;color:var(--muted)">${escapeHtml(deskClock(next.time))}${next.extra?' · '+escapeHtml(next.extra):''}</p></div>`;
   }
-  const earlierHtml=earlier.length?earlier.slice(-5).map(function(item){ return row(item, true); }).join(''):'';
-  const laterHtml=later.length?`<div class="desk-kicker" style="margin-top:8px">Later today</div>${later.slice(0,5).map(function(item){ return row(item, false); }).join('')}`:'';
+  const todayRows=[].concat(later.slice(0,5).map(function(item){ return row(item, false); }), earlier.slice(-5).map(function(item){ return row(item, true); }));
+  const laterHtml=todayRows.length?`<div class="desk-kicker" style="margin-top:8px">Today</div>${todayRows.join('')}`:'';
   const tomHtml=`<div class="desk-kicker" style="margin-top:16px">Tomorrow</div>`+(tom.length?tom.slice(0,4).map(function(item){ return row(item, false); }).join(''):`<p style="color:var(--muted);margin:8px 0">Nothing saved for tomorrow yet.</p>`);
   const when=new Date().toLocaleDateString(undefined,{weekday:'long', day:'numeric', month:'long'});
-  return `<div class="pagehead"><div class="eyebrow">${escapeHtml(when)}</div><h1>Here's your day</h1></div>${earlierHtml}${nextHtml}${laterHtml}${tomHtml}${deskFlowHtml()}<div class="desk-bar"><input id="deskBox" placeholder="Tell me anything..." autocomplete="off"><button type="button" class="btn ghost desk-clip" id="deskClip" aria-label="Attach a calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 12.5V7a4 4 0 0 1 8 0v9a3 3 0 0 1-6 0V8"/></svg></button><input id="deskFile" type="file" accept=".ics,text/calendar" style="position:absolute;left:-9999px;width:1px;height:1px" aria-label="Calendar file"><button type="button" class="btn desk-mic" id="deskMic" data-voice="desk" data-area="deskBox" data-status="deskStatus" aria-label="Hold and speak">Say</button></div><div id="deskStatus" hidden></div>`;
+  return `<div class="pagehead"><div class="eyebrow">${escapeHtml(when)}</div><h1>Here's your day</h1></div>${nextHtml}${laterHtml}${tomHtml}${deskFlowHtml()}<div class="desk-bar"><input id="deskBox" placeholder="Tell me anything..." autocomplete="off"><button type="button" class="btn ghost desk-clip" id="deskClip" aria-label="Attach a calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 12.5V7a4 4 0 0 1 8 0v9a3 3 0 0 1-6 0V8"/></svg></button><input id="deskFile" type="file" accept=".ics,text/calendar" style="position:absolute;left:-9999px;width:1px;height:1px" aria-label="Calendar file"><button type="button" class="btn desk-mic" id="deskMic" data-voice="desk" data-area="deskBox" data-status="deskStatus" aria-label="Hold and speak">Say</button></div><div id="deskStatus" hidden></div>`;
 }
 function viewToday(){
   try{ clearExcludedCopies(); }catch(e){}
@@ -13080,6 +13392,10 @@ function freeSlotsForDate(dateStr){
     let start = h*60+(m||0);
     let end = start + 60; // default 1h if no end on item
     // try match class with end
+    if(it.end){
+      const [eh,em]=String(it.end).split(':').map(Number);
+      if(!isNaN(eh)) end=eh*60+(em||0);
+    }
     const cls = (state.classes||[]).find(c=>{
       if(c.start !== it.time) return false;
       if(c.scope==='session') return c.date===dateStr;
@@ -15541,7 +15857,11 @@ function mergeHeard(prev, text){
   if(tl.indexOf(pl)===0 || pl.indexOf(tl)===0) return text.length>=prev.length ? text : prev;
   if(pl.indexOf(tl)>=0) return prev;
   if(tl.indexOf(pl)>=0) return text;
-  if(prev.toLowerCase().endsWith(tl)) return prev;
+  const pw=pl.split(' ').filter(Boolean);
+  const tw=tl.split(' ').filter(Boolean);
+  let same=0;
+  tw.forEach(function(w){ if(pw.indexOf(w)>=0) same++; });
+  if(tw.length && same/tw.length>=0.6) return text.length>=prev.length ? text : prev;
   return prev+' '+text;
 }
 function noteHeard(text, fin){
@@ -20722,6 +21042,66 @@ function wireView(){
         const flow=state.deskFlow||{};
         const task=deskTask(flow.taskId);
         if(act==='save-sessions') deskSaveSessions();
+        else if(act==='confirm-no'){ state.deskFlow=null; state.deskReply=''; deskSave(); }
+        else if(act==='confirm-yes-delete'){ deskApplyDelete(flow.hits||[]); state.view='calendar'; state.deskFlow=null; state.deskReply=''; deskSave(); }
+        else if(act==='confirm-yes-move'){ deskApplyMove(flow.hits||[], flow.toDay); state.view='calendar'; state.deskFlow=null; state.deskReply=''; deskSave(); }
+        else if(act==='keep'){
+          const el=document.getElementById('deskReview');
+          const text=String((el&&el.value)||flow.text||'').replace(/\s+/g,' ').trim();
+          if(!text){ state.deskFlow=null; state.deskReply=''; deskSave(); return; }
+          if(deskIsExercise(text)){
+            state.deskFlow={kind:'when', text:text, place:'exercise', clocks:deskPullClocks(text), date:spokenDate(text)||'', repeat:deskExerciseRepeat(text)};
+            state.deskSaid='';
+            state.deskReply='';
+            deskAdvanceWhen();
+            return;
+          }
+          state.deskFlow={kind:'sort', text:text};
+          state.deskSaid='';
+          state.deskReply='';
+          deskSave();
+        }
+        else if(act==='drop'){ state.deskFlow=null; state.deskSaid=''; state.deskReply=''; deskSave(); }
+        else if(act==='sort-as'){
+          state.deskFlow={kind:'when', text:flow.text||'', place:btn.getAttribute('data-val')||'task', clocks:deskPullClocks(flow.text||''), date:spokenDate(flow.text||'')||''};
+          deskAdvanceWhen();
+        }
+        else if(act==='repeat'){
+          state.deskFlow=Object.assign({}, flow, {repeat:btn.getAttribute('data-val')||'once'});
+          deskAdvanceWhen();
+        }
+        else if(act==='weekday'){
+          state.deskFlow=Object.assign({}, flow, {weekday:Number(btn.getAttribute('data-val'))});
+          deskAdvanceWhen();
+        }
+        else if(act==='ampm'){
+          state.deskFlow=Object.assign({}, flow, {ampm:btn.getAttribute('data-val')||'afternoon'});
+          deskAdvanceWhen();
+        }
+        else if(act==='which-day'){
+          const val=btn.getAttribute('data-val');
+          let date=todayStr();
+          if(val==='tomorrow') date=tomorrowStr();
+          if(val==='pick'){
+            const el=document.getElementById('deskWhenDate');
+            date=el&&el.value?el.value:'';
+            if(!date) return;
+          }
+          state.deskFlow=Object.assign({}, flow, {date:date});
+          deskAdvanceWhen();
+        }
+        else if(act==='which-time'){
+          const el=document.getElementById('deskWhenTime');
+          const time=el&&el.value?el.value:'';
+          if(!time) return;
+          state.deskFlow=Object.assign({}, flow, {time:time, noTime:false});
+          deskAdvanceWhen();
+        }
+        else if(act==='confirm-exercise'){ state.deskFlow=Object.assign({}, flow, {checked:true}); deskCommitHeard(); }
+        else if(act==='no-time'){
+          state.deskFlow=Object.assign({}, flow, {time:'', noTime:true});
+          deskAdvanceWhen();
+        }
         else if(act==='cal-save'){ state._icsImportGuard=Date.now()+8000; state.deskFlow=null; state.deskSaid=''; deskSave(); }
         else if(act==='cal-cancel'){
           if(flow.ok){
