@@ -152,7 +152,14 @@ body.desk-on .main{padding-bottom:120px}
 .skill-steps li{line-height:1.4}
 .skill-card .desk-actions{flex-direction:column;align-items:stretch}
 .skill-card .desk-actions .btn{width:100%}
+.skill-card .desk-actions .quiet{width:auto;align-self:center;background:transparent;border:none;color:var(--muted);font-weight:650}
 .skill-note{margin:0 0 8px;color:var(--muted);font-size:.88rem}
+.brain-grid{display:grid;gap:8px;margin:8px 0 12px}
+.brain-cell{min-height:52px;border-radius:12px;border:1px solid var(--line,#d9d3c7);background:#fff;color:var(--ink);font-weight:750;font-size:1.05rem}
+.brain-cell.on{background:var(--pine);color:#fff;border-color:var(--pine)}
+.brain-cell.got{background:#e7f2ec}
+.brain-shape{font-size:4.2rem;line-height:1;text-align:center;margin:12px 0}
+.brain-miss{color:var(--brick);font-weight:700;margin:0 0 8px}
 textarea.assist-box::placeholder{color:#8A938E;font-size:13px;font-weight:400;opacity:1}
 .btn.danger{background:var(--brick)}
 .btn.danger:hover{background:#a3402f}
@@ -597,6 +604,7 @@ body.share-only{background:#f7f6f2}
 <div id="mobileDrawerRoot"></div>
 
 <script src="skill-bank.js"></script>
+<script src="brain-play.js"></script>
 <script>
 (function(){
   try{
@@ -2599,10 +2607,7 @@ function noteRestored(bag, id){
 }
 function deleteTask(id){
   const item=state.tasks.find(t=>t.id===id);
-  if(item && item.exerciseId){
-    noteRemoved('exercisePlan', item.exerciseId);
-    state.exercisePlan=(state.exercisePlan||[]).filter(function(r){ return String(r.id)!==String(item.exerciseId); });
-  }
+  if(item) eraseMatchingEvent(item.title, item.time||item.startTime, {includeClasses:false});
   if(item) pushUndo({type:'delete-task', item:JSON.parse(JSON.stringify(item)), label:'Task deleted — Undo'});
   noteRemoved('tasks', id);
   state.tasks=state.tasks.filter(t=>t.id!==id);
@@ -8869,6 +8874,15 @@ function tidyA11y(){
     const open=typeof homeSectionOpen==='function' ? !!homeSectionOpen(key) : false;
     b.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
+  if(!window._noOutsideSkip){
+    window._noOutsideSkip=true;
+    document.addEventListener('click', function(e){
+      const t=e.target;
+      if(!t || !t.classList || !t.classList.contains('overlay')) return;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  }
   document.querySelectorAll('#modalRoot .overlay').forEach(function(ov){
     ov.setAttribute('role','dialog');
     ov.setAttribute('aria-modal','true');
@@ -11983,18 +11997,18 @@ function struggleAreas(){
 }
 function struggleInfo(area){
   const map={
-    impulse:{title:'Pausing before you act', explain:'The first urge happens before there is time to choose.', plan:'One new practice a day. There are 350. A practice does not come back until those 350 are done. It does not use your task list.'},
-    hold:{title:'Working memory', explain:'Facts, steps, and things you meant to do slip because they stayed in your head.', plan:'One new practice a day. There are 350. A practice does not come back until those 350 are done. It does not use your task list.'},
-    emotion:{title:'Feelings', explain:'Frustration or a small upset gets in front of the work.', plan:'One new practice a day. There are 350. A practice does not come back until those 350 are done. It does not use your task list.'},
-    start:{title:'Starting', explain:'The hard part is the first move, not the whole job.', plan:'One new practice a day. There are 350. A practice does not come back until those 350 are done. It does not use your task list.'},
-    attend:{title:'Sustained attention', explain:'You start, then drift, and coming back is the hard part.', plan:'One new practice a day. There are 350. A practice does not come back until those 350 are done. It does not use your task list.'},
-    plan:{title:'Planning', explain:'Deciding what comes first, and breaking a big thing into steps, is the hard part.', plan:'One new practice a day. There are 350. A practice does not come back until those 350 are done. It does not use your task list.'},
-    org:{title:'Organization', explain:'The desk, the bag, the files, or the notes are not in a place you can use.', plan:'One new practice a day. There are 350. A practice does not come back until those 350 are done. It does not use your task list.'},
-    time:{title:'Time', explain:'Guesses, arrivals, and the last-minute rush are the hard part.', plan:'One new practice a day. There are 350. A practice does not come back until those 350 are done. It does not use your task list.'},
-    flex:{title:'Flexibility', explain:'A change of plan, or a failed first try, is hard to leave.', plan:'One new practice a day. There are 350. A practice does not come back until those 350 are done. It does not use your task list.'},
-    meta:{title:'Checking your own work', explain:'You finish without looking back, so the same miss happens again.', plan:'One new practice a day. There are 350. A practice does not come back until those 350 are done. It does not use your task list.'},
-    goal:{title:'Staying with a long goal', explain:'A long aim fades when the day is dull or something more fun is nearby.', plan:'One new practice a day. There are 350. A practice does not come back until those 350 are done. It does not use your task list.'},
-    stress:{title:'Pressure', explain:'A close deadline or a changing day shuts the work down.', plan:'One new practice a day. There are 350. A practice does not come back until those 350 are done. It does not use your task list.'}
+    impulse:{title:'Pausing before you act', explain:'The first urge happens before there is time to choose.', plan:'One practice a day for 12 days, on this one skill. They do not repeat by themselves, and they do not use your task list.'},
+    hold:{title:'Working memory', explain:'Facts, steps, and things you meant to do slip because they stayed in your head.', plan:'One practice a day for 12 days, on this one skill. They do not repeat by themselves, and they do not use your task list.'},
+    emotion:{title:'Feelings', explain:'Frustration or a small upset gets in front of the work.', plan:'One practice a day for 12 days, on this one skill. They do not repeat by themselves, and they do not use your task list.'},
+    start:{title:'Starting', explain:'The hard part is the first move, not the whole job.', plan:'One practice a day for 12 days, on this one skill. They do not repeat by themselves, and they do not use your task list.'},
+    attend:{title:'Sustained attention', explain:'You start, then drift, and coming back is the hard part.', plan:'One practice a day for 12 days, on this one skill. They do not repeat by themselves, and they do not use your task list.'},
+    plan:{title:'Planning', explain:'Deciding what comes first, and breaking a big thing into steps, is the hard part.', plan:'One practice a day for 12 days, on this one skill. They do not repeat by themselves, and they do not use your task list.'},
+    org:{title:'Organization', explain:'The desk, the bag, the files, or the notes are not in a place you can use.', plan:'One practice a day for 12 days, on this one skill. They do not repeat by themselves, and they do not use your task list.'},
+    time:{title:'Time', explain:'Guesses, arrivals, and the last-minute rush are the hard part.', plan:'One practice a day for 12 days, on this one skill. They do not repeat by themselves, and they do not use your task list.'},
+    flex:{title:'Flexibility', explain:'A change of plan, or a failed first try, is hard to leave.', plan:'One practice a day for 12 days, on this one skill. They do not repeat by themselves, and they do not use your task list.'},
+    meta:{title:'Checking your own work', explain:'You finish without looking back, so the same miss happens again.', plan:'One practice a day for 12 days, on this one skill. They do not repeat by themselves, and they do not use your task list.'},
+    goal:{title:'Staying with a long goal', explain:'A long aim fades when the day is dull or something more fun is nearby.', plan:'One practice a day for 12 days, on this one skill. They do not repeat by themselves, and they do not use your task list.'},
+    stress:{title:'Pressure', explain:'A close deadline or a changing day shuts the work down.', plan:'One practice a day for 12 days, on this one skill. They do not repeat by themselves, and they do not use your task list.'}
   };
   return map[area]||map.impulse;
 }
@@ -12036,7 +12050,7 @@ function skillSteps(text){
 function struggleCardHtml(){
   const check=state.struggleCheck||{i:0, scores:{}};
   if(!check.who && check.phase!=='tie' && check.phase!=='explain'){
-    const actions=`<button type="button" class="btn" data-dose="struggle-who" data-val="student">I am a student</button><button type="button" class="btn ghost" data-dose="struggle-who" data-val="adult">I am not a student</button><button type="button" class="btn ghost" data-dose="struggle-skip">Not now</button>`;
+    const actions=`<button type="button" class="btn" data-dose="struggle-who" data-val="student">I am a student</button><button type="button" class="btn ghost" data-dose="struggle-who" data-val="adult">I am not a student</button>`;
     return skillFrame('Your day', 0, 1, `<p class="skill-ask">The questions use your real day. Which fits right now?</p>`, actions);
   }
   if(check.phase==='tie'){
@@ -12059,7 +12073,7 @@ function struggleCardHtml(){
   const item=qs[check.i||0];
   if(!item) return '';
   const n=(check.i||0)+1;
-  const actions=`<button type="button" class="btn" data-dose="struggle" data-val="always">Almost always</button><button type="button" class="btn ghost" data-dose="struggle" data-val="often">Often</button><button type="button" class="btn ghost" data-dose="struggle" data-val="sometimes">Sometimes</button><button type="button" class="btn ghost" data-dose="struggle" data-val="rarely">Rarely</button><button type="button" class="btn ghost" data-dose="struggle-skip">Not now</button>`;
+  const actions=`<button type="button" class="btn" data-dose="struggle" data-val="always">Almost always</button><button type="button" class="btn ghost" data-dose="struggle" data-val="often">Often</button><button type="button" class="btn ghost" data-dose="struggle" data-val="sometimes">Sometimes</button><button type="button" class="btn ghost" data-dose="struggle" data-val="rarely">Rarely</button>`;
   return skillFrame(item.skill, n, qs.length, `<p class="skill-ask">${escapeHtml(item.q)}</p>`, actions);
 }
 
@@ -12073,9 +12087,13 @@ function skillList(area){
 }
 function skillDay(){
   const since=(state.struggle&&state.struggle.since)||todayStr();
-  const area=(state.struggle&&state.struggle.area)||'start';
-  const n=(skillList(area)||[]).length||1;
-  return Math.max(0, -deskDaysBetween(since))%n;
+  return Math.max(0, -deskDaysBetween(since));
+}
+function cleanPractice(text){
+  let t=String(text||'').replace(/\s+/g,' ').trim();
+  t=t.replace(/\bi\b/g,'I');
+  if(t && /[a-z]/.test(t.charAt(0))) t=t.charAt(0).toUpperCase()+t.slice(1);
+  return t;
 }
 function skillDrill(area, day, step){
   const list=skillList(area);
@@ -12089,17 +12107,27 @@ function skillDrill(area, day, step){
     const gap=Math.abs(got-secs);
     return {prompt:'That was '+got+' seconds. You were aiming for '+secs+'. The gap is '+gap+' seconds. Seeing the gap is the practice. You do not have to be exact.', options:[['done','Done']]};
   }
-  return {prompt:text, options:[['did','I did this']]};
+  return {prompt:cleanPractice(text), options:[['did','Done']]};
 }
 function doseAreaCard(area){
   const info=struggleInfo(area);
   const list=skillList(area);
   const day=skillDay();
+  const total=list.length||1;
+  if(state.struggle && state.struggle.stopped) return '';
+  if(day>=total){
+    const actions=`<button type="button" class="btn" data-dose="skill-retake">Take the check again</button><button type="button" class="btn ghost" data-dose="skill-stop">Stop</button>`;
+    return skillFrame(info.title, total, total, `<p class="skill-ask">The ${total} days for ${escapeHtml(info.title)} are finished. They do not start again on their own.</p><p class="skill-note">Take the check again if you want a different skill. Or stop.</p>`, actions);
+  }
   const drill=skillDrill(area, day, state.skillStep||0);
   const buttons=(drill.options||[]).map(function(b){
     return `<button type="button" class="btn" data-dose="skill" data-area="${area}" data-val="${b[0]}">${escapeHtml(b[1])}</button>`;
   }).join('');
-  return skillFrame(info.title, day+1, list.length, skillSteps(drill.prompt), buttons+'<button type="button" class="btn ghost" data-dose="skip">Skip today</button>');
+  const text=String(drill.prompt||'').replace(/\s*Tap I did this\.?/gi,'').trim();
+  const wantsBox=/\btype\b|box below/i.test(text);
+  const saved=(state.skillDraft && state.skillDraft.date===todayStr() && state.skillDraft.area===area) ? state.skillDraft.text : '';
+  const box=wantsBox ? `<label for="skillLine" style="display:block;font-weight:750;margin:0 0 6px">Type it in this box</label><textarea id="skillLine" rows="3" placeholder="Type it here" style="width:100%;box-sizing:border-box;margin-bottom:8px">${escapeHtml(saved)}</textarea><p class="skill-note">This stays on your day after you tap Done.</p>` : '';
+  return skillFrame(info.title, day+1, list.length, `<p class="skill-ask">${escapeHtml(text)}</p>${box}`, buttons);
 }
 function doseCardHtml(){
   const flow=state.deskFlow;
@@ -12125,7 +12153,11 @@ function doseCardHtml(){
     const buttons=row[1].map(function(b){ return `<button type="button" class="btn ghost" data-dose="review" data-id="${study.id}" data-q="${q}" data-val="${b[0]}">${b[1]}</button>`; }).join('');
     return `<div class="card"><p style="margin:0 0 8px">After ${escapeHtml(study.title)}. ${q} of 5.</p><p style="margin:0 0 8px">${row[0]}</p><div class="desk-actions">${buttons}</div></div>`;
   }
-  if(state.dose && state.dose.date===today && state.dose.done) return '';
+  if(state.dose && state.dose.date===today && state.dose.done){
+    const kept=state.skillDraft && state.skillDraft.date===today && state.skillDraft.text;
+    if(kept) return `<div class="card"><p class="skill-note">Kept from today's practice</p><p style="margin:0">${escapeHtml(state.skillDraft.text)}</p></div>`;
+    return '';
+  }
   if(study && study.studyPlan && deskDaysBetween(study.date)>=0){
     const left=deskDaysBetween(study.date);
     const step=doseStudyStep(left);
@@ -12154,6 +12186,7 @@ function doseAct(btn){
   const act=btn.getAttribute('data-dose');
   const id=btn.getAttribute('data-id');
   const val=btn.getAttribute('data-val')||'';
+  if(act==='brain'){ if(typeof brainAct==='function') brainAct(btn); return; }
   const task=(state.tasks||[]).find(function(t){ return String(t.id)===String(id); }) || doseFocusTask();
   function finish(){ state.dose={date:todayStr(), done:true}; }
   if(act==='struggle-who'){
@@ -12222,6 +12255,20 @@ function doseAct(btn){
     persistRender();
     return;
   }
+  if(act==='skill-stop'){
+    state.struggle=Object.assign({}, state.struggle||{}, {stopped:true});
+    finish();
+    persistRender();
+    return;
+  }
+  if(act==='skill-retake'){
+    state.struggle=null;
+    state.struggleCheck={i:0, scores:{}};
+    state.dose=null;
+    state.skillStep=0;
+    persistRender();
+    return;
+  }
   if(act==='skill'){
     const area=btn.getAttribute('data-area')||'start';
     if(val==='skip'){ state.skillStep=0; finish(); persistRender(); return; }
@@ -12230,8 +12277,11 @@ function doseAct(btn){
     if(val==='stop'){ state.skillMs=Date.now()-(state.skillT0||Date.now()); state.skillStep=2; persistRender(); return; }
     if(drill.more){ state.skillStep=(state.skillStep||0)+1; persistRender(); return; }
     if(val==='go'){ state.deskTimer={ends:Date.now()+2*60*1000}; }
+    const line=document.getElementById('skillLine');
+    const wrote=line ? String(line.value||'').trim() : '';
     state.skillLog=state.skillLog||[];
-    state.skillLog.push({area:area, day:skillDay(), val:val, at:Date.now()});
+    state.skillLog.push({area:area, day:skillDay(), val:val, note:wrote, at:Date.now()});
+    if(wrote) state.skillDraft={date:todayStr(), area:area, text:wrote};
     state.skillStep=0; state.skillT0=0;
     finish();
     persistRender();
@@ -12416,7 +12466,7 @@ function viewDesk(){
   const laterHtml=todayRows.length?`<div class="desk-kicker" style="margin-top:8px">Today</div>${todayRows.join('')}`:'';
   const tomHtml=`<div class="desk-kicker" style="margin-top:16px">Tomorrow</div>`+(tom.length?tom.slice(0,4).map(function(item){ return row(item, false); }).join(''):`<p style="color:var(--muted);margin:8px 0">Nothing saved for tomorrow yet.</p>`);
   const when=new Date().toLocaleDateString(undefined,{weekday:'long', day:'numeric', month:'long'});
-  return `<div class="pagehead"><div class="eyebrow">${escapeHtml(when)}</div><h1>Here's your day</h1></div>${doseCardHtml()}${nextHtml}${laterHtml}${tomHtml}<div class="desk-bar"><input id="deskBox" placeholder="Tell me anything..." autocomplete="off"><button type="button" class="btn ghost desk-clip" id="deskClip" aria-label="Attach a calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 12.5V7a4 4 0 0 1 8 0v9a3 3 0 0 1-6 0V8"/></svg></button><input id="deskFile" type="file" accept=".ics,text/calendar" style="position:absolute;left:-9999px;width:1px;height:1px" aria-label="Calendar file"><button type="button" class="btn desk-mic" id="deskMic" data-voice="desk" data-area="deskBox" data-status="deskStatus" aria-label="Hold and speak">Say</button></div><div id="deskStatus" hidden></div>`;
+  return `<div class="pagehead"><div class="eyebrow">${escapeHtml(when)}</div><h1>Here's your day</h1></div>${typeof brainCardHtml==='function'?brainCardHtml():''}${nextHtml}${laterHtml}${tomHtml}<div class="desk-bar"><input id="deskBox" placeholder="Tell me anything..." autocomplete="off"><button type="button" class="btn ghost desk-clip" id="deskClip" aria-label="Attach a calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 12.5V7a4 4 0 0 1 8 0v9a3 3 0 0 1-6 0V8"/></svg></button><input id="deskFile" type="file" accept=".ics,text/calendar" style="position:absolute;left:-9999px;width:1px;height:1px" aria-label="Calendar file"><button type="button" class="btn desk-mic" id="deskMic" data-voice="desk" data-area="deskBox" data-status="deskStatus" aria-label="Hold and speak">Say</button></div><div id="deskStatus" hidden></div>`;
 }
 function viewToday(){
   try{ clearExcludedCopies(); }catch(e){}
@@ -13408,16 +13458,18 @@ function itemsForDate(dateStr){
   const dow=mondayIndex(d);
   const items=[];
   state.classes.forEach(c=>{
+    if(isBuried('classes', c.id)) return;
     let show=false;
     if(c.scope==='session'){ show = c.date===dateStr; }
     else{ show = c.day===dow && (!c.semStart || dateStr>=c.semStart) && (!c.semEnd || dateStr<=c.semEnd); }
     if(show && Array.isArray(c.exdates) && c.exdates.indexOf(dateStr)>=0) show=false;
     if(show) items.push({type:'class', kind:'class', id:c.id, color:'var(--blue)', time:c.start, end:c.end||'', label:c.title+(c.room?' · '+c.room:''), meetingUrl:c.meetingUrl, seriesId:c.seriesId||'', source:c.source||''});
   });
-  state.tasks.filter(t=>t.date===dateStr && !t.exerciseId).forEach(t=>items.push({type:'task', kind:'task', id:t.id, color: t.priority==='high'?'var(--brick)':t.priority==='medium'?'var(--amber)':'var(--pine)',time:t.time||'',label:t.title,meetingUrl:t.meetingUrl}));
+  state.tasks.filter(t=>t.date===dateStr && !t.exerciseId && !isBuried('tasks', t.id)).forEach(t=>items.push({type:'task', kind:'task', id:t.id, color: t.priority==='high'?'var(--brick)':t.priority==='medium'?'var(--amber)':'var(--pine)',time:t.time||'',label:t.title,meetingUrl:t.meetingUrl}));
   state.tasks.filter(t=>t.startDate===dateStr && t.startDate!==t.date && !t.exerciseId).forEach(t=>items.push({type:'taskstart', kind:'task', id:t.id, color:'var(--blue-soft)',time:t.startTime||'',label:t.title,meetingUrl:t.meetingUrl}));
-  state.studyBlocks.filter(b=>b.date===dateStr).forEach(b=>items.push({type:'block', kind:'block', id:b.id, color:'var(--purple)', time:b.start, end:b.end||'', label:b.label, meetingUrl:b.meetingUrl, seriesId:b.seriesId||'', source:b.source||''}));
+  state.studyBlocks.filter(b=>b.date===dateStr && !isBuried('studyBlocks', b.id)).forEach(b=>items.push({type:'block', kind:'block', id:b.id, color:'var(--purple)', time:b.start, end:b.end||'', label:b.label, meetingUrl:b.meetingUrl, seriesId:b.seriesId||'', source:b.source||''}));
   (state.nudges||[]).forEach(function(n){
+    if(isBuried('nudges', n.id)) return;
     const slot=nudgeCalendarSlot(n, dateStr);
     if(!slot) return;
     const already=items.some(function(it){
@@ -13433,6 +13485,7 @@ function itemsForDate(dateStr){
   });
   if(state.nonNegotiable[dateStr]) items.push({type:'nn',color:'var(--gold)',time:'',label:'★ '+state.nonNegotiable[dateStr].text});
   (state.exercisePlan||[]).forEach(function(r){
+    if(isBuried('exercisePlan', r.id)) return;
     if(typeof exerciseOccursOn==='function' && !exerciseOccursOn(r, dateStr)) return;
     items.push({type:'exercise', kind:'exercise', id:r.id, color:'var(--pine)', time:r.start||'', end:r.end||'', label:exerciseTaskTitle(r)});
   });
@@ -14416,7 +14469,7 @@ function calDraftCard(){
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
       <button type="button" class="btn" id="calDraftSave">Save</button>
       <button type="button" class="btn ghost" id="calDraftCancel">Cancel</button>
-      ${d.id ? (calRepeats(d) ? `<button type="button" class="btn ghost" id="calDeleteSeries">Delete the whole series</button>` : `<button type="button" class="btn ghost" id="calDraftDelete">Delete</button>`) : ''}
+      ${d.id ? (d.kind==='exercise' || !calRepeats(d) ? `<button type="button" class="btn ghost" id="calDraftDelete">Delete</button>` : `<button type="button" class="btn ghost" id="calDeleteSeries">Delete the whole series</button>`) : ''}
     </div>
   </div>`;
 }
@@ -14569,6 +14622,28 @@ function saveCalDraftFromForm(){
   const nudgeOn = !!(document.getElementById('calDraftNudge') && document.getElementById('calDraftNudge').checked);
   const alarmMinutes = nudgeOn ? 15 : 0;
   const d = state.calDraft || {};
+  if(d.kind==='exercise' && d.id){
+    const row=(state.exercisePlan||[]).find(function(r){ return String(r.id)===String(d.id); });
+    if(row){
+      row.focus=title;
+      row.start=start;
+      row.end=end;
+      row.details=room;
+      if(repeat==='weekly'){
+        row.onceDate='';
+        try{ row.day=mondayIndex(new Date(date+'T12:00:00')); }catch(e){}
+      } else {
+        row.onceDate=date;
+      }
+    }
+    state.calDraft=null;
+    state.dayPop=null;
+    try{ syncExerciseLinks(); }catch(e){}
+    try{ saveState(); }catch(e){}
+    persistRender();
+    showAppMessage('Saved', title+' is on the schedule.');
+    return;
+  }
   if(!Array.isArray(state.classes)) state.classes=[];
   if(!Array.isArray(state.studyBlocks)) state.studyBlocks=[];
   if(d.kind==='class' && d.id){
@@ -14724,6 +14799,7 @@ function deleteCalOne(){
   const d=state.calDraft||{};
   const date=d.date||state.selectedDay||todayStr();
   markCalEdit();
+  eraseMatchingEvent(d.title, d.start, {includeClasses:false});
   removeTasksForSchedule({id:d.id, title:d.title, date:date, start:d.start}, 'one');
   if(d.kind==='block' && d.id) state.studyBlocks=(state.studyBlocks||[]).filter(b=>String(b.id)!==String(d.id));
   if(d.kind==='external' && d.id) state.externalBusy=(state.externalBusy||[]).filter(b=>String(b.id)!==String(d.id));
@@ -14764,6 +14840,7 @@ function deleteCalFollowing(){
   const lab=calTitleKey(d.title);
   const mk=meetingKey(d.title);
   markCalEdit();
+  eraseMatchingEvent(d.title, d.start, {includeClasses:true});
   removeTasksForSchedule({id:d.id, title:d.title, date:date, start:d.start}, 'following');
   function endClass(c){
     if(!c || c._drop) return;
@@ -14830,10 +14907,73 @@ function undoIcsUpload(){
   persistRender();
   showAppMessage('Upload removed', 'Appointments brought in from a calendar file have been removed. Events you typed yourself are still there.');
 }
+function isBuried(bag, id){
+  const tombs=(state.removed && state.removed[bag])||{};
+  return !!(id!=null && tombs[String(id)]);
+}
+function eventName(s){
+  let t=normExTitle(String(s||'').split('·')[0]);
+  t=t.replace(/\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?\b/ig,' ');
+  return t.replace(/\s+/g,' ').trim();
+}
+function namesMatch(a,b){
+  const x=eventName(a), y=eventName(b);
+  if(!x || !y) return false;
+  if(x===y) return true;
+  function has(hay, needle){
+    return new RegExp('(?:^| )'+needle.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?: |$)').test(hay);
+  }
+  return has(x,y) || has(y,x);
+}
+function timesMatch(a,b){
+  const x=String(a||'').slice(0,5), y=String(b||'').slice(0,5);
+  if(!x || !y || !/^\d{2}:\d{2}$/.test(x) || !/^\d{2}:\d{2}$/.test(y)) return !x || !y;
+  return x===y;
+}
+function eraseMatchingEvent(title, time, opts){
+  opts=opts||{};
+  const bags=['exercisePlan','studyBlocks','tasks','nudges','externalBusy'];
+  if(opts.includeClasses) bags.push('classes');
+  const pred={
+    exercisePlan:function(r){ return namesMatch(r.focus||exerciseTaskTitle(r), title) && timesMatch(r.start, time); },
+    studyBlocks:function(b){ return namesMatch(b.label, title) && timesMatch(b.start, time); },
+    tasks:function(t){ return namesMatch(t.title, title) && (timesMatch(t.time, time) || timesMatch(t.startTime, time)); },
+    nudges:function(n){ return namesMatch(n.name, title) && (timesMatch(n.time, time) || timesMatch(n.eventTime, time)); },
+    externalBusy:function(e){ return namesMatch(e.title||e.label, title) && timesMatch(e.start, time); },
+    classes:function(c){ return namesMatch(c.title, title) && timesMatch(c.start, time); }
+  };
+  bags.forEach(function(bag){
+    const list=state[bag];
+    if(!Array.isArray(list)) return;
+    state[bag]=list.filter(function(item){
+      const hit=item && pred[bag] && pred[bag](item);
+      if(hit && item.id!=null) noteRemoved(bag, item.id);
+      return !hit;
+    });
+  });
+  try{ syncExerciseLinks(); }catch(e){}
+  try{ saveState(); }catch(e){}
+}
+function openExerciseOnSchedule(id, date){
+  const r=(state.exercisePlan||[]).find(function(x){ return String(x.id)===String(id); });
+  if(!r) return;
+  openCalDraft({id:r.id, kind:'exercise', title:r.focus||'Exercise', date:date||state.selectedDay||todayStr(), start:r.start||'09:00', end:r.end||'10:00', repeat:r.onceDate?'once':'weekly', room:r.details||''});
+}
 function deleteCalDraft(){
   const d = state.calDraft||{};
   const date=d.date||state.selectedDay||todayStr();
   markCalEdit();
+  eraseMatchingEvent(d.title, d.start, {includeClasses: d.kind==='exercise' || d.kind==='class'});
+  if(d.kind==='exercise'){
+    state.calDraft=null;
+    if(state.dayPop){
+      const left=itemsForDate(date);
+      if(left.length) state.dayPop.mode='list';
+      else state.dayPop=null;
+    }
+    persistRender();
+    return;
+  }
   if(d.kind==='class') deleteCalOne();
   else {
     removeTasksForSchedule({id:d.id, title:d.title, date:date, start:d.start}, 'one');
@@ -18914,6 +19054,8 @@ function collapseWorkoutCopies(){
 function syncExerciseLinks(){
   collapseWorkoutCopies();
   ensureHabitPlans();
+  const tombs=(state.removed && state.removed.exercisePlan) || {};
+  state.exercisePlan=(state.exercisePlan||[]).filter(function(r){ return r && !tombs[String(r.id)]; });
   const ids={};
   (state.exercisePlan||[]).forEach(function(r){
     if(!r.id) r.id=uid();
@@ -20582,7 +20724,7 @@ function wireView(){
       state.selectedDay=date;
       state.calRef=date;
       calendarBrowsing=true;
-      if(kind==='exercise'){ beginExerciseEdit(rawId); return; }
+      if(kind==='exercise'){ openExerciseOnSchedule(rawId, date); return; }
       if(kind==='class'){
         const c=(state.classes||[]).find(function(x){ return String(x.id)===String(rawId); });
         if(!c) return;
@@ -22183,8 +22325,7 @@ function wireView(){
       e.stopPropagation();
       const kind=btn.dataset.kind, id=btn.dataset.id;
       if(kind==='exercise'){
-        beginExerciseEdit(id);
-        navigateTo('habits');
+        openExerciseOnSchedule(id, state.selectedDay||todayStr());
         return;
       }
       if(kind==='class'){
